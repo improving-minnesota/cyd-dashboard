@@ -1,0 +1,87 @@
+# Release: run on every push/merge to main. Uses release-please to determine the
+# next semver version from conventional-commit PRs and, when a release is
+# created, builds the OTA firmware with that version baked into the About screen
+# and attaches the .bin to the release.
+#
+# Flow:
+#   1. A feature PR is merged to main.
+#   2. release-please opens a "release-please" PR bumping the version.
+#   3. Once that PR is merged, release-please creates a git tag + GitHub release.
+#   4. The build job compiles with -DAPP_VERSION=<tag> and uploads the .bin.
+#
+# The .bin is the raw app image written to the inactive OTA slot; OTA delivery
+# to the device is implemented separately (not part of this workflow yet).
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          release-type: simple
+          # release-please needs to open/update the release PR. Use a PAT so it
+          # still works when the repo disables "Allow GitHub Actions to create
+          # and approve pull requests" for the default GITHUB_TOKEN. The PAT
+          # must be a fine-grained token scoped to this repo with permissions
+          # "contents: write" and "pull-requests: write". Configure it as the
+          # RELEASE_PLEASE_TOKEN repo secret; this falls back to GITHUB_TOKEN.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+
+  build:
+    name: Build & attach firmware
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install arduino-cli
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
+            | BINDIR="$HOME/bin" sh
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Install esp32 core (3.3.11)
+        run: |
+          arduino-cli config init
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.11
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib install "TFT_eSPI@2.5.43"
+          arduino-cli lib install "ArduinoJson@7.4.3"
+
+      # TFT_eSPI picks up the CYD (ESP32-2432S028R) pin setup from the
+      # sketch's own tft_setup.h, so no library patching is required here.
+      - name: Build OTA firmware
+        run: |
+          VERSION="${{ needs.release-please.outputs.tag_name }}"
+          VERSION="${VERSION#v}"          # strip leading "v" so About shows "1.2.3"
+          echo "Building version ${VERSION}"
+          arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
+            --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=${VERSION}" \
+            --output-dir build/ota cyd-dashboard
+
+      - name: Upload firmware to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          files: build/ota/cyd-dashboard.ino.bin

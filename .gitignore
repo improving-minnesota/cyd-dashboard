@@ -1,0 +1,27 @@
+# Arduino build artifacts
+/build/
+cyd-dashboard/build/
+*.elf
+*.hex
+*.eep
+*.map
+
+# ESP32 provisioning venv
+cyd-dashboard/.venv/
+__pycache__/
+
+# ESP32 credentials (git-ignored)
+cyd-dashboard/secrets.h
+cyd-dashboard/.env
+
+# Airline logos are kept local (redistribution-uncertain): both the source
+# images and the generated airline_logos.h (legacy header) are git-ignored.
+# Logos are NOT compiled into the firmware anymore - they are provisioned onto
+# a dedicated LittleFS "logos" partition at runtime (see DEVELOPER.md).
+cyd-dashboard/airline-logos/*
+!cyd-dashboard/airline-logos/README.md
+cyd-dashboard/airline_logos.h
+cyd-dashboard/build/
+
+# macOS
+.DS_Store

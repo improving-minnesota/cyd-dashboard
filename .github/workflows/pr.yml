@@ -1,0 +1,70 @@
+# PR checks: lint the PR title (conventional commits, required by release-please
+# in release.yml) and verify the firmware compiles. Runs on every PR to main.
+name: PR - Lint & Build
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
+
+jobs:
+  lint:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Lint PR Title
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            refactor
+            revert
+            chore
+            docs
+            build
+            ci
+          requireScope: false
+          subjectPattern: '^[A-Z].*'
+          subjectPatternError: |
+            The subject should begin with a capital letter (e.g. "feat: Add widget").
+
+  build:
+    name: Build firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install arduino-cli
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
+            | BINDIR="$HOME/bin" sh
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Install esp32 core (3.3.11)
+        run: |
+          arduino-cli config init
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.11
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib install "TFT_eSPI@2.5.43"
+          arduino-cli lib install "ArduinoJson@7.4.3"
+
+      # TFT_eSPI picks up the CYD (ESP32-2432S028R) pin setup from the
+      # sketch's own tft_setup.h, so no library patching is required here.
+      - name: Build
+        run: |
+          arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom cyd-dashboard
