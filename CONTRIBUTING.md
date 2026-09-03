@@ -26,7 +26,7 @@ semver version, so please use the correct type:
 | `chore:`, `docs:`, `refactor:`, `build:`, `ci:` | non-functional changes |
 | `feat!:` / `fix!:`, or a `BREAKING CHANGE:` footer | a breaking change |
 
-The subject should start with a capital letter, e.g. `feat: Add a new setting`.
+The subject should start with a letter (upper or lower case), e.g. `feat: Add a new setting`.
 
 ## Development workflow
 

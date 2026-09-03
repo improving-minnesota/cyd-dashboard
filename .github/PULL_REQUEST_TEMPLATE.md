@@ -6,7 +6,7 @@ e.g.:
     fix: Correct scaling
     docs: Update README
     feat!: Breaking change
-The subject should start with a capital letter.
+The subject should start with a letter (upper or lower case).
 -->
 
 ## Summary
