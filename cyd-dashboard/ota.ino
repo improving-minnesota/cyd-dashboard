@@ -1,0 +1,263 @@
+// ota.ino - Firmware OTA updates from the project's public GitHub releases.
+//
+// Queries the GitHub API for the latest release, compares the semver tag to the
+// running kVersion, and when newer downloads the raw app .bin and flashes it to
+// the inactive OTA slot with the arduino-esp32 Update library, then reboots.
+//
+// TLS: downloads are verified against a minimal root-CA bundle covering GitHub
+// (github.com / api.github.com via the Sectigo chain -> USERTrust ECC, and the
+// release asset host objects.githubusercontent.com via Let's Encrypt -> ISRG
+// Root X1). If the bundled roots have passed their expiry (OTA_CA_EXPIRY) we
+// fall back to setInsecure(true); if the verified handshake itself fails we
+// also retry once with setInsecure so a cert rotation can't brick an update.
+
+#include <NetworkClientSecure.h>
+#include <Update.h>
+#include <esp_ota_ops.h>
+#include <esp_task_wdt.h>
+
+// Minimal root CA bundle. USERTrust ECC Certification Authority verifies the
+// Sectigo chain used by github.com / api.github.com; ISRG Root X1 verifies the
+// Let's Encrypt chain used by objects.githubusercontent.com. Earliest root
+// expires 2035-06-04 (ISRG Root X1).
+static const char* const kGithubRootCAs =
+  "-----BEGIN CERTIFICATE-----\n"
+  "MIICjzCCAhWgAwIBAgIQXIuZxVqUxdJxVt7NiYDMJjAKBggqhkjOPQQDAzCBiDEL\n"
+  "MAkGA1UEBhMCVVMxEzARBgNVBAgTCk5ldyBKZXJzZXkxFDASBgNVBAcTC0plcnNl\n"
+  "eSBDaXR5MR4wHAYDVQQKExVUaGUgVVNFUlRSVVNUIE5ldHdvcmsxLjAsBgNVBAMT\n"
+  "JVVTRVJUcnVzdCBFQ0MgQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkwHhcNMTAwMjAx\n"
+  "MDAwMDAwWhcNMzgwMTE4MjM1OTU5WjCBiDELMAkGA1UEBhMCVVMxEzARBgNVBAgT\n"
+  "Ck5ldyBKZXJzZXkxFDASBgNVBAcTC0plcnNleSBDaXR5MR4wHAYDVQQKExVUaGUg\n"
+  "VVNFUlRSVVNUIE5ldHdvcmsxLjAsBgNVBAMTJVVTRVJUcnVzdCBFQ0MgQ2VydGlm\n"
+  "aWNhdGlvbiBBdXRob3JpdHkwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAQarFRaqflo\n"
+  "I+d61SRvU8Za2EurxtW20eZzca7dnNYMYf3boIkDuAUU7FfO7l0/4iGzzvfUinng\n"
+  "o4N+LZfQYcTxmdwlkWOrfzCjtHDix6EznPO/LlxTsV+zfTJ/ijTjeXmjQjBAMB0G\n"
+  "A1UdDgQWBBQ64QmG1M8ZwpZ2dEl23OA1xmNjmjAOBgNVHQ8BAf8EBAMCAQYwDwYD\n"
+  "VR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAwNoADBlAjA2Z6EWCNzklwBBHU6+4WMB\n"
+  "zzuqQhFkoJ2UOQIReVx7Hfpkue4WQrO/isIJxOzksU0CMQDpKmFHjFJKS04YcPbW\n"
+  "RNZu9YO6bVi9JNlWSOrvxKJGgYhqOkbRqZtNyWHa0V1Xahg=\n"
+  "-----END CERTIFICATE-----\n"
+  "-----BEGIN CERTIFICATE-----\n"
+  "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\n"
+  "-----END CERTIFICATE-----\n";
+
+// Bundle expiry (earliest root notAfter, ISRG Root X1 = 2035-06-04). We pick a
+// conservative 2035-01-01. Past this, stop trusting the bundle and use
+// setInsecure(true) so updates keep working after the roots rotate out.
+#define OTA_CA_EXPIRY 2051222400UL
+
+#define OTA_REPO    "improving-minnesota/cyd-dashboard"
+#define OTA_ASSET   "cyd-dashboard.ino.bin"
+#define OTA_API_URL "https://api.github.com/repos/" OTA_REPO "/releases/latest"
+
+// ---- semver helpers -------------------------------------------------------
+int compareVersions(const String& a, const String& b) {
+  int ai = 0, bi = 0;
+  while (ai < (int)a.length() || bi < (int)b.length()) {
+    int av = 0, bv = 0;
+    while (ai < (int)a.length() && a[ai] != '.') av = av * 10 + (a[ai++] - '0');
+    ai++;  // skip '.'
+    while (bi < (int)b.length() && b[bi] != '.') bv = bv * 10 + (b[bi++] - '0');
+    bi++;
+    if (av != bv) return av > bv ? 1 : -1;
+  }
+  return 0;
+}
+String stripV(const String& s) { return (s.length() && s[0] == 'v') ? s.substring(1) : s; }
+bool isNewerThanRunning(const String& tagVersion) { return compareVersions(stripV(tagVersion), kVersion) > 0; }
+
+// ---- GitHub latest-release fetch -----------------------------------------
+bool fetchLatestRelease(String& versionOut, String& assetUrlOut) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  HTTPClient http;
+  http.begin(OTA_API_URL);
+  http.addHeader("Accept", "application/vnd.github+json");
+  http.addHeader("User-Agent", "cyd-dashboard-ota");
+  http.setTimeout(10000);
+  int code = http.GET();
+  if (code != HTTP_CODE_OK) { http.end(); return false; }
+  String payload = http.getString();
+  http.end();
+
+  JsonDocument doc;
+  if (deserializeJson(doc, payload)) return false;
+  const char* tag = doc["tag_name"] | "";
+  if (!tag || !tag[0]) return false;
+  String url;
+  for (JsonObject a : doc["assets"].as<JsonArray>()) {
+    if (String((const char*)(a["name"] | "")) == OTA_ASSET) {
+      url = (const char*)(a["browser_download_url"] | "");
+      break;
+    }
+  }
+  if (url.length() == 0) return false;
+  versionOut = String(tag);
+  assetUrlOut = url;
+  return true;
+}
+
+// Populate the About-page update state from the GitHub API. Runs on the net
+// task so it never blocks drawing.
+void checkForUpdate() {
+  String ver, url;
+  if (!fetchLatestRelease(ver, url)) { g_updateState = 4; return; }   // error
+  if (isNewerThanRunning(ver)) {
+    g_updateState = 2; g_updateLatest = stripV(ver); g_updateAsset = url;
+  } else {
+    g_updateState = 3;                                                 // none
+  }
+}
+
+// ---- daily auto-update scan ----------------------------------------------
+// Called once after WiFi + NTP sync on boot. Scans at most once per calendar
+// day (tracked in NVS); on a newer version with Auto-Update ON, starts the OTA.
+void maybeAutoUpdate() {
+  if (!g_autoUpdate) return;
+  time_t now = time(nullptr);
+  if (now < 1600000000L) return;                 // NTP not synced yet
+  unsigned long day = (unsigned long)(now / 86400UL);
+  if (g_lastScanDay == day) return;              // already scanned today
+  String ver, url;
+  if (!fetchLatestRelease(ver, url)) return;     // transient; try next boot
+  g_lastScanDay = day;                           // only mark after a good scan
+  prefs.begin("flight", false); prefs.putULong("lastscan", day); prefs.end();
+  if (isNewerThanRunning(ver)) {
+    g_otaVersion = stripV(ver);
+    g_otaUrl = url;
+    g_otaActive = true;                          // loop() performs the update
+  }
+}
+
+// ---- OTA execution --------------------------------------------------------
+static NetworkClientSecure makeSecureClient(bool forceInsecure) {
+  NetworkClientSecure c;
+  if (forceInsecure || time(nullptr) >= (time_t)OTA_CA_EXPIRY) c.setInsecure();
+  else c.setCACert(kGithubRootCAs);
+  return c;
+}
+
+void drawOtaHeader(const String& version) {
+  tft.fillScreen(TFT_BLACK);
+  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY); tft.setTextFont(2);
+  tft.setCursor(8, 6); tft.print("Updating");
+  tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK); tft.setTextFont(2);
+  tft.setCursor(8, 52); tft.print("Updating to v" + version + "...");
+  tft.setTextColor(TFT_RED, TFT_BLACK);
+  tft.setCursor(8, 84); tft.print("Do not power off device");
+  tft.drawRect(10, 120, 300, 22, TFT_WHITE);
+}
+
+void drawOtaProgress(int total, size_t got) {
+  if (total > 0) {
+    tft.fillRect(12, 122, 296, 18, TFT_BLACK);              // clear bar
+    int fill = (int)((long)got * 296 / total); if (fill > 296) fill = 296;
+    if (fill > 0) tft.fillRect(12, 122, fill, 18, TFT_GREEN);
+    char pct[16]; snprintf(pct, sizeof pct, "%d%%", (int)((long)got * 100 / total));
+    tft.fillRect(80, 146, 160, 18, TFT_BLACK);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK); tft.setTextFont(2);
+    tft.setCursor(120, 148); tft.print(pct);
+  }
+}
+
+void drawOtaRestart() {
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK); tft.setTextFont(2);
+  tft.setCursor(60, 110); tft.print("Restarting...");
+}
+
+void drawOtaError(const char* msg) {
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_RED, TFT_BLACK); tft.setTextFont(2);
+  tft.setCursor(20, 100); tft.print("Update Failed");
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK); tft.setTextFont(1);
+  tft.setCursor(20, 124); tft.print(msg);
+  delay(3000);
+}
+
+// Download + flash. Runs on the main loop (owns the display). Never returns on
+// success (reboots). Returns false only after showing an error screen.
+bool performOTA(const String& url, const String& version) {
+  drawOtaHeader(version);
+  bool ok = false;
+  for (int attempt = 0; attempt < 2 && !ok; attempt++) {   // verified, then insecure
+    NetworkClientSecure sec = makeSecureClient(attempt == 1);
+    HTTPClient http;
+    if (!http.begin(sec, url)) { http.end(); continue; }
+    http.setTimeout(20000);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    int code = http.GET();
+    if (code != HTTP_CODE_OK) { http.end(); continue; }
+    int total = http.getSize();
+    bool haveTotal = (total > 0);
+    if (!Update.begin(haveTotal ? total : OTA_SIZE_UNKNOWN, U_FLASH)) { http.end(); return false; }
+
+    WiFiClient* stream = http.getStreamPtr();
+    size_t got = 0;
+    uint8_t buf[4096];
+    int lastPct = -1;
+    bool done = false;
+    while (!done) {
+      if (stream->available() == 0) {
+        if (!http.connected()) { done = true; break; }
+        delay(1); continue;
+      }
+      int n = stream->readBytes(buf, min(sizeof buf, (size_t)stream->available()));
+      if (n <= 0) { done = true; break; }
+      Update.write(buf, n); got += n;
+      esp_task_wdt_reset();
+      int pct = haveTotal ? (int)((long)got * 100 / total) : -1;
+      if (pct != lastPct && pct >= 0) { lastPct = pct; drawOtaProgress(total, got); }
+      if (haveTotal && got >= (size_t)total) done = true;
+    }
+    http.end();
+    if ((haveTotal && got < (size_t)total) || !Update.end()) { drawOtaError("Flash failed"); return false; }
+    ok = true;
+  }
+  if (!ok) { drawOtaError("Download failed"); return false; }
+  drawOtaRestart();
+  delay(500);
+  ESP.restart();
+  return true;
+}
+
+// ---- rollback safeguard ---------------------------------------------------
+// Called once after a successful boot grace period: cancels any pending
+// rollback so a freshly-OTA'd slot stays active.
+void markAppValidBoot() {
+  esp_ota_img_states_t st;
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  if (running && esp_ota_get_state_partition(running, &st) == ESP_OK) {
+    if (st == ESP_OTA_IMG_PENDING_VERIFY) {
+      esp_ota_mark_app_valid_cancel_rollback();
+    }
+  }
+}

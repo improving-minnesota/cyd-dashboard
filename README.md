@@ -23,6 +23,8 @@ no computer needed.
   thermometer, with a history graph (Day / Week / Month / Year) showing the
   low, average, and high.
 - **Sleep mode** — deep-sleeps overnight and wakes on touch.
+- **Firmware updates** — updates itself over WiFi from GitHub, either
+  automatically once a day or manually from the About screen.
 
 ## Hardware
 
@@ -81,9 +83,10 @@ Where to get each credential is explained below.
 
 Defaults for a freshly reset device are shown with each setting.
 
-- **General** — show or hide the countdown/timer bar on the dashboard, and set
-  the **Clock Color** (the dashboard's clock/header bar). Defaults: timer
-  **off**, clock color **blue**.
+- **General** — show or hide the countdown/timer bar on the dashboard, set the
+  **Clock Color** (the dashboard's clock/header bar), and toggle **Auto-Update**
+  (whether the device checks for and installs firmware updates). Defaults: timer
+  **off**, clock color **blue**, auto-update **on** (for release builds).
 - **Location** — set your coordinates so weather and flights are accurate. Use
   **Set** to type them, **Search Address**, or **Find by IP**. Default: none —
   on first boot it's guessed from your IP, otherwise your saved location.
@@ -102,13 +105,36 @@ Defaults for a freshly reset device are shown with each setting.
   thermometer. Default: **off**.
 - **Calibrate Touch** — recalibrate the touchscreen if taps land in the wrong
   spot.
-- **About** — version and author info.
+- **About** — version, author, and firmware update status. When a newer version
+  is available it shows **Upgrade Available** with an **Install** button.
 - **Help** — this guide, on the device.
 - **Reset** — confirms before wiping and shows a message saying exactly what's
   being reset. **All** clears settings *and* all files (including pool
   temperature history) and touch calibration, so the next boot asks you to
   recalibrate; **Settings** clears settings and credentials only but keeps
   calibration. Both reboot the device. **Cancel** changes nothing.
+
+## Updates (OTA)
+
+This firmware can update itself over WiFi from this repository's GitHub
+releases, so you don't need a computer to install new versions.
+
+- **Auto-Update** (General, default **on** for release builds) checks once a
+  day — after the device boots, connects to WiFi and syncs the clock — and
+  installs a newer version if one exists. It won't run more than once per day.
+  Turning Auto-Update on after it was off clears the last-check date so it can
+  check again the same day.
+- **Manually** — open **Settings → About**; it checks for a newer version and
+  shows **Upgrade Available (vX.Y.Z)** with an **Install** button. Tap it to
+  update right away.
+- During an update the screen shows progress and **"Do not power off device"**.
+  When it finishes, the device restarts into the new firmware.
+
+If the new firmware fails to start, the device automatically rolls back to the
+previous version.
+
+> Dev builds (version `0.1`, flashed from source) never auto-update by default.
+> You can still update them manually from **About**, or turn Auto-Update on.
 
 ## Troubleshooting
 

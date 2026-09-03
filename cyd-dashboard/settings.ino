@@ -51,37 +51,76 @@ void drawAbout() {
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("About");
+  tft.print("cyd-dashboard");
 
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
   tft.setCursor(274, 7);
   tft.setTextColor(TFT_WHITE, TFT_MAROON);
   tft.print("Back");
 
-  // Body
+  // Body (moved up to make room for the upgrade section below)
   tft.setTextFont(2);
-  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.setCursor(8, 48);
-  tft.print("For entertainment purposes only");
-
-  tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
-  tft.setCursor(8, 76);
-  tft.print("improving.com");
-
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setCursor(8, 116);
+  tft.setCursor(8, 40);
   tft.print("Developer: Paul Hassinger");
-  tft.setCursor(8, 140);
+
+  tft.setTextFont(1);
+  tft.setCursor(8, 62);
   tft.print("Email: paul.hassinger (at) improving.com");
 
+  tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
+  tft.setCursor(8, 80);
+  tft.print("github.com/improving-minnesota/cyd-dashboard");
+
+  tft.setTextFont(2);
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
-  tft.setCursor(8, 176);
-  tft.print("Dashboard Version: ");
+  tft.setCursor(8, 102);
+  tft.print("Version: v");
   tft.print(kVersion);
+
+  // Divider above the upgrade section
+  tft.drawFastHLine(8, 126, 304, TFT_DARKGREY);
+
+  // Upgrade section
+  tft.setTextFont(2);
+  if (g_updateState == 2) {
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setCursor(8, 140);
+    tft.print("Upgrade Available:");
+    tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
+    tft.setCursor(8, 164);
+    tft.print("(v");
+    tft.print(g_updateLatest);
+    tft.print(")");
+    // Install button (right)
+    tft.fillRoundRect(218, 140, 76, 26, 5, TFT_GREEN);
+    tft.setTextColor(TFT_BLACK, TFT_GREEN);
+    tft.setCursor(236, 147);
+    tft.print("Install");
+  } else if (g_updateState == 3) {
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setCursor(8, 140);
+    tft.print("No Updates Available");
+  } else if (g_updateState == 4) {
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.setCursor(8, 140);
+    tft.print("Update Check Failed");
+  } else {
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setCursor(8, 140);
+    tft.print("Checking for updates...");
+  }
 }
 
 void handleAboutTouch(uint16_t x, uint16_t y) {
   if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }
+  // Install button (only shown when an update is available)
+  if (g_updateState == 2 && inRect(x, y, 218, 140, 294, 166)) {
+    g_otaVersion = g_updateLatest;
+    g_otaUrl = g_updateAsset;
+    g_otaActive = true;
+    return;
+  }
 }
 
 // ---- Help page (scrollable) ----
@@ -173,7 +212,8 @@ static const char* const kHelpLines[] = {
   "",
   "SETTINGS GUIDE (defaults)",
   "General: timer bar on/off;",
-  "   clock color (blue).",
+  "   auto-update (on), clock",
+  "   color (blue).",
   "Location: your coordinates;",
   "   IP guess on first boot.",
   "   Search Address keeps your",
@@ -190,7 +230,7 @@ static const char* const kHelpLines[] = {
   "   pick thermometer.",
   "Calibrate Touch: if taps land",
   "   in the wrong spot, rerun it.",
-  "About: version and author.",
+  "About: version, author, update.",
   "Reset: All (settings, files,",
   "   pool data, calibration) or",
   "   Settings (settings only).",
@@ -208,6 +248,19 @@ static const char* const kHelpLines[] = {
   "issue; yellow = running",
   "OpenSky anonymously (not an",
   "error - flights still work).",
+  "",
+  "UPDATES",
+  "The device can update itself",
+  "over WiFi from GitHub.",
+  "General -> Auto-Update: on by",
+  "default for release builds;",
+  "checks once per day and",
+  "installs new firmware.",
+  "About -> shows if a newer",
+  "version is available; tap",
+  "Install to update now.",
+  "Do not power off during an",
+  "update.",
 };
 static const int kNumHelpLines = sizeof(kHelpLines) / sizeof(kHelpLines[0]);
 
@@ -343,6 +396,27 @@ void drawGeneral() {
       tft.drawRect(x - 1, y - 1, kClockSw + 2, kClockSh + 2, TFT_WHITE);
     }
   }
+
+  // Auto-Update toggle
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextFont(2);
+  tft.setCursor(8, 188);
+  tft.print("Auto-Update");
+  tft.setTextColor(g_autoUpdate ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
+  tft.setCursor(150, 188);
+  tft.print(g_autoUpdate ? "ON" : "OFF");
+  tft.fillRoundRect(230, 184, 82, 24, 5, TFT_NAVY);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.setTextFont(1);
+  tft.setCursor(250, 191);
+  tft.print("Toggle");
+
+  tft.setTextFont(1);
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.setCursor(8, 216);
+  tft.print("Checks for new firmware once");
+  tft.setCursor(8, 228);
+  tft.print("a day and installs it.");
 }
 
 void handleGeneralTouch(uint16_t x, uint16_t y) {
@@ -350,6 +424,17 @@ void handleGeneralTouch(uint16_t x, uint16_t y) {
   if (inRect(x, y, 230, 40, 312, 64)) {  // Enable timer toggle
     g_showTimer = !g_showTimer;
     prefs.begin("flight", false); prefs.putBool("timer", g_showTimer); prefs.end();
+    dirty = true;
+    return;
+  }
+  if (inRect(x, y, 230, 184, 312, 208)) {  // Auto-Update toggle
+    g_autoUpdate = !g_autoUpdate;
+    prefs.begin("flight", false); prefs.putBool("autoupd", g_autoUpdate); prefs.end();
+    // Turning auto-update ON clears the last-scan date so it can try again today.
+    if (g_autoUpdate) {
+      g_lastScanDay = 0;
+      prefs.begin("flight", false); prefs.putULong("lastscan", 0); prefs.end();
+    }
     dirty = true;
     return;
   }

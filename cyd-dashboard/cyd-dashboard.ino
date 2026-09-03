@@ -81,12 +81,14 @@ void logoRelease(const RuntimeLogo* logo);
 // ---------------- CONFIG (edit these) ----------------
 // OpenSky bbox will be computed from g_lat/g_lon at runtime.
 const int OPENSKY_TOTAL_CREDITS = 4000;
-// Build/version shown on the About page. Defaults to "1.0"; CI overrides it at
-// build time with the release version via -DAPP_VERSION=<ver> (see
-// .github/workflows/release.yml), e.g. -DAPP_VERSION=1.2.3. Using the stringize
-// operator avoids embedding quotes in the -D value.
+// Build/version shown on the About page. Defaults to "0.1" for local/dev
+// builds; CI overrides it at build time with the release version via
+// -DAPP_VERSION=<ver> (see .github/workflows/release.yml), e.g.
+// -DAPP_VERSION=1.2.3. A 0.1 (dev) build never auto-updates (see
+// g_autoUpdate handling). Using the stringize operator avoids embedding quotes
+// in the -D value.
 #ifndef APP_VERSION
-  #define APP_VERSION 1.0
+  #define APP_VERSION 0.1
 #endif
 #define STRINGIZE_INNER(x) #x
 #define STRINGIZE(x) STRINGIZE_INNER(x)
@@ -158,6 +160,16 @@ bool  g_trackEnabled = true;   // flight tracking on/off
 bool  g_blinkForFlight = true; // flash the LED when a noteworthy flight is overhead
 bool  g_metric = false;        // false = imperial (ft/mi/mph), true = metric (m/km/kts)
 bool  g_showTimer = false;     // show/update the dashboard countdown bar (General)
+bool  g_autoUpdate = true;     // auto-check/install firmware updates once/day (General)
+unsigned long g_lastScanDay = 0; // epoch day of last auto-update scan (0 = never)
+
+// OTA / firmware update state
+int    g_updateState = 0;      // 0 idle, 1 checking, 2 available, 3 none, 4 error
+String g_updateLatest;         // latest version label when an update is available
+String g_updateAsset;          // download URL when an update is available
+bool   g_otaActive = false;    // loop() should run the pending OTA
+String g_otaVersion, g_otaUrl; // pending OTA target
+bool   g_rollbackMarked = false; // OTA rollback safeguard applied once post-boot
 int   g_ftPage = 0;            // Flight Tracker settings page (0 or 1)
 float g_lat = 0.0f;           // location; loaded from NVS, or guessed from IP on first boot
 float g_lon = 0.0f;
@@ -420,6 +432,7 @@ volatile bool netWantWeather      = false;
 volatile bool netWantLocation     = false;
 volatile bool netWantPool         = false;   // refresh the current pool temp
 volatile bool netWantPoolDevices  = false;   // list Govee thermometers
+volatile bool netWantUpdateCheck  = false;   // query GitHub for the latest release
 volatile bool netBusy             = false;   // a fetch is currently running
 volatile bool netUpdated          = false;   // set when a fetch finishes
 
@@ -432,6 +445,7 @@ void netTask(void* p) {
     else if (netWantWeather) { netWantWeather = false;    netBusy = true; fetchWeather();       netBusy = false; netUpdated = true; }
     else if (netWantPoolDevices){ netWantPoolDevices = false; netBusy = true; fetchGoveeDevices(); netBusy = false; netUpdated = true; }
     else if (netWantPool)    { netWantPool = false;       netBusy = true; fetchGoveeTemp();     netBusy = false; netUpdated = true; }
+    else if (netWantUpdateCheck){ netWantUpdateCheck=false; netBusy=true; checkForUpdate(); netBusy=false; netUpdated=true; }
   }
 }
 
@@ -1356,7 +1370,7 @@ void handleTouch() {
     if (idx < 0 || idx >= n) return;            // empty grid cell or out of range
     // Confirm the tap is actually inside this button (not a row/column gap).
     if (!inRect(x, y, colX[col], y0 + row * step, colX[col] + colW - 1, y0 + row * step + rowH - 1)) return;
-    if (idx == 0) { g_screen = SCR_ABOUT; dirty = true; return; }        // About
+    if (idx == 0) { g_screen = SCR_ABOUT; dirty = true; g_updateState = 1; netWantUpdateCheck = true; return; }  // About
     if (idx == 1) { calBegin(); return; }                                // Calibrate Touch
     if (idx == 2) { g_ftPage = 0; g_screen = SCR_FTRACKER; dirty = true; return; }   // Flight Tracker
     if (idx == 3) { g_screen = SCR_GENERAL; dirty = true; return; }      // General
@@ -1479,6 +1493,14 @@ void setup() {
   g_blinkForFlight = prefs.getBool("blinkf", true);
   g_metric = prefs.getBool("metric", false);
   g_showTimer = prefs.getBool("timer", false);
+  g_autoUpdate = prefs.getBool("autoupd", true);
+  g_lastScanDay = prefs.getULong("lastscan", 0);
+  // Dev builds (0.1) never auto-update: actively force OFF even if a previous
+  // release build left the pref ON, so a dev flash can't silently upgrade.
+  if (strcmp(kVersion, "0.1") == 0 && g_autoUpdate) {
+    g_autoUpdate = false;
+    prefs.putBool("autoupd", false);
+  }
   g_clockCol = (uint16_t)prefs.getUInt("clkcol", DEFAULT_CLOCK_COL);
   g_ignoreAirport = prefs.getString("ignoreap", "");
   g_goveeKey = prefs.getString("govee", "");
@@ -1682,6 +1704,13 @@ void loop() {
   // --- Awake path: ensure display is on ---
   if (g_displayOff) { tft.writecommand(0x29); g_displayOff = false; dirty = true; }
 
+  // Run a pending OTA (from the About Install button or the daily auto-scan).
+  // This blocks, draws its own screen, and reboots on success.
+  if (g_otaActive) { g_otaActive = false; performOTA(g_otaUrl, g_otaVersion); }
+  // OTA rollback safeguard: after a successful boot grace period, cancel any
+  // pending rollback so a freshly-installed slot stays active.
+  if (!g_rollbackMarked && now > 30000UL) { g_rollbackMarked = true; markAppValidBoot(); }
+
   handleTouch();
   calPoll();   // drive the touch-calibration state machine (no-op unless active)
 
@@ -1732,6 +1761,13 @@ void loop() {
 #endif
       }
       dirty = true;
+    }
+    // Daily auto-update scan (once/day): wait briefly for NTP time, then check
+    // GitHub. If a newer release exists and Auto-Update is ON, start the OTA.
+    if (g_autoUpdate) {
+      unsigned long t0 = now;
+      while (time(nullptr) < 1600000000L && millis() - t0 < 8000) delay(100);
+      maybeAutoUpdate();
     }
   }
 

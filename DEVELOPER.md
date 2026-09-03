@@ -89,16 +89,77 @@ GitHub Actions builds and releases the firmware on standard hosted runners
      slot) as a release asset.
 
 The version shown on the About screen comes from the `APP_VERSION` compile-time
-macro (`kVersion` in `cyd-dashboard.ino`); it defaults to `1.0` when not set, so
-local builds work without the flag. Keep `version.txt` in sync with that default
-when you first adopt this. OTA *delivery* of the `.bin` to a device is not
-implemented yet.
+macro (`kVersion` in `cyd-dashboard.ino`); it defaults to `0.1` when not set, so
+local builds work without the flag. `0.1` is treated as a **dev build** that
+never auto-updates (see below). Keep `version.txt` in sync with that default
+when you first adopt this. OTA *delivery* of the `.bin` to a device is handled
+on-device — see **OTA updates (firmware delivery)** below.
 
 > **Note on the token:** `release-please-action` defaults to `GITHUB_TOKEN`,
 > which works for a basic setup. release-please's docs recommend a GitHub App /
 > PAT token (`RELEASE_APP_ID` + `RELEASE_APP_PRIVATE_KEY`, as used in the
 > Terraform reference) so the bot's commits/PRs reliably trigger CI. Add that
 > when you move to the org if you see release PRs not picking up checks.
+
+## OTA updates (firmware delivery)
+
+The device updates itself over WiFi from this repository's public GitHub
+releases. All of this lives in `cyd-dashboard/ota.ino`.
+
+### How it works
+
+1. **Check.** `fetchLatestRelease()` GETs
+   `https://api.github.com/repos/improving-minnesota/cyd-dashboard/releases/latest`
+   (no auth — the repo is public), parses the `tag_name` (e.g. `v1.0.1`), and
+   finds the `cyd-dashboard.ino.bin` asset URL.
+2. **Compare.** `compareVersions()` / `isNewerThanRunning()` strip the leading
+   `v` and compare semver against the running `kVersion`.
+3. **Install.** `performOTA()` downloads the `.bin` in 4 KB chunks, streams them
+   to the inactive OTA slot via `Update.write()` (`U_FLASH`), shows a progress
+   screen, then `Update.end()` + `ESP.restart()`. On success it never returns.
+
+### What triggers a check
+
+- **Daily auto-scan** (`maybeAutoUpdate()`), run once per boot right after WiFi
+  connects and NTP syncs. It runs at most once per calendar day (tracked in NVS
+  as the epoch day under `lastscan`). If Auto-Update is ON and a newer release
+  exists, it starts the OTA. Toggling **Auto-Update** ON in
+  **Settings → General** clears `lastscan` so it can check again the same day.
+- **Manual** — opening **Settings → About** triggers a check (via the net task,
+  so the UI doesn't freeze); if newer, it shows **Upgrade Available (vX.Y.Z)**
+  with an **Install** button.
+
+### Auto-Update toggle & dev builds
+
+- `g_autoUpdate` defaults to `true` (persisted as `autoupd`).
+- A **dev build** (`kVersion == "0.1"`) actively forces it OFF at boot, even if
+  a previous release build left it ON — so flashing source never silently
+  upgrades. Dev builds can still update manually from About or by toggling
+  Auto-Update on.
+
+### TLS
+
+Downloads are verified against a minimal root-CA bundle (`kGithubRootCAs` in
+`ota.ino`): **USERTrust ECC** (covers the Sectigo chain for
+github.com/api.github.com) and **ISRG Root X1** (covers Let's Encrypt for
+objects.githubusercontent.com). `OTA_CA_EXPIRY` is the earliest root expiry;
+past that the client falls back to `setInsecure(true)`. If a verified handshake
+fails, `performOTA()` also retries once with `setInsecure` so a cert rotation
+can't brick an update.
+
+### Rollback
+
+After OTA the new slot boots in the ESP32's "pending verify" state. If it
+crashes before a grace period, the bootloader rolls back to the previous slot.
+`markAppValidBoot()` is called ~30 s into a successful run to cancel that
+rollback and lock in the new firmware.
+
+### Partitions
+
+OTA requires two app slots + `otadata`, already present in `partitions.csv`
+(`app0`/`app1` at 1.5 MB each, plus `otadata`). The release `.bin` is the **raw
+app image** for the inactive slot, built by the release workflow with
+`PartitionScheme=custom`.
 
 ### Release versioning (release-please)
 
