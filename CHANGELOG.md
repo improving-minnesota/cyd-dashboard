@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.1.0...v1.2.0) (2026-09-03)
+
+
+### Features
+
+* **ota:** use branch version with -dev for local builds; polish About page ([#9](https://github.com/improving-minnesota/cyd-dashboard/issues/9)) ([dad95ad](https://github.com/improving-minnesota/cyd-dashboard/commit/dad95ad74d9ee45fc3382b53b49cb91280fbb089))
+
 ## [1.1.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.0.1...v1.1.0) (2026-09-03)
 
 
