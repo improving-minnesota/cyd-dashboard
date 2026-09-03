@@ -12,6 +12,10 @@
 void selectGoveeDevice() {
   if (g_goveeCount == 0) { g_poolValid = false; return; }
   GoveeDev &g = g_goveeDevs[g_goveeSel];
+  if (g_poolDeviceId != g.id) {   // device actually changed
+    g_poolValid = false;          // don't show the previous device's temp
+    g_poolTemp = 0;
+  }
   g_poolDeviceId = g.id;
   g_poolModel = g.model;
   g_poolName = g.name;
