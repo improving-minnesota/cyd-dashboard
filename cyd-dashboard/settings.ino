@@ -51,35 +51,38 @@ void drawAbout() {
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("cyd-dashboard");
+  tft.print("About");
 
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
   tft.setCursor(274, 7);
   tft.setTextColor(TFT_WHITE, TFT_MAROON);
   tft.print("Back");
 
-  // Body (moved up to make room for the upgrade section below)
+  // Body (compact, to leave room for the upgrade section below)
   tft.setTextFont(2);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setCursor(8, 40);
-  tft.print("Developer: Paul Hassinger");
+  tft.print("CYD (Cheap Yellow Display) Dashboard");
 
   tft.setTextFont(1);
   tft.setCursor(8, 62);
+  tft.print("Developer: Paul Hassinger");
+
+  tft.setCursor(8, 76);
   tft.print("Email: paul.hassinger (at) improving.com");
 
   tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
-  tft.setCursor(8, 80);
+  tft.setCursor(8, 92);
   tft.print("github.com/improving-minnesota/cyd-dashboard");
 
   tft.setTextFont(2);
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
-  tft.setCursor(8, 102);
+  tft.setCursor(8, 112);
   tft.print("Version: v");
   tft.print(kVersion);
 
   // Divider above the upgrade section
-  tft.drawFastHLine(8, 126, 304, TFT_DARKGREY);
+  tft.drawFastHLine(8, 130, 304, TFT_DARKGREY);
 
   // Upgrade section
   tft.setTextFont(2);
