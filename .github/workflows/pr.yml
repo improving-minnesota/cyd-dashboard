@@ -34,9 +34,9 @@ jobs:
             build
             ci
           requireScope: false
-          subjectPattern: '^[A-Z].*'
+          subjectPattern: '^[A-Za-z].*'
           subjectPatternError: |
-            The subject should begin with a capital letter (e.g. "feat: Add widget").
+            The subject should begin with a letter (e.g. "feat: Add widget" or "fix: clear a bug").
 
   build:
     name: Build firmware
