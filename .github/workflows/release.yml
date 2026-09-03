@@ -28,17 +28,23 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
+      - name: Mint release-please app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_PLEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_PRIVATE_KEY }}
+
       - uses: googleapis/release-please-action@v4
         id: release
         with:
           release-type: simple
-          # release-please needs to open/update the release PR. Use a PAT so it
-          # still works when the repo disables "Allow GitHub Actions to create
-          # and approve pull requests" for the default GITHUB_TOKEN. The PAT
-          # must be a fine-grained token scoped to this repo with permissions
-          # "contents: write" and "pull-requests: write". Configure it as the
-          # RELEASE_PLEASE_TOKEN repo secret; this falls back to GITHUB_TOKEN.
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          # release-please opens/updates the release PR and creates the GitHub
+          # release using a GitHub App installation token, which is exempt from
+          # the org setting that blocks the default GITHUB_TOKEN from creating
+          # pull requests. The app needs "contents: write" + "pull-requests:
+          # write" on this repo.
+          token: ${{ steps.app-token.outputs.token }}
 
   build:
     name: Build & attach firmware
