@@ -1,8 +1,8 @@
 # cyd-dashboard
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](LICENSE)
-[![PR - Lint & Build](https://github.com/phassingerimproving/cyd-dashboard/actions/workflows/pr.yml/badge.svg)](https://github.com/phassingerimproving/cyd-dashboard/actions/workflows/pr.yml)
-[![Release](https://img.shields.io/github/v/release/phassingerimproving/cyd-dashboard)](https://github.com/phassingerimproving/cyd-dashboard/releases)
+[![PR - Lint & Build](https://github.com/improving-minnesota/cyd-dashboard/actions/workflows/pr.yml/badge.svg)](https://github.com/improving-minnesota/cyd-dashboard/actions/workflows/pr.yml)
+[![Release](https://img.shields.io/github/v/release/improving-minnesota/cyd-dashboard)](https://github.com/improving-minnesota/cyd-dashboard/releases)
 
 A self-contained, AI Vibe-coded, **ESP32 touchscreen dashboard** for the **Cheap Yellow Display
 (CYD)** — the common ESP32-2432S028R board with a built-in 2.8" 320x240
