@@ -89,8 +89,9 @@ GitHub Actions builds and releases the firmware on standard hosted runners
      slot) as a release asset.
 
 The version shown on the About screen comes from the `APP_VERSION` compile-time
-macro (`kVersion` in `cyd-dashboard.ino`); it defaults to `0.1` when not set, so
-local builds work without the flag. `0.1` is treated as a **dev build** that
+macro (`kVersion` in `cyd-dashboard.ino`); it defaults to the current branch
+version with a `-dev` suffix (e.g. `1.1.0-dev`) when not set, so local builds
+work without the flag. Any `-dev` version is treated as a **dev build** that
 never auto-updates (see below). Keep `version.txt` in sync with that default
 when you first adopt this. OTA *delivery* of the `.bin` to a device is handled
 on-device — see **OTA updates (firmware delivery)** below.
@@ -132,7 +133,7 @@ releases. All of this lives in `cyd-dashboard/ota.ino`.
 ### Auto-Update toggle & dev builds
 
 - `g_autoUpdate` defaults to `true` (persisted as `autoupd`).
-- A **dev build** (`kVersion == "0.1"`) actively forces it OFF at boot, even if
+- A **dev build** (version ending in `-dev`) actively forces it OFF at boot, even if
   a previous release build left it ON — so flashing source never silently
   upgrades. Dev builds can still update manually from About or by toggling
   Auto-Update on.

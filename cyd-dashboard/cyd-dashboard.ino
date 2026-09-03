@@ -33,6 +33,9 @@ struct RuntimeLogo { char icao[4]; uint16_t* data; int w; int h; };
 bool logosInit();
 const RuntimeLogo* findAirlineLogo(const char* callsign);
 void logoRelease(const RuntimeLogo* logo);
+// Forward-declare Plane so Arduino's auto-generated function prototypes (which
+// are inserted before the sketch body) can reference drawFlightInfo(Plane& p).
+struct Plane;
 
 // Serial NVS provisioning (see wifi_config.ino). Defined HERE (not in
 // wifi_config.ino) because Arduino concatenates .ino files alphabetically, and
@@ -81,18 +84,21 @@ void logoRelease(const RuntimeLogo* logo);
 // ---------------- CONFIG (edit these) ----------------
 // OpenSky bbox will be computed from g_lat/g_lon at runtime.
 const int OPENSKY_TOTAL_CREDITS = 4000;
-// Build/version shown on the About page. Defaults to "0.1" for local/dev
-// builds; CI overrides it at build time with the release version via
-// -DAPP_VERSION=<ver> (see .github/workflows/release.yml), e.g.
-// -DAPP_VERSION=1.2.3. A 0.1 (dev) build never auto-updates (see
-// g_autoUpdate handling). Using the stringize operator avoids embedding quotes
-// in the -D value.
-#ifndef APP_VERSION
-  #define APP_VERSION 0.1
-#endif
+// Build/version shown on the About page. Local/dev builds default to the
+// current branch version with a "-dev" suffix (e.g. "1.1.0-dev"), so About
+// shows a real version and the OTA logic knows it's a dev build. Keep the
+// default in sync with version.txt. CI overrides APP_VERSION at build time with
+// the release version via -DAPP_VERSION=<ver> (see .github/workflows/release.yml).
+// A "-dev" build never auto-updates (see g_autoUpdate handling).
 #define STRINGIZE_INNER(x) #x
 #define STRINGIZE(x) STRINGIZE_INNER(x)
-const char* const kVersion = STRINGIZE(APP_VERSION);
+#ifndef APP_VERSION
+  #define APP_VERSION "1.1.0-dev"
+  const char* const kVersion = APP_VERSION;
+#else
+  const char* const kVersion = STRINGIZE(APP_VERSION);
+#endif
+bool isDevBuild() { return strstr(kVersion, "-dev") != NULL; }
 // ------------------------------------------------------
 
 TFT_eSPI tft = TFT_eSPI();
@@ -1495,9 +1501,10 @@ void setup() {
   g_showTimer = prefs.getBool("timer", false);
   g_autoUpdate = prefs.getBool("autoupd", true);
   g_lastScanDay = prefs.getULong("lastscan", 0);
-  // Dev builds (0.1) never auto-update: actively force OFF even if a previous
-  // release build left the pref ON, so a dev flash can't silently upgrade.
-  if (strcmp(kVersion, "0.1") == 0 && g_autoUpdate) {
+  // Dev builds (version ending in "-dev") never auto-update: actively force OFF
+  // even if a previous release build left the pref ON, so a dev flash can't
+  // silently upgrade.
+  if (isDevBuild() && g_autoUpdate) {
     g_autoUpdate = false;
     prefs.putBool("autoupd", false);
   }
