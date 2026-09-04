@@ -1598,7 +1598,13 @@ void setup() {
   esp_sleep_wakeup_cause_t wakeCause = wokeFromDeepSleep
       ? esp_sleep_get_wakeup_cause() : ESP_SLEEP_WAKEUP_UNDEFINED;
 #if TOUCH_IRQ_ENABLED
-  if (wakeCause == ESP_SLEEP_WAKEUP_EXT0) {
+  // A touch wake is normally reported as ESP_SLEEP_WAKEUP_EXT0. But the cause
+  // register isn't always reliable here, so also honor the wake duration when
+  // the touch IRQ line is actually asserted (finger still down) at boot.
+  // Otherwise the device would wake for a few seconds and then immediately
+  // fall back asleep once NTP syncs and inSleepWindowNow() turns true.
+  bool touchActiveNow = (digitalRead(TOUCH_IRQ_PIN) == LOW);
+  if (wakeCause == ESP_SLEEP_WAKEUP_EXT0 || touchActiveNow) {
     wakeUntil = millis() + (unsigned long)g_wakeMin * 60000UL;
   }
 #endif
