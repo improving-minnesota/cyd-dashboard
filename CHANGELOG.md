@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.9...v1.4.0) (2026-09-04)
+
+
+### Features
+
+* move Enable timer to Flight Tracker and add Home airport setting ([3e538a8](https://github.com/improving-minnesota/cyd-dashboard/commit/3e538a8728a18ca8b29cba22d713097135126121))
+* move Enable timer to Flight Tracker and add Home airport setting ([8d925ea](https://github.com/improving-minnesota/cyd-dashboard/commit/8d925eaeab29de34413b0f22b480dd085ef4cc84))
+
 ## [1.3.9](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.8...v1.3.9) (2026-09-04)
 
 
