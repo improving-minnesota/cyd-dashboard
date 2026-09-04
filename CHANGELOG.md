@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.2.1...v1.2.2) (2026-09-04)
+
+
+### Bug Fixes
+
+* **ota:** run OTA on a dedicated large-stack task to fix TLS stack overflow ([#13](https://github.com/improving-minnesota/cyd-dashboard/issues/13)) ([9128263](https://github.com/improving-minnesota/cyd-dashboard/commit/9128263828c7a7b3014c55d5882ee176a824df77))
+
 ## [1.2.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.2.0...v1.2.1) (2026-09-04)
 
 
