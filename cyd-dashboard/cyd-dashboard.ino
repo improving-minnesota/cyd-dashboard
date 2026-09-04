@@ -1718,7 +1718,12 @@ bool inSleepWindowNow() {
   // configTime() runs after WiFi connects - so getLocalTime() would apply the
   // default UTC offset and could report a local time that lands in the sleep
   // window even when the real time is outside it (causing an unwanted sleep).
-  if (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED) return false;
+  // sntp_get_sync_status() is NOT used here: Arduino-ESP32's configTime()
+  // never drives it to SNTP_SYNC_STATUS_COMPLETED (confirmed on-device - it
+  // stays SNTP_SYNC_STATUS_RESET forever even once the clock is correctly
+  // synced), which would permanently block sleep. Use the same "epoch looks
+  // sane" check already used elsewhere in this file instead.
+  if (time(nullptr) < 1600000000L) return false;
   struct tm t;
   // Explicit 0ms timeout: called every main-loop iteration, and
   // getLocalTime()'s default 5s timeout would block the loop (touch +
