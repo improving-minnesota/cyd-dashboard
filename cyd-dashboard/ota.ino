@@ -17,7 +17,6 @@
 #include <NetworkClientSecure.h>
 #include <Update.h>
 #include <esp_ota_ops.h>
-#include <esp_task_wdt.h>
 #include "mbedtls/sha256.h"
 
 // Minimal root CA bundle. USERTrust ECC Certification Authority verifies the
@@ -272,7 +271,8 @@ bool performOTA(const String& url, const String& version, const String& expected
     if (n <= 0) { done = true; break; }
     mbedtls_sha256_update(&sha, buf, n);
     Update.write(buf, n); got += n;
-    esp_task_wdt_reset();
+    // No esp_task_wdt_reset() here: performOTA runs on its own task that is not
+    // watchdog-subscribed, and the HTTP timeouts bound the download.
     int pct = haveTotal ? (int)((long)got * 100 / total) : -1;
     if (pct != lastPct && pct >= 0) { lastPct = pct; drawOtaProgress(total, got); }
     if (haveTotal && got >= (size_t)total) done = true;
