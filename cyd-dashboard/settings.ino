@@ -173,6 +173,13 @@ static const char* const kHelpLines[] = {
   "  average / high.",
   "  Tap the Pool reading to",
   "  open its history graph.",
+  "Weather temp history: the",
+  "  current temperature is",
+  "  logged to flash every 10",
+  "  min and graphed with low /",
+  "  average / high. Always on.",
+  "  Tap the big temperature on",
+  "  the idle screen to open it.",
   "Sleep: deep-sleeps overnight",
   "and wakes on touch.",
   "",
@@ -691,7 +698,7 @@ void drawReset() {
       tft.setCursor(10, ty); tft.print("All: settings, files, and"); ty += 12;
       tft.setCursor(10, ty); tft.print("credentials will be cleared."); ty += 12;
       tft.setCursor(10, ty); tft.print("Touch calibration will be cleared."); ty += 12;
-      tft.setCursor(10, ty); tft.print("Pool temp history will be deleted."); ty += 12;
+      tft.setCursor(10, ty); tft.print("Pool & weather history deleted."); ty += 12;
       tft.setCursor(10, ty); tft.print("The device will reboot."); ty += 12;
     } else {                            // Settings: keeps calibration so it stays usable
       tft.setCursor(10, ty); tft.print("Settings: settings and"); ty += 12;

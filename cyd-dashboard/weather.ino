@@ -126,6 +126,9 @@ void fetchWeather() {
   }
   g_weatherValid = true;
   g_lastWeather = millis();
+
+  // record in the RAM ring buffer and (if available) persistent flash log
+  weatherLog(g_temp, (unsigned long)time(nullptr));
 }
 
 // Simple 24x24 weather icon; day=true for sun, false for moon.
@@ -250,4 +253,127 @@ void drawIdle() {
   tft.setTextFont(1);
   tft.setCursor(8, 224);
   tft.print(lastErr);
+}
+
+// ---- Weather temp history graph ----
+// Mirrors the pool temp history graph (pool.ino), but plots the Open-Meteo
+// current temperature that we log to flash every ~10 min via weatherLog().
+// Opened by tapping the weather temperature on the idle screen.
+
+// Window (seconds) for the current weather graph timeframe
+unsigned long wxWindowSec() {
+  switch (g_wxTF) {
+    case WX_DAY:   return 86400UL;
+    case WX_MONTH: return 2592000UL;
+    case WX_YEAR:  return 31536000UL;
+    default:       return 604800UL;  // WX_WEEK
+  }
+}
+
+// Day/Week plot from the raw (10-min) tier; Month from hourly rollups; Year
+// from daily rollups.
+void wxSeriesForTF(unsigned long** times, float** temps, int* count) {
+  switch (g_wxTF) {
+    case WX_MONTH: *times = g_wxHourTime; *temps = g_wxHourTemp; *count = g_wxHourCount; break;
+    case WX_YEAR:  *times = g_wxDayTime;  *temps = g_wxDayTemp;  *count = g_wxDayCount;  break;
+    default:       *times = g_wxLogTime;  *temps = g_wxLogTemp;  *count = g_wxLogCount;  break;
+  }
+}
+
+// Weather series wrapper (cyan line); the generic plotter is in pool.ino.
+bool plotWeatherSeries(unsigned long* times, float* temps, int count,
+                       unsigned long t0, unsigned long nowSec, unsigned long win,
+                       int gx, int gy, int gw, int gh,
+                       float& dataMin, float& dataMax) {
+  return plotSeries(times, temps, count, t0, nowSec, win, gx, gy, gw, gh,
+                    dataMin, dataMax, TFT_CYAN);
+}
+
+// Weather temp history graph. Plots the samples we have logged for the
+// selected timeframe. Auto-dismisses after 30s; any touch keeps it alive.
+void drawWxGraph() {
+  tft.fillScreen(TFT_BLACK);
+  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.setTextFont(2);
+  tft.setCursor(8, 6);
+  tft.print("Weather Temperature History");
+  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
+  tft.setCursor(274, 7);
+  tft.setTextColor(TFT_WHITE, TFT_MAROON);
+  tft.print("X");
+
+  // timeframe selector
+  const char* labels[4] = {"Day", "Week", "Month", "Year"};
+  int bx = 8;
+  for (int i = 0; i < 4; i++) {
+    uint16_t col = (i == g_wxTF) ? TFT_DARKGREEN : TFT_DARKGREY;
+    tft.fillRoundRect(bx, 34, 70, 22, 5, col);
+    tft.setTextColor(TFT_WHITE, col);
+    tft.setTextFont(1);
+    tft.setCursor(bx + 18, 40);
+    tft.print(labels[i]);
+    bx += 76;
+  }
+
+  // graph area
+  int gx = 10, gy = 66, gw = 300, gh = 140;
+  tft.fillRect(gx, gy, gw, gh, TFT_NAVY);
+  tft.drawRect(gx - 1, gy - 1, gw + 2, gh + 2, TFT_WHITE);
+
+  unsigned long nowSec = (unsigned long)time(nullptr);
+
+  // Time not synced yet (right after a boot/deep-sleep wake). Show an explicit
+  // "waiting" message instead of "No data" (see drawPoolGraph()).
+  if (nowSec < 1600000000UL) {
+    tft.setTextColor(TFT_LIGHTGREY, TFT_NAVY);
+    tft.setTextFont(1);
+    tft.setCursor(gx + 20, gy + gh / 2);
+    tft.print("Waiting for time sync...");
+    return;
+  }
+
+  unsigned long win = wxWindowSec();
+  unsigned long t0 = (nowSec > win) ? (nowSec - win) : 0;
+
+  unsigned long* times; float* temps; int count;
+  wxSeriesForTF(&times, &temps, &count);
+  float lo, hi;
+  bool plotted = plotWeatherSeries(times, temps, count, t0, nowSec, win, gx, gy, gw, gh, lo, hi);
+
+  if (!plotted) {
+    tft.setTextColor(TFT_LIGHTGREY, TFT_NAVY);
+    tft.setTextFont(1);
+    tft.setCursor(gx + 20, gy + gh / 2);
+    tft.print("No data in this period yet");
+  } else {
+    // Bottom strip below the chart: actual data low (left), current weather
+    // temp (center), actual data high (right) for the timeframe shown.
+    tft.setTextColor(TFT_CYAN, TFT_NAVY);
+    tft.setTextFont(2);
+    tft.setCursor(gx, gy + gh + 6);
+    tft.printf("Lo %.1f", lo);
+    tft.setTextColor(TFT_WHITE, TFT_NAVY);
+    tft.setCursor(gx + 110, gy + gh + 6);
+    tft.printf("now %.1fF", g_temp);
+    char hbuf[16];
+    snprintf(hbuf, sizeof hbuf, "Hi %.1f", hi);
+    tft.drawRightString(hbuf, gx + gw, gy + gh + 6, 2);
+  }
+}
+
+void handleWxGraphTouch(uint16_t x, uint16_t y) {
+  // any touch keeps the graph alive for another 30s
+  g_graphUntil = millis() + 30000UL;
+
+  if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_DASH; dirty = true; return; }  // close
+  int bx = 8;
+  for (int i = 0; i < 4; i++) {
+    if (inRect(x, y, bx, 34, bx + 70, 56)) {
+      if (g_wxTF != i) { g_wxTF = i; dirty = true; }
+      return;
+    }
+    bx += 76;
+  }
+  dirty = true;
 }

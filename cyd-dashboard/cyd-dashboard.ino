@@ -273,6 +273,41 @@ enum PoolTF { TF_DAY, TF_WEEK, TF_MONTH, TF_YEAR };
 int g_poolTF = TF_WEEK;
 unsigned long g_graphUntil = 0;   // 0 = graph not showing
 
+// Weather temp history: tiered storage mirroring pool temp (see weatherfs.ino
+// and poolfs.ino). Open-Meteo current temperature is fetched every 10 min -
+// half the pool's 5-min rate - so the same tiers need roughly half the raw
+// samples for the same retained time range. Always-on (no enable toggle).
+//   - raw (10-min samples): covers Day/Week views, ~8.3 days retained
+//   - hourly rollups (avg per hour): covers Month view, ~30 days retained
+//   - daily rollups (avg per day): covers Year view, ~1 year retained
+#define MAX_WX_LOG 1200
+float g_wxLogTemp[MAX_WX_LOG];
+unsigned long g_wxLogTime[MAX_WX_LOG];
+int g_wxLogNext = 0;
+int g_wxLogCount = 0;
+
+#define MAX_WX_HOUR 720
+float g_wxHourTemp[MAX_WX_HOUR];
+unsigned long g_wxHourTime[MAX_WX_HOUR];
+int g_wxHourNext = 0;
+int g_wxHourCount = 0;
+long g_wxHourBucket = -1;   // epoch/3600 of the in-progress hour
+float g_wxHourSum = 0;
+int   g_wxHourN = 0;
+
+#define MAX_WX_DAY 365
+float g_wxDayTemp[MAX_WX_DAY];
+unsigned long g_wxDayTime[MAX_WX_DAY];
+int g_wxDayNext = 0;
+int g_wxDayCount = 0;
+long g_wxDayBucket = -1;    // epoch/86400 of the in-progress day
+float g_wxDaySum = 0;
+int   g_wxDayN = 0;
+
+// Weather graph screen state
+enum WxTF { WX_DAY, WX_WEEK, WX_MONTH, WX_YEAR };
+int g_wxTF = WX_WEEK;
+
 String g_savedSsid = "";   // WiFi loaded from NVS
 String g_savedPass = "";
 String g_osClientId = "";       // OpenSky OAuth2 client id (blank = anonymous)
@@ -290,7 +325,7 @@ String g_sleepStartStr = "2200";  // HHMM for editing in settings
 String g_sleepEndStr   = "0800";
 String g_wakeStr       = "10";
 
-enum Screen { SCR_DASH, SCR_SETTINGS, SCR_GENERAL, SCR_ABOUT, SCR_HELP, SCR_WIFI, SCR_RESET, SCR_SLEEP, SCR_FTRACKER, SCR_POOL, SCR_POOLGRAPH, SCR_LOCATION, SCR_CALIB, SCR_FLIGHTDETAIL };
+enum Screen { SCR_DASH, SCR_SETTINGS, SCR_GENERAL, SCR_ABOUT, SCR_HELP, SCR_WIFI, SCR_RESET, SCR_SLEEP, SCR_FTRACKER, SCR_POOL, SCR_POOLGRAPH, SCR_WXGRAPH, SCR_LOCATION, SCR_CALIB, SCR_FLIGHTDETAIL };
 Screen g_screen = SCR_DASH;
 int g_helpScroll = 0;   // Help page vertical scroll offset (px)
 int g_resetConfirm = 0;  // Reset screen sub-state: 0=choose, 1=confirm All, 2=confirm Settings
@@ -1500,6 +1535,8 @@ void handleTouch() {
 
   if (g_screen == SCR_POOLGRAPH) { handlePoolGraphTouch(x, y); return; }
 
+  if (g_screen == SCR_WXGRAPH) { handleWxGraphTouch(x, y); return; }
+
   if (g_screen == SCR_RESET) {
     if (g_resetConfirm == 0) {
       // Step 1: choose what to reset.
@@ -1526,7 +1563,7 @@ void handleTouch() {
         prefs.putInt("calsy", g_calScaleY); prefs.putLong("caloy", g_calOffY);
       }
       prefs.end();
-      if (g_resetConfirm == 1) poolfsWipe();   // All also deletes pool temp history files
+      if (g_resetConfirm == 1) { poolfsWipe(); weatherfsWipe(); }   // All also deletes pool + weather history files
       // Brief on-screen feedback so the tap visibly registers, and a short
       // pause so NVS/LittleFS finish flushing before the reboot. Say exactly
       // what is being wiped.
@@ -1635,6 +1672,15 @@ void handleTouch() {
       return;
     }
 
+    // tapping the weather temperature (idle, always shown) opens the weather
+    // temp history graph
+    if (!overhead && inRect(x, y, 4, 38, 100, 72)) {
+      g_screen = SCR_WXGRAPH;
+      g_graphUntil = millis() + 30000UL;
+      dirty = true;
+      return;
+    }
+
     // tapping the lower-left status line (e.g. "6 aircraft") while idle recalls
     // the last overhead flight's details (dashes if none has been seen yet).
     if (!overhead && inRect(x, y, 4, 216, 170, 236)) {
@@ -1731,7 +1777,8 @@ void setup() {
   else                g_bootStage = BOOT_DONE;
   prefs.end();
 
-  poolfsInit();   // load persisted pool temp history from flash into RAM
+  poolfsInit();     // load persisted pool temp history from flash into RAM
+  weatherfsInit();  // load persisted weather temp history from flash into RAM
   logosInit();    // mount the "logos" partition (may be absent -> run logo-less)
 
   // esp_sleep_get_wakeup_cause() reads a hardware register that is NOT cleared
@@ -1854,7 +1901,8 @@ void enterDeepSleep() {
   esp_sleep_enable_ext0_wakeup((gpio_num_t)TOUCH_IRQ_PIN, 0);  // wake on LOW (touch)
 #endif
   esp_sleep_enable_timer_wakeup(SLEEP_POOL_INTERVAL_US);
-  saveRollupState();   // keep the in-progress hour/day rollups across this deep sleep
+  saveRollupState();     // keep the in-progress pool hour/day rollups across this deep sleep
+  saveWxRollupState();   // keep the in-progress weather hour/day rollups across this deep sleep
   esp_deep_sleep_start();
 }
 
@@ -1906,6 +1954,7 @@ bool sleeperRun() {
     if (g_goveeKey.length() > 0 && g_poolDeviceId.length() > 0) {
       fetchGoveeTemp();                      // logs to flash via poolLog
     }
+    fetchWeather();                          // logs weather temp to flash via weatherLog
     enterDeepSleep();                        // resets on next wake
   }
 }
@@ -2088,8 +2137,9 @@ void loop() {
     updateDashboard();
   }
 
-  // Auto-dismiss the pool graph after 30s of inactivity (touch resets it)
-  if (g_screen == SCR_POOLGRAPH && g_graphUntil != 0 && (long)(now - g_graphUntil) >= 0) {
+  // Auto-dismiss the pool/weather history graphs after 30s (touch resets it)
+  if ((g_screen == SCR_POOLGRAPH || g_screen == SCR_WXGRAPH) &&
+      g_graphUntil != 0 && (long)(now - g_graphUntil) >= 0) {
     g_screen = SCR_DASH;
     dirty = true;
   }
@@ -2116,6 +2166,7 @@ void loop() {
     else if (g_screen == SCR_FTRACKER) drawFtracker();
     else if (g_screen == SCR_POOL) drawPool();
     else if (g_screen == SCR_POOLGRAPH) drawPoolGraph();
+    else if (g_screen == SCR_WXGRAPH) drawWxGraph();
     else if (g_screen == SCR_FLIGHTDETAIL) drawFlightDetailPage();
     else drawDashboard();
     dirty = false;

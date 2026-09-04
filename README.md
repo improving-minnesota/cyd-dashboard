@@ -14,7 +14,9 @@ no computer needed.
 
 - **Clock** — a big time and date in the header.
 - **Weather** — current temperature, "feels like", humidity, sunrise/sunset, and
-  a 7-day forecast, refreshed every 10 minutes.
+  a 7-day forecast, refreshed every 10 minutes. The current temperature is also
+  logged to flash (always on) and graphed over Day / Week / Month / Year with the
+  low, average, and high.
 - **Flight tracker** — live aircraft overhead (from OpenSky) with a mini radar,
   callsign, altitude/speed/distance, origin & destination, and airline logo. The
   LED flashes red or green when a flight is departing or arriving at DFW, and
@@ -75,6 +77,8 @@ Where to get each credential is explained below.
 ## Using the device
 
 - Tap the **Settings** cog to open the settings menu.
+- On the idle screen, tap the **weather temperature** (top-left) to open the
+  weather temperature history graph.
 - On the idle screen, tap the **Pool** reading to open its history graph.
 - On the idle screen, tap the **aircraft status** in the lower-left (e.g. "6
   aircraft") to open the last overhead flight's details (its route, speed, etc.).
@@ -116,8 +120,8 @@ Defaults for a freshly reset device are shown with each setting.
   is available it shows **Upgrade Available** with an **Install** button.
 - **Help** — this guide, on the device.
 - **Reset** — confirms before wiping and shows a message saying exactly what's
-  being reset. **All** clears settings *and* all files (including pool
-  temperature history) and touch calibration, so the next boot asks you to
+  being reset. **All** clears settings *and* all files (including pool and
+  weather temperature history) and touch calibration, so the next boot asks you to
   recalibrate; **Settings** clears settings and credentials only but keeps
   calibration. Both reboot the device. **Cancel** changes nothing.
 

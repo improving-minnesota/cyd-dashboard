@@ -240,13 +240,15 @@ below):
 | Partition | Stock "default" | This project | Notes |
 |---|---|---|---|
 | app0 / app1 (each) | 1.31 MB | 1.5 MB | Two OTA slots |
-| spiffs (LittleFS) | 1.375 MB | 384 KB | Pool temp history |
+| spiffs (LittleFS) | 1.375 MB | 384 KB | Pool + weather temp history |
 | logos (LittleFS) | — | 512 KB | Airline logos (runtime) |
 
-384 KB of spiffs is still comfortably above the pool temp history feature's
-worst-case usage (the raw/hourly/daily CSV tiers peak at roughly 150-200 KB
-combined before compaction trims them), so this isn't expected to be a
-practical constraint. The 512 KB logos partition holds ~364 KB of the current
+384 KB of spiffs is still comfortably above the combined pool + weather temp
+history worst-case usage. Pool's raw/hourly/daily CSV tiers peak at roughly
+150-200 KB before compaction trims them; weather is sampled half as often
+(every 10 min vs pool's 5 min) so its tiers peak at roughly 50-110 KB. Combined
+they stay well under 384 KB even before compaction, so this isn't expected to
+be a practical constraint. The 512 KB logos partition holds ~364 KB of the current
 54 logos, leaving ~148 KB of headroom to add more without ever changing the
 table again.
 
@@ -257,7 +259,7 @@ exact offsets/sizes are in the table above):
 0x0000   ┌ HD  bootloader + partition table + NVS (0x9000) + otadata (0xE000)
 0x10000  ├─ app0     ██████████████████████████████████████████ 1.5 MB   (OTA slot 0)
 0x190000 ├─ app1     ██████████████████████████████████████████ 1.5 MB   (OTA slot 1)
-0x310000 ├─ spiffs   ████████████ 384 KB   (pool temp history, "spiffs")
+0x310000 ├─ spiffs   ████████████ 384 KB   (pool + weather temp history, "spiffs")
 0x370000 ├─ logos    █████████████████ 512 KB   (airline logos, "logos")
 0x3F0000 └─ coredump ████ 64 KB
 0x400000   (end of 4 MB flash)
@@ -268,7 +270,7 @@ Key takeaways from the map:
 - **app0 / app1** — the two OTA slots. OTA writes the inactive slot and swaps,
   so a failed update rolls back automatically. They hold the logo-less firmware
   (~1.15 MB), leaving ~350 KB of headroom per slot.
-- **spiffs** — pool temperature history (LittleFS, global `LittleFS`).
+- **spiffs** — pool + weather temperature history (LittleFS, global `LittleFS`).
 - **logos** — airline logos as files (LittleFS, separate `LogosFS` instance).
   OTA never touches this partition, so logos persist across updates; add/remove/
   update them by re-provisioning files, not reflashing.
@@ -285,8 +287,8 @@ shown above.
 > **One-time consequence when applying this change to an already-provisioned
 > board:** NVS (settings/credentials) keeps the same offset, so it survives.
 > The LittleFS partitions (pool "spiffs" and "logos") move to different flash
-> offsets, so any existing pool temp history data does not carry over — LittleFS
-> will format fresh on the next boot — and the logos partition must be
+> offsets, so any existing pool/weather temp history data does not carry over —
+> LittleFS will format fresh on the next boot — and the logos partition must be
 > provisioned once (see "Airline logos"). This is a one-time effect of
 > adopting the new partition table, not something that happens on every flash
 > afterward. **Once provisioned, do not change the partition table again:**
@@ -311,11 +313,15 @@ When app flash usage becomes tight, the biggest levers are growing the app
 slots at the cost of the logos partition, or reducing other data (e.g. the
 top-500 airport table in `flight_details.ino`).
 
-## Pool temperature history persistence
+## Temperature history persistence (pool + weather)
 
-The pool-temp history graphs (Day / Week / Month / Year) are backed by a
-tiered store on the LittleFS (spiffs) flash partition, so the data survives
-reboots and deep-sleep wakes:
+The pool-temp and weather-temp history graphs (Day / Week / Month / Year) are
+both backed by a tiered store on the LittleFS (spiffs) flash partition, so the
+data survives reboots and deep-sleep wakes. The two features use the same
+scheme (see `poolfs.ino` for pool, `weatherfs.ino` for weather) but different
+files and sampling rates.
+
+**Pool** (Govee thermometer, ~every 5 min):
 
 - `/pool.csv` — raw `epoch,temp` samples, logged roughly every 5 minutes. Feeds
   the Day & Week graphs. Compacts to keep the newest ~2500 lines (~8.7 days).
@@ -324,26 +330,48 @@ reboots and deep-sleep wakes:
 - `/pool_day.csv` — daily averages. Feeds the Year graph. Compacts to keep the
   newest ~800 lines (~2.2 years).
 - `/pool_rollup.bin` — the in-progress hour/day accumulators, saved right
-  before each deep sleep and restored at boot. Each 5-minute deep-sleep wake is
-  a fresh boot, so without this the hourly/daily tiers would never flush during
-  the night (starving the Month/Year graphs of overnight data).
+  before each deep sleep and restored at boot (see below).
+
+**Weather** (Open-Meteo current temperature, ~every 10 min — half the pool
+rate — so roughly half the raw samples for the same retained time range):
+
+- `/weather.csv` — raw `epoch,temp` samples, logged on each weather fetch
+  (every ~10 min while awake). Feeds the Day & Week graphs. Compacts to keep
+  the newest ~1200 lines (~8.3 days).
+- `/weather_hour.csv` — hourly averages. Feeds the Month graph. Compacts to
+  keep the newest ~900 lines (~37 days).
+- `/weather_day.csv` — daily averages. Feeds the Year graph. Compacts to keep
+  the newest ~800 lines (~2.2 years).
+- `/weather_rollup.bin` — the in-progress hour/day accumulators, saved before
+  each deep sleep and restored at boot.
+
+Weather history is **always on** (no enable toggle). It's logged from
+`fetchWeather()` via `weatherLog()` in `weatherfs.ino`.
+
+Each tier's `*_rollup.bin` holds the in-progress hour/day accumulators, saved
+right before each deep sleep and restored at boot. Each 5-minute deep-sleep
+wake is a fresh boot, so without this the hourly/daily tiers would never flush
+during the night (starving the Month/Year graphs of overnight data).
 
 At boot the CSV tiers are loaded back into RAM ring buffers (keeping the
-newest samples) so the graphs can draw them immediately. The graph shows
-"Waiting for time sync..." until NTP has synced, so it never plots samples
+newest samples) so the graphs can draw them immediately. The graphs show
+"Waiting for time sync..." until NTP has synced, so they never plot samples
 against an unsynced clock.
 
 On a freshly flashed board the spiffs partition has never been initialized —
 sketch-only flashes (bootloader, partition table, app) never write the data
 partition — so the first mount would fail. `poolfsInit()` therefore calls
 `LittleFS.begin(true)` to format the partition once on that first mount
-failure; afterwards it mounts normally. If the partition is moved or erased
+failure; afterwards it mounts normally. `weatherfsInit()` runs after it and
+shares that same mounted partition. If the partition is moved or erased
 (e.g. a partition-table change), it is formatted once again and the previous
 history is dropped.
 
-Data collection runs both while awake (a Govee fetch every ~5 min while on the
-dashboard) and while asleep (deep-sleep timer wakes every ~5 min that log one
-sample and go back to sleep).
+Data collection runs both while awake and while asleep. While asleep the
+deep-sleep timer wakes every ~5 min; the **same single wake** connects, logs
+the pool temp and the weather temp, and goes back to sleep — weather logging
+adds **no additional wake-ups**, only one extra HTTPS call within the wake the
+pool already needs.
 
 ### Power loss vs. deep sleep
 
