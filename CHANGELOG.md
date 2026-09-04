@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.7.0...v1.7.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **sleep:** gate sleep window on timezone applied this boot ([#55](https://github.com/improving-minnesota/cyd-dashboard/issues/55)) ([f43ae1d](https://github.com/improving-minnesota/cyd-dashboard/commit/f43ae1d7f63e09409601543bce79a2e1a08e1ecd))
+
 ## [1.7.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.6.0...v1.7.0) (2026-09-04)
 
 
