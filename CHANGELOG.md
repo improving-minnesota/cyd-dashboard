@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.6](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.5...v1.3.6) (2026-09-04)
+
+
+### Bug Fixes
+
+* **sleep:** release the touch CS GPIO hold on wake so deep sleep actually sticks ([bea120b](https://github.com/improving-minnesota/cyd-dashboard/commit/bea120bf72487a2dfa533c7bd7b640b817d830e2))
+* **sleep:** release the touch CS GPIO hold on wake so deep sleep actually sticks ([88ad6bf](https://github.com/improving-minnesota/cyd-dashboard/commit/88ad6bfcd773e9566bccc860797f5d7a75828a4a))
+
 ## [1.3.5](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.4...v1.3.5) (2026-09-04)
 
 
