@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.5.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.4.0...v1.5.0) (2026-09-04)
+
+
+### Features
+
+* verify TLS cert for Nominatim geocoding ([35a01b7](https://github.com/improving-minnesota/cyd-dashboard/commit/35a01b705c4ac1a16989683e729c83981dcaab75))
+* verify TLS certificates for all third-party API calls ([56f840e](https://github.com/improving-minnesota/cyd-dashboard/commit/56f840ef2c3c4a35b0c20dcc4eb3c151bf0e2062))
+* verify TLS certs for all third-party API calls ([14f14c3](https://github.com/improving-minnesota/cyd-dashboard/commit/14f14c3e05355e75dd2c43d27a187dabaaeae96c))
+
 ## [1.4.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.9...v1.4.0) (2026-09-04)
 
 
