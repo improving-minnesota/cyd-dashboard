@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.5](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.2.4...v1.2.5) (2026-09-04)
+
+
+### Bug Fixes
+
+* **version:** stop the dev-build version string from going stale ([#20](https://github.com/improving-minnesota/cyd-dashboard/issues/20)) ([2c75903](https://github.com/improving-minnesota/cyd-dashboard/commit/2c75903030cd9cedbe1202f5825ae8e172ceef67))
+
 ## [1.2.4](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.2.3...v1.2.4) (2026-09-04)
 
 
