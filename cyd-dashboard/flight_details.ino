@@ -201,8 +201,10 @@ void fetchRoute(const char* icao24) {
   time_t end = now + 60;           // a little into the future
   String url = String("https://opensky-network.org/api/flights/aircraft?icao24=") + icao24
                + "&begin=" + String((long)begin) + "&end=" + String((long)end);
+  // Verified TLS against the same ISRG roots used by the main OpenSky calls.
+  NetworkClientSecure sec;
   HTTPClient http;
-  http.begin(url);
+  if (!httpsBegin(http, sec, url.c_str(), kISRGRootCAs)) { g_routeFetched = true; g_routeBusy = false; return; }
   http.setTimeout(5000);
   if (openskyEnsureToken()) http.addHeader("Authorization", "Bearer " + g_osToken);
   int code = http.GET();
