@@ -170,14 +170,20 @@ void maybeAutoUpdate() {
   unsigned long day = (unsigned long)(now / 86400UL);
   if (g_lastScanDay == day) return;              // already scanned today
   String ver, url, digest;
-  if (!fetchLatestRelease(ver, url, digest)) return;     // transient; try next boot
+  if (!fetchLatestRelease(ver, url, digest)) {
+    g_autoUpdStatus = 4; g_autoUpdStatusUntil = millis() + 4000;   // Check Failed
+    return;                                      // transient; try next boot
+  }
   g_lastScanDay = day;                           // only mark after a good scan
   prefs.begin("flight", false); prefs.putULong("lastscan", day); prefs.end();
   if (isNewerThanRunning(ver)) {
+    g_autoUpdStatus = 3; g_autoUpdStatusUntil = millis() + 4000;   // Updating...
     g_otaVersion = stripV(ver);
     g_otaUrl = url;
     g_otaSha256 = digest;
     g_otaActive = true;                          // loop() performs the update
+  } else {
+    g_autoUpdStatus = 2; g_autoUpdStatusUntil = millis() + 4000;   // No Updates
   }
 }
 
@@ -186,6 +192,7 @@ void maybeAutoUpdate() {
 // and running it on the loop would also freeze the UI. Waits briefly for NTP
 // time first so the once-per-day clock is meaningful.
 void autoScanOnce() {
+  g_autoUpdStatus = 1; g_autoUpdStatusUntil = millis() + 2500;   // Scanning...
   unsigned long t0 = millis();
   while (time(nullptr) < 1600000000L && millis() - t0 < 8000) delay(100);
   maybeAutoUpdate();
