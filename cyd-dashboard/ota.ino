@@ -226,8 +226,10 @@ void drawOtaError(const char* msg) {
   delay(3000);
 }
 
-// Download + flash. Runs on the main loop (owns the display). Never returns on
-// success (reboots). Returns false only after showing an error screen.
+// Download + flash. Runs on a dedicated task with a large stack (see
+// otaTaskEntry) because the mbedtls TLS handshake overflows the small loop task.
+// Owns the display. Never returns on success (reboots). Returns false only after
+// showing an error screen.
 static bool sha256Matches(const uint8_t hash[32], const String& expected) {
   char hex[65];
   for (int i = 0; i < 32; i++) snprintf(&hex[i * 2], 3, "%02x", hash[i]);
