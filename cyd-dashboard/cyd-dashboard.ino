@@ -23,6 +23,7 @@
 #include <TFT_eSPI.h>
 #include <time.h>
 #include "esp_sleep.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 // Airline logos are loaded at runtime from a dedicated LittleFS partition (see
@@ -1542,10 +1543,17 @@ void setup() {
   poolfsInit();   // load persisted pool temp history from flash into RAM
   logosInit();    // mount the "logos" partition (may be absent -> run logo-less)
 
-  // If a touch woke us from deep sleep (requires TOUCH_IRQ_ENABLED and the
-  // IRQ pin wired - see the config block above), treat it like the old
-  // touch-to-wake behavior: stay awake for the wake duration.
-  esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
+  // esp_sleep_get_wakeup_cause() reads a hardware register that is NOT cleared
+  // by a software reset (esp_restart(), used by OTA and Factory Reset). So on
+  // any boot that ISN'T actually waking from deep sleep, it can still report
+  // the cause from the last real deep-sleep exit, potentially hours earlier.
+  // Only trust it when esp_reset_reason() confirms this boot really is a
+  // deep-sleep wake; otherwise a stale value could send a fresh OTA/reset boot
+  // straight into the low-power sleeperRun() path below (before the display
+  // even initializes) instead of a normal boot.
+  bool wokeFromDeepSleep = (esp_reset_reason() == ESP_RST_DEEPSLEEP);
+  esp_sleep_wakeup_cause_t wakeCause = wokeFromDeepSleep
+      ? esp_sleep_get_wakeup_cause() : ESP_SLEEP_WAKEUP_UNDEFINED;
 #if TOUCH_IRQ_ENABLED
   if (wakeCause == ESP_SLEEP_WAKEUP_EXT0) {
     wakeUntil = millis() + (unsigned long)g_wakeMin * 60000UL;
