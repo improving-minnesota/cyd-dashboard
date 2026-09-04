@@ -95,7 +95,16 @@ int compareVersions(const String& a, const String& b) {
   return 0;
 }
 String stripV(const String& s) { return (s.length() && s[0] == 'v') ? s.substring(1) : s; }
-bool isNewerThanRunning(const String& tagVersion) { return compareVersions(stripV(tagVersion), kVersion) > 0; }
+// Strip any non-numeric suffix (e.g. the "-dev" in a local build's version)
+// before comparing: compareVersions() reads each dot-separated component as
+// consecutive digit characters, so a trailing "-dev" on the last numeric
+// component would otherwise be parsed as digits and corrupt the comparison.
+String bareVersion(const String& s) {
+  int i = 0;
+  while (i < (int)s.length() && (isDigit(s[i]) || s[i] == '.')) i++;
+  return s.substring(0, i);
+}
+bool isNewerThanRunning(const String& tagVersion) { return compareVersions(stripV(tagVersion), bareVersion(kVersion)) > 0; }
 
 // ---- GitHub latest-release fetch -----------------------------------------
 bool fetchLatestRelease(String& versionOut, String& assetUrlOut, String& sha256Out) {
