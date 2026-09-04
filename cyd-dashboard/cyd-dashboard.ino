@@ -830,8 +830,13 @@ bool geocodeAddress() {
   String url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q="
              + urlEncode(g_addrSearch);
 
+  // Nominatim is Let's Encrypt signed, verified against the same ISRG roots.
+  NetworkClientSecure sec;
   HTTPClient http;
-  http.begin(url);
+  if (!httpsBegin(http, sec, url.c_str(), kISRGRootCAs)) {
+    snprintf(lastErr, sizeof lastErr, "geo tls");
+    return false;
+  }
   http.addHeader("User-Agent", "cyd-dashboard/1.0 (contact: user@localhost)");
   http.setTimeout(5000);
   int code = http.GET();

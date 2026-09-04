@@ -63,11 +63,12 @@ and always verifies.
 
 ## Third-party API (data provider) TLS
 
-The non-OTA HTTPS calls — OpenSky (token exchange and flight data), the
-weather provider (open-meteo), and the Govee pool-temp API — are all
-TLS-verified against root-CA bundles embedded in the firmware. OpenSky and
-open-meteo are Let's Encrypt signed and use the shared `kISRGRootCAs` bundle
-(ISRG Root X1 + X2); Govee is Amazon-signed and uses `kAmazonRootCA1`. Unlike
+The non-OTA HTTPS calls — OpenSky (token exchange, flight data, and flight
+history), the weather provider (open-meteo), the address geocoder (Nominatim),
+and the Govee pool-temp API — are all TLS-verified against root-CA bundles
+embedded in the firmware. OpenSky, open-meteo, and Nominatim are Let's Encrypt
+signed and use the shared `kISRGRootCAs` bundle (ISRG Root X1 + X2); Govee is
+Amazon-signed and uses `kAmazonRootCA1`. Unlike
 the OTA path there is **no** `setInsecure()` fallback: a certificate-validation
 or handshake failure is treated as a hard error, never a silent downgrade to an
 unauthenticated connection. A failed OpenSky token exchange is surfaced as a
