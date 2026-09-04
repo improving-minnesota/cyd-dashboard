@@ -169,6 +169,11 @@ void maybeAutoUpdate() {
   if (now < 1600000000L) return;                 // NTP not synced yet
   unsigned long day = (unsigned long)(now / 86400UL);
   if (g_lastScanDay == day) return;              // already scanned today
+  // Only announce "Scanning" once we know a network check will actually
+  // happen (all the skip-checks above have passed). The deadline generously
+  // covers fetchLatestRelease()'s own timeouts (5s connect + 10s read) so the
+  // status can never outlive the scan it describes.
+  g_autoUpdStatus = 1; g_autoUpdStatusUntil = millis() + 20000;   // Scanning...
   String ver, url, digest;
   if (!fetchLatestRelease(ver, url, digest)) {
     g_autoUpdStatus = 4; g_autoUpdStatusUntil = millis() + 4000;   // Check Failed
@@ -192,7 +197,6 @@ void maybeAutoUpdate() {
 // and running it on the loop would also freeze the UI. Waits briefly for NTP
 // time first so the once-per-day clock is meaningful.
 void autoScanOnce() {
-  g_autoUpdStatus = 1; g_autoUpdStatusUntil = millis() + 2500;   // Scanning...
   unsigned long t0 = millis();
   while (time(nullptr) < 1600000000L && millis() - t0 < 8000) delay(100);
   maybeAutoUpdate();
