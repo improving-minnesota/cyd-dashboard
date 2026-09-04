@@ -817,8 +817,10 @@ void updateDashboard() {
 // seconds (g_autoUpdStatusUntil) so the outcome is readable on screen.
 void drawAutoUpdateStatus() {
   if (g_autoUpdStatus == 0) return;
-  // Transient statuses expire after their deadline; the current one stays.
-  if (g_autoUpdStatus != 1 && (long)(millis() - g_autoUpdStatusUntil) > 0) return;
+  // Every status (including "Scanning") expires after its deadline, so a
+  // status can never get stuck on screen if a code path forgets to transition
+  // it away (see g_autoUpdStatusUntil at each set site).
+  if ((long)(millis() - g_autoUpdStatusUntil) > 0) { g_autoUpdStatus = 0; return; }
   const char* msg = "";
   uint16_t col = TFT_LIGHTGREY;
   switch (g_autoUpdStatus) {
