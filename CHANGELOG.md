@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.5](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.4...v1.3.5) (2026-09-04)
+
+
+### Bug Fixes
+
+* **sleep:** don't sleep while an OTA is pending or running ([7774fa4](https://github.com/improving-minnesota/cyd-dashboard/commit/7774fa49c1fda4f068a8d7126830d742330d5cab))
+* **sleep:** don't sleep while an OTA is pending or running ([e13ad15](https://github.com/improving-minnesota/cyd-dashboard/commit/e13ad157248513851f86500253f27f6fb29f99d4))
+
 ## [1.3.4](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.3...v1.3.4) (2026-09-04)
 
 
