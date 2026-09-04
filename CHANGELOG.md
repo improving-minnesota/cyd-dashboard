@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.9](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.8...v1.3.9) (2026-09-04)
+
+
+### Bug Fixes
+
+* **ui:** use black text on yellow anonymous-warning border ([e515223](https://github.com/improving-minnesota/cyd-dashboard/commit/e515223890a533e7c0eb9bb048eaa831f7ed472e))
+* **ui:** use black text on yellow anonymous-warning border ([1be7a47](https://github.com/improving-minnesota/cyd-dashboard/commit/1be7a474f93f61a3db212cdc7b5f7acacc2bc745))
+
 ## [1.3.8](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.7...v1.3.8) (2026-09-04)
 
 
