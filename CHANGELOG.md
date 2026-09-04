@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.4](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.2.3...v1.2.4) (2026-09-04)
+
+
+### Bug Fixes
+
+* **sleep:** don't trust a stale wakeup-cause register on non-sleep boots ([#18](https://github.com/improving-minnesota/cyd-dashboard/issues/18)) ([9fbe4ea](https://github.com/improving-minnesota/cyd-dashboard/commit/9fbe4eaf1552a52b635da5b189015476e60db575))
+
 ## [1.2.3](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.2.2...v1.2.3) (2026-09-04)
 
 
