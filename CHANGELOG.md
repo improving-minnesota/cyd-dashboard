@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.2...v1.3.3) (2026-09-04)
+
+
+### Bug Fixes
+
+* Don't leave "Update: Scanning..." stuck on screen ([#32](https://github.com/improving-minnesota/cyd-dashboard/issues/32)) ([d524547](https://github.com/improving-minnesota/cyd-dashboard/commit/d52454724415d1bbfd1c9fa2f379a4343b87430b))
+
 ## [1.3.2](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.1...v1.3.2) (2026-09-04)
 
 
