@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.7.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.6.0...v1.7.0) (2026-09-04)
+
+
+### Features
+
+* live radar flight tracking with heading plane icons ([a168309](https://github.com/improving-minnesota/cyd-dashboard/commit/a1683097e62d4a78f775601dd937f9c2304f4836))
+* live radar flight tracking with heading plane icons ([718baf1](https://github.com/improving-minnesota/cyd-dashboard/commit/718baf16ffb85bcf5cbae96ffdfbe0486eff9dff))
+
+
+### Bug Fixes
+
+* bound OpenSky query to radar range to avoid JSON parse errors ([e97d71d](https://github.com/improving-minnesota/cyd-dashboard/commit/e97d71db76ee059be0ad277c2701c8aff283f729))
+
 ## [1.6.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.5.0...v1.6.0) (2026-09-04)
 
 
