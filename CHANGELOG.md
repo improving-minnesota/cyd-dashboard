@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.1...v1.3.2) (2026-09-04)
+
+
+### Bug Fixes
+
+* Prevent TFT/SPI race that froze the device when an OTA started ([#30](https://github.com/improving-minnesota/cyd-dashboard/issues/30)) ([613d846](https://github.com/improving-minnesota/cyd-dashboard/commit/613d846c3b0b54e1358c30e513513fc4b6d71592))
+
 ## [1.3.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.0...v1.3.1) (2026-09-04)
 
 
