@@ -637,11 +637,18 @@ void fetchFlights() {
   sec.setCACert(kISRGRootCAs);
   HTTPClient http;
   char osurl[240];
-  // dynamic bbox around current location (0.5 deg ~ 35 mi)
-  float d = 0.45f;
+  // Bound the query to what the radar can actually draw: the ring is g_radiusMi
+  // and we keep/track planes out to 2x radius (min 8 mi), so a box that large is
+  // all we need. A wider box returns far more aircraft than we keep, which blew
+  // the 48KB parse cap ("Json NoMemory") or truncated the body ("Json
+  // IncompleteInput"). Widen longitude by 1/cos(lat) so the box is a true circle
+  // on the ground and doesn't clip planes due east/west.
+  const float bboxMi = max(g_radiusMi * 2.0f, 8.0f);
+  const float dLat = bboxMi / 69.0f;                        // ~1 deg lat ~ 69 mi
+  const float dLon = dLat / cosf(g_lat * PI / 180.0f);
   snprintf(osurl, sizeof osurl,
     "https://opensky-network.org/api/states/all?lamin=%.4f&lomin=%.4f&lamax=%.4f&lomax=%.4f",
-    g_lat - d, g_lon - d, g_lat + d, g_lon + d);
+    g_lat - dLat, g_lon - dLon, g_lat + dLat, g_lon + dLon);
   if (!http.begin(sec, osurl)) {
     g_osHandshakeFailed = true;
     snprintf(lastErr, sizeof lastErr, "tls setup");
@@ -753,10 +760,9 @@ void fetchFlights() {
     // altitude ceiling filter
     if (g_ceilingFt > 0 && altM * 3.28084f > g_ceilingFt) continue;
 
-    // rough radar range: keep planes within 2x radius (or 15 mi) for the display
+    // rough radar range: keep planes within the fetched bbox (2x radius, min 8 mi)
     float distMi = hav(g_lat, g_lon, lat, lon);
-    float radarRange = max(g_radiusMi * 2.0f, 8.0f);
-    if (distMi > radarRange) continue;
+    if (distMi > bboxMi) continue;
 
     Plane &p = planes[planeCount++];
     JsonVariant icaoV = st[0];
