@@ -178,6 +178,8 @@ bool   g_otaActive = false;    // loop() should run the pending OTA
 String g_otaVersion, g_otaUrl; // pending OTA target
 String g_otaSha256;            // digest of the pending OTA target
 bool   g_rollbackMarked = false; // OTA rollback safeguard applied once post-boot
+TaskHandle_t g_otaTask = NULL;   // dedicated task running performOTA
+volatile bool g_otaRunning = false; // OTA task owns the display; loop() yields
 int   g_ftPage = 0;            // Flight Tracker settings page (0 or 1)
 float g_lat = 0.0f;           // location; loaded from NVS, or guessed from IP on first boot
 float g_lon = 0.0f;
@@ -1681,8 +1683,27 @@ bool sleeperRun() {
   }
 }
 
+// Dedicated task for performOTA. Runs on a large stack because the mbedtls TLS
+// handshake overflows the small (8KB) loop task. Owns the display while running;
+// never returns on success (reboots). On failure it returns to About showing the
+// error state.
+void otaTaskEntry(void*) {
+  performOTA(g_otaUrl, g_otaVersion, g_otaSha256);
+  // Only reached on failure:
+  g_otaRunning = false;
+  g_otaTask = NULL;
+  g_screen = SCR_ABOUT;
+  g_updateState = 4;   // Update Check Failed
+  dirty = true;
+  vTaskDelete(NULL);
+}
+
 void loop() {
   unsigned long now = millis();
+
+  // While an OTA runs on its dedicated task, yield so it can own the display
+  // (no TFT contention from the loop).
+  if (g_otaRunning) { delay(10); return; }
 
 #if TOUCH_DEBUG
   // Heartbeat: if the gap between prints grows large, loop() itself is
@@ -1717,9 +1738,14 @@ void loop() {
   // --- Awake path: ensure display is on ---
   if (g_displayOff) { tft.writecommand(0x29); g_displayOff = false; dirty = true; }
 
-  // Run a pending OTA (from the About Install button or the daily auto-scan).
-  // This blocks, draws its own screen, and reboots on success.
-  if (g_otaActive) { g_otaActive = false; performOTA(g_otaUrl, g_otaVersion, g_otaSha256); }
+  // Start a pending OTA (About Install button or daily auto-scan) on a dedicated
+  // task with a large stack: the mbedtls TLS handshake overflows the small
+  // loopTask. The OTA task owns the display; loop() yields while it runs.
+  if (g_otaActive && !g_otaRunning) {
+    g_otaActive = false;
+    g_otaRunning = true;
+    xTaskCreate(otaTaskEntry, "ota", 32768, NULL, 1, &g_otaTask);
+  }
   // OTA rollback safeguard: after a successful boot grace period, cancel any
   // pending rollback so a freshly-installed slot stays active.
   if (!g_rollbackMarked && now > 30000UL) { g_rollbackMarked = true; markAppValidBoot(); }

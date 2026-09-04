@@ -49,8 +49,7 @@ The `cyd-dashboard/` sketch targets the **ESP32-2432S028R "CYD"**
 "Partition table" below), so the FQBN must include `:PartitionScheme=custom`:
 
 ```bash
-arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
-  --build-property "compiler.cpp.extra_flags=-DARDUINO_LOOP_STACK_SIZE=16384" cyd-dashboard
+arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom cyd-dashboard
 arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 cyd-dashboard
 ```
 
