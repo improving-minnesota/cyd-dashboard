@@ -155,10 +155,11 @@ releases. All of this lives in `cyd-dashboard/ota.ino`.
 ### Auto-Update toggle & dev builds
 
 - `g_autoUpdate` defaults to `true` (persisted as `autoupd`).
-- A **dev build** (version ending in `-dev`) actively forces it OFF at boot, even if
-  a previous release build left it ON — so flashing source never silently
-  upgrades. Dev builds can still update manually from About or by toggling
-  Auto-Update on.
+- A **dev build** (version ending in `-dev`) forces Auto-Update OFF for that
+  boot, so flashing source never silently upgrades — but it does **not** change
+  the saved preference in NVS. Your Auto-Update setting is preserved, so it's
+  still ON when you later flash a release build. Dev builds can still update
+  manually from About or by toggling Auto-Update on.
 
 ### TLS
 

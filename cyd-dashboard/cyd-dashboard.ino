@@ -456,6 +456,10 @@ void netTask(void* p) {
   for (;;) {
     vTaskDelay(30 / portTICK_PERIOD_MS);
     if (WiFi.status() != WL_CONNECTED) continue;
+    // While an OTA is downloading, pause all net fetches so the OTA task's HTTP
+    // doesn't overlap with ours (concurrent lwIP use can trigger a FreeRTOS
+    // xTaskPriorityDisinherit assert).
+    if (g_otaRunning) { vTaskDelay(30); continue; }
     // User-initiated update check gets priority so the About page responds
     // quickly even while background fetches (flights/weather/pool) are queued.
     if (netWantUpdateCheck) { netWantUpdateCheck=false; netBusy=true; checkForUpdate(); netBusy=false; netUpdated=true; }
@@ -1514,12 +1518,12 @@ void setup() {
   g_showTimer = prefs.getBool("timer", false);
   g_autoUpdate = prefs.getBool("autoupd", true);
   g_lastScanDay = prefs.getULong("lastscan", 0);
-  // Dev builds (version ending in "-dev") never auto-update: actively force OFF
-  // even if a previous release build left the pref ON, so a dev flash can't
-  // silently upgrade.
+  // Dev builds (version ending in "-dev") never auto-update: force it OFF for
+  // this boot so a dev flash can't silently upgrade. Do NOT persist it to NVS -
+  // the user's saved Auto-Update preference should survive a dev flash, so it's
+  // still ON when they later install a release build.
   if (isDevBuild() && g_autoUpdate) {
     g_autoUpdate = false;
-    prefs.putBool("autoupd", false);
   }
   g_clockCol = (uint16_t)prefs.getUInt("clkcol", DEFAULT_CLOCK_COL);
   g_ignoreAirport = prefs.getString("ignoreap", "");
@@ -1706,6 +1710,11 @@ bool sleeperRun() {
 // never returns on success (reboots). On failure it returns to About showing the
 // error state.
 void otaTaskEntry(void*) {
+  // The OTA downloads over the network while the net task may be mid-fetch
+  // (flights/weather/pool polling continues on the dashboard). Two tasks doing
+  // HTTP/lwIP at once can trigger a FreeRTOS xTaskPriorityDisinherit assert, so
+  // wait for any in-flight net fetch to finish before starting the download.
+  while (netBusy) vTaskDelay(20);
   performOTA(g_otaUrl, g_otaVersion, g_otaSha256);
   // Only reached on failure:
   g_otaRunning = false;
