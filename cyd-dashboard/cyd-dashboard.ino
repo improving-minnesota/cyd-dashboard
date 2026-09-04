@@ -140,8 +140,13 @@ struct Plane {
   float distMi;
   int   altFt;
   int   spdKt;
-  float dxMi;   // east  offset in miles
-  float dyMi;   // north offset in miles
+  float hdgDeg;   // true track (deg), 0-359 clockwise from north; -1 if unknown
+  float dxMi;     // east  offset in miles
+  float dyMi;     // north offset in miles
+  unsigned long lastStepMs;   // millis() of the last known position / dead-reckon step
+  int  lastPx;    // on-screen pixel of the last drawn blip
+  int  lastPy;
+  bool blipOn;    // true while a blip for this plane is on screen (to erase later)
 };
 
 const int MAXP = 6;
@@ -158,15 +163,34 @@ struct FlightSnap {
   char  icao24[7];
   int   altFt;
   int   spdKt;
+  float hdgDeg;           // true track (deg), -1 if unknown
   float distMi;
   float dxMi;             // east offset (for the radar blip)
   float dyMi;             // north offset (for the radar blip)
   char  origin[6];        // route ICAO codes ("" = unknown)
   char  dest[6];
   bool  routeFetched;
+  unsigned long tickMs;   // millis() of the last known position / dead-reckon step
 };
 FlightSnap g_lastFlight;
 unsigned long g_flightDetailUntil = 0;   // millis() at which the detail page auto-returns
+
+// Radar blip bookkeeping for the flight-detail page (its radar shows a single
+// plane, so it has its own last-pixel state). g_radarShown records whether a
+// radar is actually displayed right now; dead-reckoning only moves blips on a
+// screen that is really showing one (avoids painting a phantom radar onto the
+// idle dashboard).
+bool g_radarShown = false;
+int  g_flightLastPx, g_flightLastPy;
+bool g_flightBlipOn = false;
+
+// The tracked (overhead) flight's original spot, and whether an off-screen
+// magenta marker is currently drawn there. When the tracked plane dead-reckons
+// off the screen while its view is still up, we draw a static magenta marker
+// at where it was first tracked so the user still knows where it is.
+float g_trackedOrigDx = 0, g_trackedOrigDy = 0;
+bool  g_trackedOrigValid = false;
+bool  g_trackedOffOn = false;
 
 // Settings (persisted)
 float g_radiusMi = 3.5;
@@ -353,6 +377,11 @@ bool connected = false;
 char lastErr[40] = "connecting...";
 
 unsigned long lastPoll = 0;
+// millis() when the last flight fetch actually completed (data shown). The
+// countdown bar is referenced to this instead of lastPoll so it drains to
+// empty exactly when the freshly-fetched flight appears, rather than a fetch
+// latency (~1s) after the poll was merely scheduled.
+unsigned long g_lastData = 0;
 unsigned long lastClockDraw = 0;
 unsigned long g_lastWeather = 0;
 const unsigned long WEATHER_REFRESH_MS = 10UL * 60UL * 1000UL;
@@ -611,7 +640,7 @@ void netTask(void* p) {
     // User-initiated update check gets priority so the About page responds
     // quickly even while background fetches (flights/weather/pool) are queued.
     if (netWantUpdateCheck) { netWantUpdateCheck=false; netBusy=true; checkForUpdate(); netBusy=false; netUpdated=true; }
-    else if (netWantFlights)     { netWantFlights = false;     netBusy = true; fetchFlights();      netBusy = false; netUpdated = true; }
+    else if (netWantFlights)     { netWantFlights = false;     netBusy = true; fetchFlights();      netBusy = false; netUpdated = true; g_lastData = millis(); }
     else if (netWantLocation){ netWantLocation = false;   netBusy = true; fetchIpLocation();    netBusy = false; netUpdated = true; }
     else if (netWantWeather) { netWantWeather = false;    netBusy = true; fetchWeather();       netBusy = false; netUpdated = true; }
     else if (netWantPoolDevices){ netWantPoolDevices = false; netBusy = true; fetchGoveeDevices(); netBusy = false; netUpdated = true; }
@@ -637,11 +666,18 @@ void fetchFlights() {
   sec.setCACert(kISRGRootCAs);
   HTTPClient http;
   char osurl[240];
-  // dynamic bbox around current location (0.5 deg ~ 35 mi)
-  float d = 0.45f;
+  // Bound the query to what the radar can actually draw: the ring is g_radiusMi
+  // and we keep/track planes out to 2x radius (min 8 mi), so a box that large is
+  // all we need. A wider box returns far more aircraft than we keep, which blew
+  // the 48KB parse cap ("Json NoMemory") or truncated the body ("Json
+  // IncompleteInput"). Widen longitude by 1/cos(lat) so the box is a true circle
+  // on the ground and doesn't clip planes due east/west.
+  const float bboxMi = max(g_radiusMi * 2.0f, 8.0f);
+  const float dLat = bboxMi / 69.0f;                        // ~1 deg lat ~ 69 mi
+  const float dLon = dLat / cosf(g_lat * PI / 180.0f);
   snprintf(osurl, sizeof osurl,
     "https://opensky-network.org/api/states/all?lamin=%.4f&lomin=%.4f&lamax=%.4f&lomax=%.4f",
-    g_lat - d, g_lon - d, g_lat + d, g_lon + d);
+    g_lat - dLat, g_lon - dLon, g_lat + dLat, g_lon + dLon);
   if (!http.begin(sec, osurl)) {
     g_osHandshakeFailed = true;
     snprintf(lastErr, sizeof lastErr, "tls setup");
@@ -741,6 +777,7 @@ void fetchFlights() {
     JsonVariant altV = st[7];
     JsonVariant ogV = st[8];
     JsonVariant velV = st[9];
+    JsonVariant hdgV = st[10];   // true_track (deg), null if not reported
 
     if (csV.isNull() || lonV.isNull() || latV.isNull() || ogV.isNull()) continue;
     bool onGround = ogV.as<bool>();
@@ -753,10 +790,9 @@ void fetchFlights() {
     // altitude ceiling filter
     if (g_ceilingFt > 0 && altM * 3.28084f > g_ceilingFt) continue;
 
-    // rough radar range: keep planes within 2x radius (or 15 mi) for the display
+    // rough radar range: keep planes within the fetched bbox (2x radius, min 8 mi)
     float distMi = hav(g_lat, g_lon, lat, lon);
-    float radarRange = max(g_radiusMi * 2.0f, 8.0f);
-    if (distMi > radarRange) continue;
+    if (distMi > bboxMi) continue;
 
     Plane &p = planes[planeCount++];
     JsonVariant icaoV = st[0];
@@ -767,6 +803,8 @@ void fetchFlights() {
     p.distMi = distMi;
     p.altFt = (int)round(altM * 3.28084f);
     p.spdKt = velV.isNull() ? 0 : (int)round(velV.as<float>() * 1.94384f);
+    p.hdgDeg = hdgV.isNull() ? -1.0f : hdgV.as<float>();
+    p.lastStepMs = millis();   // dead-reckoning starts fresh from real data
     // dx = east miles, dy = north miles
     float dlat = (lat - g_lat);
     float dlon = (lon - g_lon) * cos(g_lat * PI / 180.0f);
@@ -790,9 +828,11 @@ void fetchFlights() {
     strncpy(g_lastFlight.icao24, planes[0].icao24, 6);     g_lastFlight.icao24[6]   = 0;
     g_lastFlight.altFt  = planes[0].altFt;
     g_lastFlight.spdKt  = planes[0].spdKt;
+    g_lastFlight.hdgDeg = planes[0].hdgDeg;
     g_lastFlight.distMi = planes[0].distMi;
     g_lastFlight.dxMi   = planes[0].dxMi;
     g_lastFlight.dyMi   = planes[0].dyMi;
+    g_lastFlight.tickMs = planes[0].lastStepMs;
     if (!g_routeBusy) {
       g_lastFlight.origin[0] = 0; strncpy(g_lastFlight.origin, g_routeOrigin.c_str(), 5); g_lastFlight.origin[5] = 0;
       g_lastFlight.dest[0]   = 0; strncpy(g_lastFlight.dest,   g_routeDest.c_str(),   5); g_lastFlight.dest[5]   = 0;
@@ -805,6 +845,12 @@ void fetchFlights() {
       g_routeOrigin = "";
       g_routeDest = "";
       ledFlashedIcao[0] = 0;
+      // Remember where this tracked flight was when it first appeared, so that
+      // if it later dead-reckons off-screen we can show a static marker there.
+      g_trackedOrigDx = planes[0].dxMi;
+      g_trackedOrigDy = planes[0].dyMi;
+      g_trackedOrigValid = true;
+      g_trackedOffOn = false;
     }
     // Fetch the route automatically the first time this plane is overhead, and
     // cache it (fetchRoute sets g_routeFetched=true, so it runs once per plane).
@@ -981,6 +1027,8 @@ void updateDashboard() {
   }
   if (g_screen == SCR_DASH && g_showTimer && g_trackEnabled) drawCountdownBar(); // updates the bar in place
   drawAutoUpdateStatus();
+  // Dead-reckon the radar blips forward and redraw them in place.
+  stepRadar();
 }
 
 // Draw the auto-update status line at the bottom-left of the dashboard.
@@ -1032,6 +1080,9 @@ void drawDashboard() {
   } else {
     drawIdle();
   }
+  // Record whether a radar is actually on screen so the per-second
+  // dead-reckoning update only moves blips here (never on the idle view).
+  g_radarShown = overhead;
 
   // Red border while anonymous or when OpenSky credentials are rejected
   drawAuthBorder();
@@ -1092,7 +1143,11 @@ void drawCountdownBar() {
   int x = 303, w = 14, topY = HEADER_H + 2, botY = 200;
   int h = botY - topY;
   unsigned long now = millis();
-  unsigned long elapsed = (now >= lastPoll) ? (now - lastPoll) : 0;
+  // Reference the bar to when the last flight data was shown (g_lastData) so
+  // it reaches empty exactly when the next fetch's flight appears, instead of
+  // draining a fetch-latency (~1s) before the flight shows.
+  unsigned long ref = g_lastData ? g_lastData : lastPoll;
+  unsigned long elapsed = (now >= ref) ? (now - ref) : 0;
   unsigned long period = (unsigned long)g_pollSec * 1000UL;
   float frac = 1.0f;
   if (period > 0) frac = 1.0f - (float)elapsed / (float)period;
@@ -1274,8 +1329,12 @@ void drawFlightInfo(Plane& p) {
   }
 }
 
-void drawRadar() {
-  int cx = 235, cy = 155, r = 48;
+// Shared radar geometry: the dashboard overhead radar and the flight-detail
+// radar both use the same center/radius, so blips can be redrawn in place.
+static const int kRadarCX = 235, kRadarCY = 155, kRadarR = 48;
+
+// Draw the static radar rings, crosshairs and range label.
+void drawRadarFrame(int cx, int cy, int r) {
   tft.drawCircle(cx, cy, r, TFT_DARKGREY);
   tft.drawCircle(cx, cy, r / 2, TFT_DARKGREY);
   tft.drawLine(cx - r, cy, cx + r, cy, TFT_DARKGREY);
@@ -1285,17 +1344,252 @@ void drawRadar() {
   tft.setCursor(cx - 12, cy + r + 6);
   if (g_metric) tft.printf("%dkm", (int)round(g_radiusMi * 1.60934f));
   else tft.printf("%dmi", (int)round(g_radiusMi));
+}
 
+// Bounding radius of a blip (plane icon or its dot fallback), used both for
+// the erase pass and the "would this land on an on-screen object" check. A
+// fixed circle this size covers the icon at any rotation (it only ever rotates
+// in place around its own center). Sized for the largest icon, the tracked
+// flight, which is drawn bigger to stand out.
+const int kBlipR = 11;
+// Scale multipliers for the radar plane icons. The tracked flight is drawn
+// bigger so it stands out from the other (smaller) planes.
+const float kOtherScale   = 1.0f;   // non-tracked flights
+const float kTrackedScale = 1.6f;   // tracked (overhead) flight
+
+// Returns true if a blip centered at (px,py) would overlap an on-screen object
+// (header text, flight-info text, airline logo, or countdown bar). Such blips
+// are skipped instead of drawn, so we never later erase a black hole through
+// that object. Boxes are padded by kBlipR so a blip at the edge can't clip an
+// object.
+bool blipBlocked(int px, int py) {
+  const int R = kBlipR;
+  if (py <= 33 + R) return true;                                     // header band
+  if (inRect(px, py, -R, 34 - R, 171 + R, 208 + R)) return true;     // flight-info text
+  if (inRect(px, py, 222 - R, 34 - R, 320 + R, 93 + R)) return true; // airline logo
+  if (g_screen == SCR_DASH) {
+    // The countdown bar only occupies the right strip while the timer is shown;
+    // when it's toggled off, that space is free for blips to draw in.
+    if (g_showTimer && g_trackEnabled &&
+        inRect(px, py, 302 - R, 34 - R, 320 + R, 200 + R)) return true;  // countdown bar
+    // The settings cog is always drawn on the dashboard, so it stays protected.
+    if (inRect(px, py, 296 - R, 200 - R, 320 + R, 213 + R)) return true; // settings cog
+  }
+  if (py >= 213) return true;                                        // bottom status/border strip
+  return false;
+}
+
+// A single point offset from a blip's center, in the (forward, right) frame
+// of its heading, converted to screen pixels.
+void planePoint(float fx, float fy, float rx, float ry, float f, float r,
+                int cx, int cy, int16_t& outX, int16_t& outY) {
+  outX = cx + (int16_t)round(fx * f + rx * r);
+  outY = cy + (int16_t)round(fy * f + ry * r);
+}
+
+// Draw a small airplane silhouette (nose, wings, tail) pointing along
+// hdgDeg (0 = north, clockwise), with a black outline so overlapping blips
+// of different colors stay legible. Falls back to a plain outlined dot when
+// heading is unknown (-1) so we still show something for those flights.
+void drawPlaneIcon(int cx, int cy, float hdgDeg, uint16_t color, float scale) {
+  if (hdgDeg < 0.0f) {
+    int r = max(1, (int)round(3.0f * scale));
+    tft.fillCircle(cx, cy, r, color);
+    tft.drawCircle(cx, cy, r, TFT_BLACK);
+    return;
+  }
+  float rad = hdgDeg * PI / 180.0f;
+  // Forward (nose) and right-wing unit vectors in screen pixels; matches the
+  // dead-reckoning convention (0=north/up, clockwise).
+  float fx = sin(rad), fy = -cos(rad);
+  float rx = cos(rad), ry = sin(rad);
+  float s = scale;
+
+  // Nose/wings form the front arrowhead; the tail triangle shares the same
+  // back-edge line (f = -1) as the wings so the two shapes read as one
+  // silhouette instead of two disconnected blobs. `s` scales the whole icon.
+  int16_t noseX, noseY, wingLX, wingLY, wingRX, wingRY;
+  int16_t tailX, tailY, tailBaseLX, tailBaseLY, tailBaseRX, tailBaseRY;
+  planePoint(fx, fy, rx, ry,  5.0f * s,  0.0f,      cx, cy, noseX, noseY);
+  planePoint(fx, fy, rx, ry, -1.4f * s, -4.5f * s,  cx, cy, wingLX, wingLY);
+  planePoint(fx, fy, rx, ry, -1.4f * s,  4.5f * s,  cx, cy, wingRX, wingRY);
+  planePoint(fx, fy, rx, ry, -5.5f * s,  0.0f,      cx, cy, tailX, tailY);
+  planePoint(fx, fy, rx, ry, -1.4f * s, -1.7f * s,  cx, cy, tailBaseLX, tailBaseLY);
+  planePoint(fx, fy, rx, ry, -1.4f * s,  1.7f * s,  cx, cy, tailBaseRX, tailBaseRY);
+
+  tft.fillTriangle(noseX, noseY, wingLX, wingLY, wingRX, wingRY, color);
+  tft.fillTriangle(tailX, tailY, tailBaseLX, tailBaseLY, tailBaseRX, tailBaseRY, color);
+  tft.drawTriangle(noseX, noseY, wingLX, wingLY, wingRX, wingRY, TFT_BLACK);
+  tft.drawTriangle(tailX, tailY, tailBaseLX, tailBaseLY, tailBaseRX, tailBaseRY, TFT_BLACK);
+}
+
+// Draw a single radar blip at its offset from center, clipped to the screen.
+// On success it records the on-screen pixel (outPx/outPy) so a later in-place
+// update can erase it. Returns false (and draws nothing) if the blip is
+// off-screen or would land on top of an on-screen object.
+bool plotRadarBlip(int cx, int cy, float scale, float dxMi, float dyMi, float distMi,
+                   int& outPx, int& outPy, uint16_t color, float hdgDeg, float glyphScale) {
+  int px = cx + (int)(dxMi * scale);
+  int py = cy - (int)(dyMi * scale);
+  if (px < 0 || px > 319 || py < 0 || py > 239) return false;
+  if (blipBlocked(px, py)) return false;
+  drawPlaneIcon(px, py, hdgDeg, color, glyphScale);
+  outPx = px; outPy = py;
+  return true;
+}
+
+// Erase a previously drawn blip so its old pixel doesn't leave a trail. Only
+// safe because blips are never drawn over on-screen objects.
+void eraseRadarBlip(int px, int py) { tft.fillCircle(px, py, kBlipR, TFT_BLACK); }
+
+// The overhead flight (planes[0], whose details are on the left) is cyan so
+// it's easy to pick out; the rest stay red (in range) / green (outside).
+uint16_t blipColor(const Plane& p, int index) {
+  return (index == 0) ? TFT_CYAN
+         : ((p.distMi <= g_radiusMi) ? TFT_RED : TFT_GREEN);
+}
+
+// Draw the tracked (overhead) flight, always on top. While it's on screen it
+// draws the larger cyan icon; once it dead-reckons off the screen (but before
+// the view is dismissed), it draws a static magenta icon at the spot where it
+// was first tracked so the user can still see where it is.
+void drawTrackedBlip(int cx, int cy, float scale, Plane& p) {
+  int px = cx + (int)(p.dxMi * scale);
+  int py = cy - (int)(p.dyMi * scale);
+  if (px >= 0 && px <= 319 && py >= 0 && py <= 239) {
+    g_trackedOffOn = false;
+    p.blipOn = plotRadarBlip(cx, cy, scale, p.dxMi, p.dyMi, p.distMi,
+                             p.lastPx, p.lastPy, TFT_CYAN, p.hdgDeg, kTrackedScale);
+  } else if (g_trackedOrigValid) {
+    p.blipOn = false;
+    int opx = cx + (int)(g_trackedOrigDx * scale);
+    int opy = cy - (int)(g_trackedOrigDy * scale);
+    drawPlaneIcon(opx, opy, p.hdgDeg, TFT_MAGENTA, kTrackedScale);
+    g_trackedOffOn = true;
+  } else {
+    p.blipOn = false;
+    g_trackedOffOn = false;
+  }
+}
+
+// Full radar draw for the dashboard overhead view. Draws the static frame plus
+// every plane blip and records each blip's pixel. Called from a full screen
+// redraw (the screen is already black, so no region clear is needed here).
+void drawRadar() {
+  int cx = kRadarCX, cy = kRadarCY, r = kRadarR;
+  drawRadarFrame(cx, cy, r);
+  float scale = r / g_radiusMi;
+  // Draw other flights first, then the tracked flight last so its cyan dot is
+  // always painted on top and can't be hidden by a neighbor drawn after it.
+  for (int i = 1; i < planeCount; i++) {
+    Plane &p = planes[i];
+    p.blipOn = plotRadarBlip(cx, cy, scale, p.dxMi, p.dyMi, p.distMi,
+                             p.lastPx, p.lastPy, blipColor(p, i), p.hdgDeg, kOtherScale);
+  }
+  if (planeCount > 0) drawTrackedBlip(cx, cy, scale, planes[0]);
+  tft.fillCircle(cx, cy, 3, TFT_WHITE); // you
+}
+
+// In-place per-second update for the dashboard radar: erase each blip's old
+// pixel, restore the static frame (in case a blip crossed a ring/label pixel),
+// then redraw blips at their dead-reckoned positions. Blips only ever draw
+// over the black background or the radar frame itself, so the erase never
+// damages other on-screen objects and no trails are left behind.
+void drawRadarInPlace() {
+  int cx = kRadarCX, cy = kRadarCY, r = kRadarR;
   float scale = r / g_radiusMi;
   for (int i = 0; i < planeCount; i++) {
     Plane &p = planes[i];
-    int px = cx + (int)(p.dxMi * scale);
-    int py = cy - (int)(p.dyMi * scale);
-    if (px < 0 || px > 319 || py < 0 || py > 239) continue;
-    uint16_t col = (p.distMi <= g_radiusMi) ? TFT_RED : TFT_GREEN;
-    tft.fillCircle(px, py, 3, col);
+    if (p.blipOn) eraseRadarBlip(p.lastPx, p.lastPy);
   }
+  // Erase the off-screen magenta marker too (it lives at the tracked flight's
+  // original spot).
+  if (g_trackedOffOn && g_trackedOrigValid) {
+    int opx = cx + (int)(g_trackedOrigDx * scale);
+    int opy = cy - (int)(g_trackedOrigDy * scale);
+    eraseRadarBlip(opx, opy);
+    g_trackedOffOn = false;
+  }
+  drawRadarFrame(cx, cy, r);
+  // Draw other flights first, then the tracked flight last so its cyan dot is
+  // always on top (see drawRadar).
+  for (int i = 1; i < planeCount; i++) {
+    Plane &p = planes[i];
+    p.blipOn = plotRadarBlip(cx, cy, scale, p.dxMi, p.dyMi, p.distMi,
+                             p.lastPx, p.lastPy, blipColor(p, i), p.hdgDeg, kOtherScale);
+  }
+  if (planeCount > 0) drawTrackedBlip(cx, cy, scale, planes[0]);
   tft.fillCircle(cx, cy, 3, TFT_WHITE); // you
+}
+
+// Full radar draw for the flight-detail page (single plane).
+void drawFlightDetailRadar() {
+  int cx = kRadarCX, cy = kRadarCY, r = kRadarR;
+  drawRadarFrame(cx, cy, r);
+  // Cyan so the flight whose details are shown is easy to pick out.
+  g_flightBlipOn = plotRadarBlip(cx, cy, r / g_radiusMi,
+                                 g_lastFlight.dxMi, g_lastFlight.dyMi, g_lastFlight.distMi,
+                                 g_flightLastPx, g_flightLastPy, TFT_CYAN, g_lastFlight.hdgDeg,
+                                 kTrackedScale);
+  tft.fillCircle(cx, cy, 3, TFT_WHITE); // you
+}
+
+// In-place per-second update for the flight-detail radar blip.
+void drawFlightDetailRadarInPlace() {
+  int cx = kRadarCX, cy = kRadarCY, r = kRadarR;
+  if (g_flightBlipOn) eraseRadarBlip(g_flightLastPx, g_flightLastPy);
+  drawRadarFrame(cx, cy, r);
+  g_flightBlipOn = plotRadarBlip(cx, cy, r / g_radiusMi,
+                                 g_lastFlight.dxMi, g_lastFlight.dyMi, g_lastFlight.distMi,
+                                 g_flightLastPx, g_flightLastPy, TFT_CYAN, g_lastFlight.hdgDeg,
+                                 kTrackedScale);
+  tft.fillCircle(cx, cy, 3, TFT_WHITE); // you
+}
+
+// Advance an estimated east/north offset and distance by dtMs of straight,
+// level flight at the given heading and speed. A missing heading (-1) or zero
+// speed means we can't extrapolate, so the position is left unchanged.
+void deadReckonPosition(float& dxMi, float& dyMi, float& distMi,
+                        float hdgDeg, int spdKt, unsigned long dtMs) {
+  if (hdgDeg < 0.0f || spdKt <= 0 || dtMs == 0) return;
+  float dtHr = dtMs / 3600000.0f;
+  float spdMph = spdKt * 1.15078f;
+  float rad = hdgDeg * PI / 180.0f;
+  dyMi += spdMph * cos(rad) * dtHr;   // north component
+  dxMi += spdMph * sin(rad) * dtHr;   // east  component
+  distMi = sqrtf(dxMi * dxMi + dyMi * dyMi);
+}
+
+// Per-second dead-reckoning for the radar. Every plane (and the flight-detail
+// snapshot) is advanced by the time since its last known position, then the
+// active radar is redrawn in place. Deltas are capped so a long absence (e.g.
+// another screen was up) never extrapolates into a wild jump; the next OpenSky
+// poll overwrites positions with real data anyway.
+void stepRadar() {
+  unsigned long now = millis();
+  for (int i = 0; i < planeCount; i++) {
+    Plane &p = planes[i];
+    unsigned long dt = now - p.lastStepMs;
+    p.lastStepMs = now;
+    if (dt > 2000) continue;          // gap too long: don't extrapolate
+    deadReckonPosition(p.dxMi, p.dyMi, p.distMi, p.hdgDeg, p.spdKt, dt);
+  }
+  if (g_lastFlight.valid) {
+    unsigned long dt = now - g_lastFlight.tickMs;
+    g_lastFlight.tickMs = now;
+    if (dt <= 2000)
+      deadReckonPosition(g_lastFlight.dxMi, g_lastFlight.dyMi, g_lastFlight.distMi,
+                         g_lastFlight.hdgDeg, g_lastFlight.spdKt, dt);
+  }
+
+  // Move blips in place only on a screen that is actually showing a radar;
+  // g_radarShown is set by the full draw, so we never paint a phantom radar
+  // onto the idle dashboard during the brief window before its full redraw.
+  if (g_screen == SCR_FLIGHTDETAIL) {
+    if (g_radarShown) drawFlightDetailRadarInPlace();
+  } else if (g_screen == SCR_DASH) {
+    if (g_radarShown) drawRadarInPlace();
+  }
 }
 
 // Full-screen page that recalls the last overhead flight (see SCR_FLIGHTDETAIL).
@@ -1382,26 +1676,8 @@ void drawFlightDetailPage() {
   }
 
   // Radar showing the recalled plane's position (red = was within radius).
-  {
-    int cx = 235, cy = 155, r = 48;
-    tft.drawCircle(cx, cy, r, TFT_DARKGREY);
-    tft.drawCircle(cx, cy, r / 2, TFT_DARKGREY);
-    tft.drawLine(cx - r, cy, cx + r, cy, TFT_DARKGREY);
-    tft.drawLine(cx, cy - r, cx, cy + r, TFT_DARKGREY);
-    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-    tft.setTextFont(2);
-    tft.setCursor(cx - 12, cy + r + 6);
-    if (g_metric) tft.printf("%dkm", (int)round(g_radiusMi * 1.60934f));
-    else tft.printf("%dmi", (int)round(g_radiusMi));
-    if (g_lastFlight.valid) {
-      float scale = r / g_radiusMi;
-      int px = cx + (int)(g_lastFlight.dxMi * scale);
-      int py = cy - (int)(g_lastFlight.dyMi * scale);
-      uint16_t col = (g_lastFlight.distMi <= g_radiusMi) ? TFT_RED : TFT_GREEN;
-      tft.fillCircle(px, py, 3, col);
-    }
-    tft.fillCircle(cx, cy, 3, TFT_WHITE); // you
-  }
+  if (g_lastFlight.valid) drawFlightDetailRadar();
+  g_radarShown = g_lastFlight.valid;
 }
 
 // Settings screen + sub-screens (Flight Tracker, Sleep Mode, Reset confirm)
@@ -1654,9 +1930,13 @@ void handleTouch() {
     if (inRect(x, y, 278, 184, 320, 234)) { g_screen = SCR_SETTINGS; dirty = true; return; }
 
     // Back button (upper-right) or the countdown bar dismisses the overhead
-    // flight back to idle. The countdown-bar tap zone only applies while the
-    // timer is shown (so there is no invisible region when it is hidden).
-    if (overhead &&
+    // flight back to idle. Gate on g_radarShown (is the overhead flight view
+    // actually displayed?) rather than the live `overhead` data condition: as
+    // dead-reckoning moves the flight out of radius, `overhead` can go false
+    // while the view is still on screen, which would make the Back button do
+    // nothing until a later redraw. The countdown-bar tap zone only applies
+    // while the timer is shown (so there is no invisible region when hidden).
+    if (g_radarShown &&
         ((x >= 265 && y >= 4 && x <= 315 && y <= 24) ||  // Back button
          (g_showTimer && x >= 296 && y >= HEADER_H + 2 && y <= 200))) {  // countdown bar
       g_suppressFlight = true;
@@ -2130,9 +2410,10 @@ void loop() {
     dirty = true;
   }
 
-  // Refresh the dashboard once a second. Only the clock and countdown bar are
-  // redrawn (in place) to avoid flicker; the rest of the screen is untouched.
-  if (g_screen == SCR_DASH && now - lastClockDraw >= 1000) {
+  // Refresh the dashboard and flight-detail page once a second. The header
+  // clock/countdown bar are redrawn in place to avoid flicker, and the radar
+  // blips are dead-reckoned forward.
+  if ((g_screen == SCR_DASH || g_screen == SCR_FLIGHTDETAIL) && now - lastClockDraw >= 1000) {
     lastClockDraw = now;
     updateDashboard();
   }
