@@ -76,7 +76,7 @@ void drawWifiScreen() {
   else if (g_wifiSub == 7) drawKeyboard("Sleep end (HHMM)", g_sleepEndStr, false);
   else if (g_wifiSub == 8) drawKeyboard("Wake duration (min)", g_wakeStr, false);
   else if (g_wifiSub == 10) drawKeyboard("Lat,Lon", g_latLonStr, false);
-  else if (g_wifiSub == 11) drawKeyboard("Ignore airport", g_ignoreAirport, false);
+  else if (g_wifiSub == 11) drawKeyboard("Home airport", g_homeAirport, false);
   else if (g_wifiSub == 12) drawAddrStatus();
   else drawKeyboard("Govee API key", g_goveeKey, true);
 }
@@ -352,7 +352,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
     if (g_wifiSub == 6 || g_wifiSub == 7 || g_wifiSub == 8) { g_screen = SCR_SLEEP; dirty = true; return; }
     if (g_wifiSub == 9) { g_screen = SCR_POOL; dirty = true; return; }       // Govee key
     if (g_wifiSub == 10) { g_screen = SCR_LOCATION; dirty = true; return; }  // lat/lon
-    if (g_wifiSub == 11) { g_screen = SCR_FTRACKER; dirty = true; return; }   // ignore airport
+    if (g_wifiSub == 11) { g_screen = SCR_FTRACKER; dirty = true; return; }   // home airport
     g_wifiSub = 0; dirty = true; return;
   }
 
@@ -367,7 +367,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
     case 8: bp = &g_wakeStr; break;
     case 9: bp = &g_goveeKey; break;
     case 10: bp = &g_latLonStr; break;
-    case 11: bp = &g_ignoreAirport; break;
+    case 11: bp = &g_homeAirport; break;
     default: bp = &g_addrSearch; break;
   }
   String& buf = *bp;
@@ -480,7 +480,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
         }
         g_screen = SCR_LOCATION; dirty = true;
       }
-      else if (g_wifiSub == 11) { saveIgnoreAirport(); g_screen = SCR_FTRACKER; dirty = true; }
+      else if (g_wifiSub == 11) { saveHomeAirport(); g_screen = SCR_FTRACKER; dirty = true; }
     }
     return;
   }
@@ -535,7 +535,7 @@ bool provisionKey(const String& key, const String& val) {
   else if (key == "WIFI_PASSWORD")   { prefs.putString("pass",   val); g_savedPass = val; return true; }
   else if (key == "OPENSKY_CLIENT_ID")     { prefs.putString("oscid",  val); g_osClientId     = val; return true; }
   else if (key == "OPENSKY_CLIENT_SECRET") { prefs.putString("ocssec", val); g_osClientSecret = val; return true; }
-  else if (key == "IGNORE_AIRPORT")        { String v = val; v.toUpperCase(); prefs.putString("ignoreap", v); g_ignoreAirport = v; return true; }
+  else if (key == "HOME_AIRPORT")          { String v = val; v.toUpperCase(); prefs.putString("homeap", v); g_homeAirport = v; return true; }
   else if (key == "GOVEE_KEY")       { prefs.putString("govee",  val); g_goveeKey  = val; return true; }
   return false;
 }
@@ -581,11 +581,11 @@ void saveOsCreds() {
   prefs.end();
 }
 
-// Persist the "ignore airport" route-display setting to NVS (uppercased).
-void saveIgnoreAirport() {
-  g_ignoreAirport.toUpperCase();
+// Persist the "home airport" route-display setting to NVS (uppercased).
+void saveHomeAirport() {
+  g_homeAirport.toUpperCase();
   prefs.begin("flight", false);
-  prefs.putString("ignoreap", g_ignoreAirport);
+  prefs.putString("homeap", g_homeAirport);
   prefs.end();
 }
 

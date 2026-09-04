@@ -457,7 +457,7 @@ Settings are stored in NVS under the `"flight"` namespace (see `setup()` in
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `timer` | bool | `false` | Show the dashboard countdown/timer bar (General → Enable timer). |
+| `timer` | bool | `false` | Show the dashboard countdown/timer bar (Flight Tracker → Enable timer). |
 | `clkcol` | uint32 | `TFT_BLUE` | Dashboard clock-bar color (General → Clock Color). |
 
 `prefs.clear()` in the Reset handler removes **all** keys for both "All" and

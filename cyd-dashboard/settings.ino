@@ -177,6 +177,10 @@ static const char* const kHelpLines[] = {
   "and wakes on touch.",
   "",
   "GETTING STARTED",
+  "Upload a compiled image to",
+  "the device first - see",
+  "DEVELOPER.md for build and",
+  "flash instructions.",
   "First boot: the device",
   "  calibrates the touchscreen",
   "  then asks for your WiFi.",
@@ -193,6 +197,9 @@ static const char* const kHelpLines[] = {
   "the yellow 'anonymous'",
   "warning. Optional",
   "credentials below.",
+  "Airline logos (optional):",
+  "  see DEVELOPER.md ->",
+  "  'Airline logos'.",
   "",
   "TYPING",
   "On a keyboard, tap inside",
@@ -215,9 +222,8 @@ static const char* const kHelpLines[] = {
   "   generate an API key.",
   "",
   "SETTINGS GUIDE (defaults)",
-  "General: timer bar on/off;",
-  "   auto-update (on), clock",
-  "   color (blue).",
+  "General: auto-update (on),",
+  "   clock color (blue).",
   "Location: your coordinates;",
   "   IP guess on first boot.",
   "   Search Address keeps your",
@@ -226,8 +232,9 @@ static const char* const kHelpLines[] = {
   "Flight Tracker: on/off, units",
   "   (imperial), radius 3.5 mi,",
   "   ceiling 15000 ft, poll 60s,",
-  "   ignore airport, blink LED",
-  "   on noteworthy flight (on).",
+  "   timer bar on/off (off),",
+  "   home airport, blink LED on",
+  "   noteworthy flight (on).",
   "Sleep Mode: on; 10 PM - 8 AM,",
   "   wake 10 min.",
   "Pool Temp: off; add Govee key,",
@@ -346,7 +353,7 @@ static const uint16_t kClockColors[] = {
 };
 static const int kNumClockColors = sizeof(kClockColors) / sizeof(kClockColors[0]);
 static const int kClockSw = 46, kClockSh = 22, kClockGap = 4;
-static const int kClockX0 = 8, kClockY0 = 132;
+static const int kClockX0 = 8, kClockY0 = 44;
 static const int kClockPerRow = 6;
 
 void drawGeneral() {
@@ -362,34 +369,10 @@ void drawGeneral() {
   tft.setTextColor(TFT_WHITE, TFT_MAROON);
   tft.print("Back");
 
-  // Enable timer toggle
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextFont(2);
-  tft.setCursor(8, 44);
-  tft.print("Enable timer");
-  tft.setTextColor(g_showTimer ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
-  tft.setCursor(150, 44);
-  tft.print(g_showTimer ? "ON" : "OFF");
-  tft.fillRoundRect(230, 40, 82, 24, 5, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.setTextFont(1);
-  tft.setCursor(250, 47);
-  tft.print("Toggle");
-
-  // Explanation
-  tft.setTextFont(1);
-  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.setCursor(8, 76);
-  tft.print("Countdown bar on the dashboard.");
-  tft.setCursor(8, 88);
-  tft.print("Off hides it; data still refreshes");
-  tft.setCursor(8, 100);
-  tft.print("on the normal schedule.");
-
   // Clock Color: label + swatches (tap to change)
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextFont(2);
-  tft.setCursor(8, 112);
+  tft.setCursor(8, 40);
   tft.print("Clock Color");
   for (int i = 0; i < kNumClockColors; i++) {
     int row = i / kClockPerRow, col = i % kClockPerRow;
@@ -404,34 +387,28 @@ void drawGeneral() {
   // Auto-Update toggle
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextFont(2);
-  tft.setCursor(8, 188);
+  tft.setCursor(8, 112);
   tft.print("Auto-Update");
   tft.setTextColor(g_autoUpdate ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
-  tft.setCursor(150, 188);
+  tft.setCursor(150, 112);
   tft.print(g_autoUpdate ? "ON" : "OFF");
-  tft.fillRoundRect(230, 184, 82, 24, 5, TFT_NAVY);
+  tft.fillRoundRect(230, 108, 82, 24, 5, TFT_NAVY);
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(1);
-  tft.setCursor(250, 191);
+  tft.setCursor(250, 115);
   tft.print("Toggle");
 
   tft.setTextFont(1);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.setCursor(8, 216);
+  tft.setCursor(8, 140);
   tft.print("Checks for new firmware once");
-  tft.setCursor(8, 228);
+  tft.setCursor(8, 152);
   tft.print("a day and installs it.");
 }
 
 void handleGeneralTouch(uint16_t x, uint16_t y) {
   if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }
-  if (inRect(x, y, 230, 40, 312, 64)) {  // Enable timer toggle
-    g_showTimer = !g_showTimer;
-    prefs.begin("flight", false); prefs.putBool("timer", g_showTimer); prefs.end();
-    dirty = true;
-    return;
-  }
-  if (inRect(x, y, 230, 184, 312, 208)) {  // Auto-Update toggle
+  if (inRect(x, y, 230, 108, 312, 132)) {  // Auto-Update toggle
     g_autoUpdate = !g_autoUpdate;
     prefs.begin("flight", false); prefs.putBool("autoupd", g_autoUpdate); prefs.end();
     // Turning auto-update ON clears the last-scan date so it can try again today.
@@ -569,7 +546,8 @@ void drawFtracker() {
     drawSlider(142, "Ceiling", (float)g_ceilingFt, 3000, 30000, 1000, 0);
     drawSlider(180, "Poll (s)", (float)g_pollSec, 10, 300, 10, 0);
   } else {
-    // Page 2: Blink-for-flight toggle + Ignore-airport route setting + Credentials
+    // Page 2: Blink-for-flight toggle + Enable timer toggle + Home-airport
+    // route setting + Credentials
     // Blink for Flight toggle
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextFont(2);
@@ -584,18 +562,32 @@ void drawFtracker() {
     tft.setCursor(250, 43);
     tft.print("Toggle");
 
-    drawEditRow(76, "Ignore airport", g_ignoreAirport.length() ? g_ignoreAirport : "--");
+    // Enable timer toggle
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextFont(2);
+    tft.setCursor(8, 76);
+    tft.print("Enable timer");
+    tft.setTextColor(g_showTimer ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
+    tft.setCursor(150, 76);
+    tft.print(g_showTimer ? "ON" : "OFF");
+    tft.fillRoundRect(230, 72, 82, 24, 5, TFT_NAVY);
+    tft.setTextColor(TFT_WHITE, TFT_NAVY);
+    tft.setTextFont(1);
+    tft.setCursor(250, 79);
+    tft.print("Toggle");
+
+    drawEditRow(112, "Home airport", g_homeAirport.length() ? g_homeAirport : "--");
     tft.setTextFont(1);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-    tft.setCursor(8, 108);
+    tft.setCursor(8, 144);
     tft.print("Airport not shown in route data.");
-    tft.setCursor(8, 120);
+    tft.setCursor(8, 156);
     tft.print("Empty = show all (default).");
 
-    tft.fillRoundRect(10, 152, 300, 24, 6, TFT_NAVY);
+    tft.fillRoundRect(10, 188, 300, 24, 6, TFT_NAVY);
     tft.setTextColor(TFT_WHITE, TFT_NAVY);
     tft.setTextFont(2);
-    tft.setCursor(20, 158);
+    tft.setCursor(20, 194);
     tft.print("OpenSky Credentials");
   }
 
@@ -656,13 +648,19 @@ void handleFtrackerTouch(uint16_t x, uint16_t y) {
     dirty = true;
     return;
   }
-  if (inRect(x, y, 270, 76, 312, 100)) {  // Edit ignore-airport
+  if (inRect(x, y, 230, 72, 312, 96)) {  // Enable timer toggle
+    g_showTimer = !g_showTimer;
+    prefs.begin("flight", false); prefs.putBool("timer", g_showTimer); prefs.end();
+    dirty = true;
+    return;
+  }
+  if (inRect(x, y, 270, 112, 312, 136)) {  // Edit home airport
     g_screen = SCR_WIFI;
     g_wifiSub = 11;
     dirty = true;
     return;
   }
-  if (inRect(x, y, 10, 152, 310, 176)) {  // OpenSky credentials
+  if (inRect(x, y, 10, 188, 310, 212)) {  // OpenSky credentials
     g_screen = SCR_WIFI;
     g_wifiSub = 3;
     dirty = true;
