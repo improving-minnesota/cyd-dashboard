@@ -16,6 +16,10 @@ extern unsigned long g_lastWeather;
 void setupNTP() {
   // US Central (UTC-6, DST +1)
   configTime(-6 * 3600, 3600, "pool.ntp.org", "time.nist.gov");
+  // From this point on getLocalTime() applies the correct local offset.
+  // Before this call it would report UTC, which could land inside the sleep
+  // window right after a soft reset (OTA) and cause an unwanted deep sleep.
+  g_timeReady = true;
 }
 
 String fmtClock() {

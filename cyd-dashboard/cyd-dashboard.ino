@@ -245,6 +245,9 @@ int  g_wakeMin     = 10;                        // wake duration after a touch
 // Sleep runtime state
 bool g_displayOff = false;
 unsigned long wakeUntil = 0;                  // 0 = not in a user-triggered wake
+// True once configTime()/setupNTP() has run in THIS boot, so the timezone
+// offset is applied to getLocalTime(). Set by setupNTP() (weather.ino).
+bool g_timeReady = false;
 
 // Pool Temp / Govee integration (persisted + runtime)
 String g_goveeKey = "";       // Govee Open API key
@@ -2197,8 +2200,14 @@ bool inSleepWindowNow() {
   // sntp_get_sync_status() is NOT used here: Arduino-ESP32's configTime()
   // never drives it to SNTP_SYNC_STATUS_COMPLETED (confirmed on-device - it
   // stays SNTP_SYNC_STATUS_RESET forever even once the clock is correctly
-  // synced), which would permanently block sleep. Use the same "epoch looks
-  // sane" check already used elsewhere in this file instead.
+  // synced), which would permanently block sleep.
+  // The epoch check below alone is NOT enough: after a soft reset (OTA) the
+  // RTC retains a valid-looking UTC epoch, so time() clears it even though the
+  // timezone isn't applied yet. Until setupNTP()/configTime() has run in THIS
+  // boot, getLocalTime() reports UTC, which can land inside the sleep window
+  // and cause an unwanted sleep. g_timeReady (set by setupNTP) gates on the
+  // timezone actually being applied; combine it with the epoch check.
+  if (!g_timeReady) return false;
   if (time(nullptr) < 1600000000L) return false;
   struct tm t;
   // Explicit 0ms timeout: called every main-loop iteration, and
