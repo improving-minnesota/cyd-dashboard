@@ -914,7 +914,8 @@ void drawStatusBorder(const char* label, uint16_t col) {
 
   // tag on the bottom-right corner of the frame
   tft.fillRect(150, 232, 170, 8, col);
-  tft.setTextColor(TFT_WHITE, col);
+  // Black text is legible on the yellow anonymous-warning border; white on red.
+  tft.setTextColor((col == TFT_YELLOW) ? TFT_BLACK : TFT_WHITE, col);
   tft.setTextFont(1);
   tft.setCursor(154, 233);
   tft.print(label);
