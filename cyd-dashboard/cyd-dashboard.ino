@@ -1598,6 +1598,17 @@ void setup() {
   esp_sleep_wakeup_cause_t wakeCause = wokeFromDeepSleep
       ? esp_sleep_get_wakeup_cause() : ESP_SLEEP_WAKEUP_UNDEFINED;
 #if TOUCH_IRQ_ENABLED
+  // enterDeepSleep() latches TOUCH_CS_PIN low via gpio_hold_en() so the
+  // XPT2046 stays selected and can assert its IRQ during sleep. That hold
+  // survives the reset caused by waking from deep sleep, so it must be
+  // released here - otherwise CS stays stuck low forever, keeping the touch
+  // controller permanently selected. That leaves its IRQ line asserted
+  // (LOW) indefinitely, and since the EXT0 wakeup below is level-triggered
+  // on LOW, every later deep-sleep attempt would wake right back up
+  // immediately, so the device would never actually stay asleep.
+  gpio_hold_dis((gpio_num_t)TOUCH_CS_PIN);
+  pinMode(TOUCH_CS_PIN, OUTPUT);
+  digitalWrite(TOUCH_CS_PIN, HIGH);   // deselect the touch controller
   // A touch wake is normally reported as ESP_SLEEP_WAKEUP_EXT0. But the cause
   // register isn't always reliable here, so also honor the wake duration when
   // the touch IRQ line is actually asserted (finger still down) at boot.
