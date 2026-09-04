@@ -40,17 +40,23 @@ without modification**. Developers can find the wiring and flashing details in
 
 ## Getting started
 
-1. **Power it up.** The first boot runs a short setup wizard: it calibrates the
+1. **Flash a compiled image to the device.** The firmware isn't preinstalled —
+   you must upload a compiled image to the board over USB. Building and
+   flashing instructions are in [DEVELOPER.md](DEVELOPER.md).
+2. **Power it up.** The first boot runs a short setup wizard: it calibrates the
    touchscreen (if no calibration is saved), then walks you through entering
    your WiFi name and password. To change WiFi later, open **Settings → WiFi**.
-2. If the wizard is skipped or you need to redo a step: calibrate via
+3. If the wizard is skipped or you need to redo a step: calibrate via
    **Settings → General → Calibrate Touch** (or hold anywhere on the screen for
    10 s), and connect WiFi via **Settings → WiFi**.
-3. **Weather and flights work out of the box.** Optionally add your own OpenSky
+4. **Weather and flights work out of the box.** Optionally add your own OpenSky
    credentials to raise the flight-API rate limit and remove the yellow warning regarding anonymous usage.
-4. **Govee pool thermometer (optional):** if you have one, add your Govee API
+5. **Govee pool thermometer (optional):** if you have one, add your Govee API
    key on **Settings → Pool Temp**, then tap **Fetch Devices** to select your
    thermometer.
+6. **Airline logos (optional):** consider adding airline logos so the flight
+   view shows each carrier's icon. See [DEVELOPER.md](DEVELOPER.md) →
+   "Airline logos" for how to provision them.
 
 Where to get each credential is explained below.
 
@@ -83,10 +89,10 @@ Where to get each credential is explained below.
 
 Defaults for a freshly reset device are shown with each setting.
 
-- **General** — show or hide the countdown/timer bar on the dashboard, set the
-  **Clock Color** (the dashboard's clock/header bar), and toggle **Auto-Update**
-  (whether the device checks for and installs firmware updates). Defaults: timer
-  **off**, clock color **blue**, auto-update **on** (for release builds).
+- **General** — set the **Clock Color** (the dashboard's clock/header bar) and
+  toggle **Auto-Update** (whether the device checks for and installs firmware
+  updates). Defaults: clock color **blue**, auto-update **on** (for release
+  builds).
 - **Location** — set your coordinates so weather and flights are accurate. Use
   **Set** to type them, **Search Address**, or **Find by IP**. Default: none —
   on first boot it's guessed from your IP, otherwise your saved location.
@@ -95,10 +101,11 @@ Defaults for a freshly reset device are shown with each setting.
 - **WiFi** — your network, plus any API credentials (OpenSky, Govee). Default:
   none — you must enter your WiFi.
 - **Flight Tracker** — on/off, units (mi or km), radar radius, altitude ceiling,
-  poll interval, which airport to ignore, and whether to blink the LED when a
-  noteworthy flight is overhead. Also where you enter your OpenSky credentials.
-  Defaults: **on**, imperial units, **3.5 mi** radius, **15,000 ft** ceiling,
-  **60 s** poll, no ignored airport, blinking **on**.
+  poll interval, the countdown/timer bar on the dashboard, your home airport,
+  and whether to blink the LED when a noteworthy flight is overhead. Also where
+  you enter your OpenSky credentials. Defaults: **on**, imperial units,
+  **3.5 mi** radius, **15,000 ft** ceiling, **60 s** poll, timer **off**, no
+  home airport, blinking **on**.
 - **Sleep Mode** — enable it, set the start/end time, and the wake duration.
   Defaults: **on**, sleeps 10:00 PM – 8:00 AM, **10 min** wake.
 - **Pool Temp** — enable it, enter your Govee API key, and pick your

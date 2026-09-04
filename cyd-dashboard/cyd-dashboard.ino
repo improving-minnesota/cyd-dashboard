@@ -174,7 +174,7 @@ int   g_pollSec = 60;
 bool  g_trackEnabled = true;   // flight tracking on/off
 bool  g_blinkForFlight = true; // flash the LED when a noteworthy flight is overhead
 bool  g_metric = false;        // false = imperial (ft/mi/mph), true = metric (m/km/kts)
-bool  g_showTimer = false;     // show/update the dashboard countdown bar (General)
+bool  g_showTimer = false;     // show/update the dashboard countdown bar (Flight Tracker)
 bool  g_autoUpdate = true;     // auto-check/install firmware updates once/day (General)
 unsigned long g_lastScanDay = 0; // epoch day of last auto-update scan (0 = never)
 
@@ -356,7 +356,7 @@ String g_routeOrigin = "";      // "KDAL"
 String g_routeDest   = "";      // "KDFW"
 bool   g_routeFetched = false;  // true once we've tried (success or not)
 volatile bool g_routeBusy = false;  // true while a route fetch is in flight (cross-task)
-String g_ignoreAirport = "";    // airport to hide from route data ("" = show all)
+String g_homeAirport = "";      // home airport to hide from route data ("" = show all)
 
 // ---- small helpers ----
 float hav(float lat1, float lon1, float lat2, float lon2) {
@@ -1051,7 +1051,7 @@ void drawFlightInfo(Plane& p) {
 
   // Origin/destination (route fetched automatically once per plane and cached).
   // Each endpoint shows the airport code and the city on separate lines, in
-  // FONT2 (same as alt/speed/distance). An airport set in the "Ignore airport"
+  // FONT2 (same as alt/speed/distance). An airport set in the "Home airport"
   // setting (e.g. the local home base) is hidden from both ends; when it's
   // empty (default) every airport is shown. The city line shows "--" for
   // airports not in the lookup table rather than echoing the code.
@@ -1060,7 +1060,7 @@ void drawFlightInfo(Plane& p) {
   // route for that frame.
   const char* origin = g_routeBusy ? "" : g_routeOrigin.c_str();
   const char* dest   = g_routeBusy ? "" : g_routeDest.c_str();
-  const char* ign    = g_ignoreAirport.c_str();
+  const char* ign    = g_homeAirport.c_str();
   bool ignoring = (ign[0] != 0);
   bool origKnown = origin[0] != 0 && !(ignoring && strcmp(origin, ign) == 0);
   bool destKnown = dest[0] != 0 && !(ignoring && strcmp(dest, ign) == 0);
@@ -1168,7 +1168,7 @@ void drawFlightDetailPage() {
     // Origin/destination from the snapshot (same rules as drawFlightInfo).
     const char* origin = g_lastFlight.origin;
     const char* dest   = g_lastFlight.dest;
-    const char* ign    = g_ignoreAirport.c_str();
+    const char* ign    = g_homeAirport.c_str();
     bool ignoring = (ign[0] != 0);
     bool origKnown = origin[0] != 0 && !(ignoring && strcmp(origin, ign) == 0);
     bool destKnown = dest[0] != 0 && !(ignoring && strcmp(dest, ign) == 0);
@@ -1577,7 +1577,7 @@ void setup() {
     g_autoUpdate = false;
   }
   g_clockCol = (uint16_t)prefs.getUInt("clkcol", DEFAULT_CLOCK_COL);
-  g_ignoreAirport = prefs.getString("ignoreap", "");
+  g_homeAirport = prefs.getString("homeap", "");
   g_goveeKey = prefs.getString("govee", "");
   g_poolDeviceId = prefs.getString("poolid", "");
   g_poolModel = prefs.getString("poolmodel", "");
