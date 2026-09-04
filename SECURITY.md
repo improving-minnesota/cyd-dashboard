@@ -60,3 +60,19 @@ and always verifies.
 > mitigation is to keep the device on current firmware so its CA bundle stays
 > valid. Code-signing the firmware image would close this gap entirely and is
 > the recommended hardening path if that fallback window is unacceptable.
+
+## Third-party API (data provider) TLS
+
+The non-OTA HTTPS calls — OpenSky (token exchange and flight data), the
+weather provider (open-meteo), and the Govee pool-temp API — are all
+TLS-verified against root-CA bundles embedded in the firmware. OpenSky and
+open-meteo are Let's Encrypt signed and use the shared `kISRGRootCAs` bundle
+(ISRG Root X1 + X2); Govee is Amazon-signed and uses `kAmazonRootCA1`. Unlike
+the OTA path there is **no** `setInsecure()` fallback: a certificate-validation
+or handshake failure is treated as a hard error, never a silent downgrade to an
+unauthenticated connection. A failed OpenSky token exchange is surfaced as a
+failed-auth state rather than falling back to anonymous, so a man-in-the-middle
+cannot quietly capture credentials by defeating verification.
+
+Note: the default-location lookup (`ip-api.com`) intentionally uses plain HTTP
+(supported by that endpoint) and sends no credentials.

@@ -83,8 +83,10 @@ void fetchWeather() {
     "&forecast_days=7&temperature_unit=fahrenheit&timezone=auto",
     g_lat, g_lon);
 
+  // open-meteo is Let's Encrypt (ISRG root), same verified bundle as OpenSky.
+  NetworkClientSecure sec;
   HTTPClient http;
-  http.begin(url);
+  if (!httpsBegin(http, sec, url, kISRGRootCAs)) { http.end(); return; }
   http.setTimeout(5000);
   int code = http.GET();
   if (code != HTTP_CODE_OK) { http.end(); return; }

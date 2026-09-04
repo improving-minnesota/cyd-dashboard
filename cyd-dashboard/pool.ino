@@ -32,8 +32,12 @@ void selectGoveeDevice() {
 // Thermometers have type "devices.types.thermometer" / a "sensorTemperature" capability.
 bool fetchGoveeDevices() {
   if (WiFi.status() != WL_CONNECTED || g_goveeKey.length() == 0) return false;
+  // Govee's Open API is Amazon-signed, verified against Amazon Root CA 1.
+  NetworkClientSecure sec;
   HTTPClient http;
-  http.begin("https://openapi.api.govee.com/router/api/v1/user/devices");
+  if (!httpsBegin(http, sec, "https://openapi.api.govee.com/router/api/v1/user/devices", kAmazonRootCA1)) {
+    return false;
+  }
   http.addHeader("Govee-API-Key", g_goveeKey);
   http.setTimeout(5000);
   int code = http.GET();
@@ -75,8 +79,13 @@ bool fetchGoveeTemp() {
   }
   String body = "{\"requestId\":\"pool-1\",\"payload\":{\"sku\":\"" + g_poolModel
                 + "\",\"device\":\"" + g_poolDeviceId + "\"}}";
+  // Verified TLS against Amazon Root CA 1 (see kAmazonRootCA1).
+  NetworkClientSecure sec;
   HTTPClient http;
-  http.begin("https://openapi.api.govee.com/router/api/v1/device/state");
+  if (!httpsBegin(http, sec, "https://openapi.api.govee.com/router/api/v1/device/state", kAmazonRootCA1)) {
+    g_poolValid = false;
+    return false;
+  }
   http.addHeader("Govee-API-Key", g_goveeKey);
   http.addHeader("Content-Type", "application/json");
   http.setTimeout(5000);

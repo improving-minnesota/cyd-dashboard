@@ -17,6 +17,7 @@
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <NetworkClientSecure.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <SPI.h>
@@ -206,6 +207,10 @@ const unsigned long CREDIT_RECOVERY_MS = 15UL * 60UL * 1000UL;  // retry cadence
 enum AuthState { AUTH_OK = 0, AUTH_ANON, AUTH_BAD };
 int g_authState = AUTH_ANON;   // defaults to anonymous (blank creds)
 bool g_authChecked = false;    // true after the first OpenSky fetch attempt
+// True when an OpenSky TLS handshake/cert validation failed (transport-level
+// error, negative HTTPClient code). Used to turn such failures into a hard
+// error instead of silently falling back to anonymous.
+bool g_osHandshakeFailed = false;
 
 // Sleep Mode settings (persisted)
 bool g_sleepOn = true;
@@ -393,6 +398,99 @@ bool tryConnect(const char* ssid, const char* pass) {
 const char* kOsTokenUrl = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token";
 const int   kOsTokenLifetimeMs = 30 * 60 * 1000;   // OpenSky tokens expire after ~30 min
 
+// Root CA bundle used to verify TLS for every ISRG/Let's Encrypt-signed host
+// this firmware talks to: OpenSky (auth.opensky-network.org,
+// opensky-network.org) and open-meteo (api.open-meteo.com). All currently
+// chain up to ISRG Root X1 (leaf <- Let's Encrypt intermediate (e.g. YR1/YR2)
+// <- Root YR <- ISRG Root X1) and send their full intermediate chain, so a
+// root-only trust anchor suffices. ISRG Root X2 is also included as a second
+// Let's Encrypt root for future-proofing if any host rotates to an ECDSA
+// chain. Earliest root expires 2035-06-04 (ISRG Root X1). Unlike the OTA
+// bundle there is deliberately NO setInsecure() fallback: a failed validation
+// is a hard error so a MITM can't silently downgrade auth.
+static const char* const kISRGRootCAs =
+  "-----BEGIN CERTIFICATE-----\n"
+  "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\n"
+  "-----END CERTIFICATE-----\n"
+  "-----BEGIN CERTIFICATE-----\n"
+  "MIICGzCCAaGgAwIBAgIQQdKd0XLq7qeAwSxs6S+HUjAKBggqhkjOPQQDAzBPMQsw\n"
+  "CQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJuZXQgU2VjdXJpdHkgUmVzZWFyY2gg\n"
+  "R3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBYMjAeFw0yMDA5MDQwMDAwMDBaFw00\n"
+  "MDA5MTcxNjAwMDBaME8xCzAJBgNVBAYTAlVTMSkwJwYDVQQKEyBJbnRlcm5ldCBT\n"
+  "ZWN1cml0eSBSZXNlYXJjaCBHcm91cDEVMBMGA1UEAxMMSVNSRyBSb290IFgyMHYw\n"
+  "EAYHKoZIzj0CAQYFK4EEACIDYgAEzZvVn4CDCuwJSvMWSj5cz3es3mcFDR0HttwW\n"
+  "+1qLFNvicWDEukWVEYmO6gbf9yoWHKS5xcUy4APgHoIYOIvXRdgKam7mAHf7AlF9\n"
+  "ItgKbppbd9/w+kHsOdx1ymgHDB/qo0IwQDAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0T\n"
+  "AQH/BAUwAwEB/zAdBgNVHQ4EFgQUfEKWrt5LSDv6kviejM9ti6lyN5UwCgYIKoZI\n"
+  "zj0EAwMDaAAwZQIwe3lORlCEwkSHRhtFcP9Ymd70/aTSVaYgLXTWNLxBo1BfASdW\n"
+  "tL4ndQavEi51mI38AjEAi/V3bNTIZargCyzuFJ0nN6T5U6VR5CmD1/iQMVtCnwr1\n"
+  "/q4AaOeMSQ+2b1tbFfLn\n"
+  "-----END CERTIFICATE-----\n";
+
+// Root CA bundle for hosts NOT served by Let's Encrypt. Govee's Open API
+// (openapi.api.govee.com) chains leaf <- Amazon RSA 2048 M04 <- Amazon Root
+// CA 1 and sends its full intermediate chain, so a root-only trust anchor
+// suffices. Amazon Root CA 1 expires 2038-01-17. No insecure fallback, same
+// as kISRGRootCAs.
+static const char* const kAmazonRootCA1 =
+  "-----BEGIN CERTIFICATE-----\n"
+  "MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF\n"
+  "ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6\n"
+  "b24gUm9vdCBDQSAxMB4XDTE1MDUyNjAwMDAwMFoXDTM4MDExNzAwMDAwMFowOTEL\n"
+  "MAkGA1UEBhMCVVMxDzANBgNVBAoTBkFtYXpvbjEZMBcGA1UEAxMQQW1hem9uIFJv\n"
+  "b3QgQ0EgMTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALJ4gHHKeNXj\n"
+  "ca9HgFB0fW7Y14h29Jlo91ghYPl0hAEvrAIthtOgQ3pOsqTQNroBvo3bSMgHFzZM\n"
+  "9O6II8c+6zf1tRn4SWiw3te5djgdYZ6k/oI2peVKVuRF4fn9tBb6dNqcmzU5L/qw\n"
+  "IFAGbHrQgLKm+a/sRxmPUDgH3KKHOVj4utWp+UhnMJbulHheb4mjUcAwhmahRWa6\n"
+  "VOujw5H5SNz/0egwLX0tdHA114gk957EWW67c4cX8jJGKLhD+rcdqsq08p8kDi1L\n"
+  "93FcXmn/6pUCyziKrlA4b9v7LWIbxcceVOF34GfID5yHI9Y/QCB/IIDEgEw+OyQm\n"
+  "jgSubJrIqg0CAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC\n"
+  "AYYwHQYDVR0OBBYEFIQYzIU07LwMlJQuCFmcx7IQTgoIMA0GCSqGSIb3DQEBCwUA\n"
+  "A4IBAQCY8jdaQZChGsV2USggNiMOruYou6r4lK5IpDB/G/wkjUu0yKGX9rbxenDI\n"
+  "U5PMCCjjmCXPI6T53iHTfIUJrU6adTrCC2qJeHZERxhlbI1Bjjt/msv0tadQ1wUs\n"
+  "N+gDS63pYaACbvXy8MWy7Vu33PqUXHeeE6V/Uq2V8viTO96LXFvKWlJbYK8U90vv\n"
+  "o/ufQJVtMVT8QtPHRh8jrdkPSHCa2XV4cdFyQzR1bldZwgJcJmApzyMZFo6IQ6XU\n"
+  "5MsI+yMRQ+hDKXJioaldXgjUkK642M4UwtBV8ob2xJNDd2ZhwLnoQdeXeGADbkpy\n"
+  "rqXRfboQnoZsG4q5WTP468SQvvG5\n"
+  "-----END CERTIFICATE-----\n";
+
+// Shared helper: attach the given root bundle to a NetworkClientSecure and
+// start a verified-TLS request with the passed HTTPClient. Returns false when
+// the client/URL can't be set up (caller should treat as a hard error). The
+// caller must keep `sec` alive for the lifetime of the request.
+bool httpsBegin(HTTPClient& http, NetworkClientSecure& sec, const char* url, const char* roots) {
+  sec.setCACert(roots);
+  return http.begin(sec, url);
+}
+
 // Percent-encode a string for an application/x-www-form-urlencoded body.
 String urlEncode(const String& s) {
   String out;
@@ -415,6 +513,7 @@ String urlEncode(const String& s) {
 // when no client is configured (fall back to anonymous) OR the token exchange
 // failed (client credentials are invalid - callers should flag AUTH_BAD).
 bool openskyEnsureToken() {
+  g_osHandshakeFailed = false;   // fresh for each call (cached-token path keeps it false)
   if (g_osTokenValid && g_osToken.length() > 0 && millis() < g_osTokenExpiry) {
     return true;
   }
@@ -423,8 +522,13 @@ bool openskyEnsureToken() {
   if (g_osClientId.length() == 0 || g_osClientSecret.length() == 0) {
     return false;  // no client configured -> anonymous
   }
+  // TLS is verified against the bundled ISRG roots. Unlike the OTA path there
+  // is no insecure fallback, so a handshake/validation failure (e.g. expired
+  // CA or a MITM) is a hard error, never a silent downgrade to anonymous.
+  NetworkClientSecure sec;
+  sec.setCACert(kISRGRootCAs);
   HTTPClient http;
-  http.begin(kOsTokenUrl);
+  if (!http.begin(sec, kOsTokenUrl)) { g_osHandshakeFailed = true; return false; }
   http.setTimeout(5000);
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   String body = "grant_type=client_credentials&client_id=" + urlEncode(g_osClientId) +
@@ -432,6 +536,7 @@ bool openskyEnsureToken() {
   int code = http.POST(body);
   String payload = http.getString();
   http.end();
+  if (code < 0) { g_osHandshakeFailed = true; return false; }  // TLS/transport failure
   if (code != HTTP_CODE_OK) return false;
   JsonDocument doc;
   if (deserializeJson(doc, payload)) return false;
@@ -491,6 +596,10 @@ void fetchFlights() {
     connected = true;
   }
 
+  // Flight-data request uses verified TLS against the bundled ISRG roots, the
+  // same as the token exchange (no insecure fallback).
+  NetworkClientSecure sec;
+  sec.setCACert(kISRGRootCAs);
   HTTPClient http;
   char osurl[240];
   // dynamic bbox around current location (0.5 deg ~ 35 mi)
@@ -498,7 +607,13 @@ void fetchFlights() {
   snprintf(osurl, sizeof osurl,
     "https://opensky-network.org/api/states/all?lamin=%.4f&lomin=%.4f&lamax=%.4f&lomax=%.4f",
     g_lat - d, g_lon - d, g_lat + d, g_lon + d);
-  http.begin(osurl);
+  if (!http.begin(sec, osurl)) {
+    g_osHandshakeFailed = true;
+    snprintf(lastErr, sizeof lastErr, "tls setup");
+    http.end();
+    dirty = true;
+    return;
+  }
   http.setTimeout(5000);
   // Tell HTTPClient which response headers to capture. Without this it discards
   // everything except a small built-in set, so X-Rate-Limit-Remaining (the
@@ -507,13 +622,25 @@ void fetchFlights() {
   http.collectHeaders(hdrKeys, 1);
   // Authenticate via OAuth2 client-credentials for the higher 4000-credit/day
   // rate. If no client is configured, openskyEnsureToken() returns false and we
-  // fall back to anonymous (400 credits/day).
+  // fall back to anonymous (400 credits/day). A TLS/handshake failure on the
+  // token exchange is NOT a fallback: it's flagged via g_osHandshakeFailed and
+  // handled below as a hard error so a MITM can't silently downgrade auth.
   bool authed = openskyEnsureToken();
   if (authed) {
     http.addHeader("Authorization", "Bearer " + g_osToken);
   }
   int code = http.GET();
   g_authChecked = true;   // we've made a real OpenSky attempt; auth state is now meaningful
+  // Negative code = TLS handshake / transport failure (e.g. cert rejected or
+  // expired CA). Treat as a hard error, never fall back to anonymous.
+  if (code < 0 || g_osHandshakeFailed) {
+    g_osHandshakeFailed = true;
+    if (g_osClientId.length() > 0) g_authState = AUTH_BAD;
+    snprintf(lastErr, sizeof lastErr, "tls fail %d", code);
+    http.end();
+    dirty = true;
+    return;
+  }
   if (code == HTTP_CODE_UNAUTHORIZED) {
     // Token was rejected/expired; drop it so the next poll refreshes.
     g_osTokenValid = false;
