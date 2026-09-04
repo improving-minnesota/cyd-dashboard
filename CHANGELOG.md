@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.4](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.3...v1.3.4) (2026-09-04)
+
+
+### Bug Fixes
+
+* **build:** make ENABLE_SERIAL_PROVISION overridable via -D flag ([487b8b8](https://github.com/improving-minnesota/cyd-dashboard/commit/487b8b8d56133e3d44eae02b780820d873539470))
+* **build:** make ENABLE_SERIAL_PROVISION overridable via -D flag ([650845a](https://github.com/improving-minnesota/cyd-dashboard/commit/650845adf5586be596bd303baa55164add0a40ed))
+* **sleep:** keep device awake for the full wake duration on touch-wake ([2231065](https://github.com/improving-minnesota/cyd-dashboard/commit/223106505b94a3dd86d72f6dcba81e873f996fb1))
+* **sleep:** keep device awake for the full wake duration on touch-wake ([87e2e39](https://github.com/improving-minnesota/cyd-dashboard/commit/87e2e3947d6dd8fa21996bbd35d67c2c9f285865))
+
 ## [1.3.3](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.2...v1.3.3) (2026-09-04)
 
 
