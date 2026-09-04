@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.7](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.2.6...v1.2.7) (2026-09-04)
+
+
+### Bug Fixes
+
+* **ota:** draw the progress bar incrementally to stop flicker ([#24](https://github.com/improving-minnesota/cyd-dashboard/issues/24)) ([1765617](https://github.com/improving-minnesota/cyd-dashboard/commit/1765617861ce66ebfc155404d2d0c70a00aad18b))
+
 ## [1.2.6](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.2.5...v1.2.6) (2026-09-04)
 
 
