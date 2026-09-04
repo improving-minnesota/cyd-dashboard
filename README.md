@@ -133,10 +133,6 @@ releases, so you don't need a computer to install new versions.
 If the new firmware fails to start, the device automatically rolls back to the
 previous version.
 
-> Dev builds (versions ending in `-dev`, flashed from source) never auto-update by
-default.
-> You can still update them manually from **About**, or turn Auto-Update on.
-
 ## Troubleshooting
 
 **The screen isn't accurate when you touch it.** The touchscreen can drift over

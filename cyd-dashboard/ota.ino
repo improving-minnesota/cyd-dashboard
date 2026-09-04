@@ -203,7 +203,13 @@ static NetworkClientSecure makeSecureClient() {
   return c;
 }
 
+// Last-drawn progress-bar fill width, so drawOtaProgress() can redraw only the
+// newly-grown segment instead of erasing + redrawing the whole bar (which
+// caused visible flicker while the bar grew).
+static int s_otaFill = 0;
+
 void drawOtaHeader(const String& version) {
+  s_otaFill = 0;
   tft.fillScreen(TFT_BLACK);
   tft.fillRect(0, 0, 320, 28, TFT_NAVY);
   tft.setTextColor(TFT_WHITE, TFT_NAVY); tft.setTextFont(2);
@@ -216,15 +222,17 @@ void drawOtaHeader(const String& version) {
 }
 
 void drawOtaProgress(int total, size_t got) {
-  if (total > 0) {
-    tft.fillRect(12, 122, 296, 18, TFT_BLACK);              // clear bar
-    int fill = (int)((long)got * 296 / total); if (fill > 296) fill = 296;
-    if (fill > 0) tft.fillRect(12, 122, fill, 18, TFT_GREEN);
-    char pct[16]; snprintf(pct, sizeof pct, "%d%%", (int)((long)got * 100 / total));
-    tft.fillRect(80, 146, 160, 18, TFT_BLACK);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK); tft.setTextFont(2);
-    tft.setCursor(120, 148); tft.print(pct);
+  if (total <= 0) return;
+  int fill = (int)((long)got * 296 / total); if (fill > 296) fill = 296;
+  if (fill < s_otaFill) fill = s_otaFill;
+  if (fill > s_otaFill) {
+    tft.fillRect(12 + s_otaFill, 122, fill - s_otaFill, 18, TFT_GREEN);
+    s_otaFill = fill;
   }
+  char pct[16]; snprintf(pct, sizeof pct, "%d%%", (int)((long)got * 100 / total));
+  tft.fillRect(80, 146, 160, 18, TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK); tft.setTextFont(2);
+  tft.setCursor(120, 148); tft.print(pct);
 }
 
 void drawOtaRestart() {
