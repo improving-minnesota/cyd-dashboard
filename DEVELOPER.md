@@ -53,11 +53,12 @@ arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom cyd
 arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 cyd-dashboard
 ```
 
-> **Important:** the display only works if TFT_eSPI's `User_Setup_Select.h`
-> includes `User_Setups/Setup_ESP32_2432S028_CYD.h` (correct pinout: TFT on
-> HSPI, touch on VSPI, touch IRQ GPIO 36). The older
-> `Setup_ESP32_2432S028_ILI9341.h` has the wrong pins and yields a blank/white
-> display. Touch-wake from deep sleep uses GPIO 36.
+> **Important:** the display pinout is configured in the sketch's own
+> `cyd-dashboard/tft_setup.h`. TFT_eSPI auto-detects a `tft_setup.h` in the
+> sketch folder and uses it instead of its `User_Setup_Select.h`, so **no edits
+> to the installed TFT_eSPI library are needed** and the build is identical
+> locally and in CI. It sets the correct CYD wiring (TFT on HSPI, touch on VSPI,
+> touch IRQ GPIO 36); touch-wake from deep sleep uses GPIO 36.
 
 ## Continuous integration & releases
 
@@ -71,9 +72,15 @@ GitHub Actions builds and releases the firmware on standard hosted runners
      version in `release.yml`, so PR titles must look like `feat: Add widget`,
      `fix: Correct scaling`, `chore: Update docs`, etc.
   2. **Build** the firmware: installs arduino-cli, the `esp32` core (3.3.11),
-     TFT_eSPI (2.5.43) and ArduinoJson (7.4.3), patches TFT_eSPI's
-     `User_Setup_Select.h` to enable the CYD display, then compiles with the
-     production FQBN. This verifies every PR compiles.
+     TFT_eSPI (2.5.43) and ArduinoJson (7.4.3), then compiles with the
+     production FQBN. (The CYD display pinout comes from the sketch's own
+     `tft_setup.h`, so no library patching is required.) This verifies every
+     PR compiles.
+
+> **Docs-only PRs:** `pr.yml` has no path filter, so even a docs-only PR runs
+> the (harmless) firmware build. That's intentional — it keeps the "Build
+> firmware" check predictable for branch-protection rulesets. For occasional
+> one-off doc updates, just let the build run.
 
 - **`release.yml`** — runs on every push/merge to `main` and drives the release
   flow with `googleapis/release-please-action@v4` (`release-type: simple`):
@@ -96,11 +103,13 @@ never auto-updates (see below). Keep `version.txt` in sync with that default
 when you first adopt this. OTA *delivery* of the `.bin` to a device is handled
 on-device — see **OTA updates (firmware delivery)** below.
 
-> **Note on the token:** `release-please-action` defaults to `GITHUB_TOKEN`,
-> which works for a basic setup. release-please's docs recommend a GitHub App /
-> PAT token (`RELEASE_APP_ID` + `RELEASE_APP_PRIVATE_KEY`, as used in the
-> Terraform reference) so the bot's commits/PRs reliably trigger CI. Add that
-> when you move to the org if you see release PRs not picking up checks.
+> **Token:** `release.yml` authenticates release-please with a dedicated GitHub
+> App installation token (minted by `create-github-app-token` from the
+> `RELEASE_PLEASE_CLIENT_ID` / `RELEASE_PLEASE_PRIVATE_KEY` secrets) rather than
+> the default `GITHUB_TOKEN`. This is what lets the bot open/update the release
+> PR and create the release even where the org blocks the default token from
+> opening PRs. If release PRs ever stop picking up checks, verify those secrets
+> are still set on the repo.
 
 ## OTA updates (firmware delivery)
 
@@ -118,6 +127,11 @@ releases. All of this lives in `cyd-dashboard/ota.ino`.
 3. **Install.** `performOTA()` downloads the `.bin` in 4 KB chunks, streams them
    to the inactive OTA slot via `Update.write()` (`U_FLASH`), shows a progress
    screen, then `Update.end()` + `ESP.restart()`. On success it never returns.
+   It runs on a **dedicated 32 KB-stack task** (`otaTaskEntry`, `g_otaTask` in
+   `cyd-dashboard.ino`) because the mbedtls TLS handshake overflows the ~8 KB
+   default `loopTask`. The OTA task owns the display, so the main loop yields
+   while it runs. It is **not** subscribed to the task watchdog, so there is no
+   `esp_task_wdt_reset()` call during the download; the HTTP timeouts bound it.
 
 ### What triggers a check
 
@@ -357,11 +371,13 @@ seconds at boot, writes each `KEY=VALUE` line straight into NVS, and the script
 confirms the `=OK` acks. To change credentials, edit `.env` and re-run the
 script — no firmware re-flash needed.
 
-> **Testing-only code:** the provisioning listener is a temporary aid.
-> Credentials persist in NVS, so once provisioned the board works without it.
-> To strip it out for production, set `ENABLE_SERIAL_PROVISION` to `0` in
-> `cyd-dashboard.ino` (or delete the guarded block and the
-> `serialProvision()` call in `setup()`).
+> **Testing-only code, disabled by default:** the provisioning listener is a
+> temporary aid and is compiled **out** by default (`ENABLE_SERIAL_PROVISION`
+> is `0` in `cyd-dashboard.ino`), so the serial `.env` flow above only works
+> after you set it to `1` and re-flash. Credentials persist in NVS, so once
+> provisioned the board works without the listener. To ship production code,
+> leave `ENABLE_SERIAL_PROVISION` at `0` (or delete the guarded block in
+> `wifi_config.ino` and the `serialProvision()` call in `setup()`).
 
 Credentials themselves (WiFi, OpenSky, Govee) are entered on the device's
 settings screens. For instructions on obtaining them, see the README's
