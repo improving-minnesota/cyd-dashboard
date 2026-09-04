@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.0...v1.3.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* pause net fetches during OTA and don't persist Auto-Update off for dev builds ([#28](https://github.com/improving-minnesota/cyd-dashboard/issues/28)) ([45f44e5](https://github.com/improving-minnesota/cyd-dashboard/commit/45f44e5bf49fc6966956cb2e6753d2a5428b1126))
+
 ## [1.3.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.2.7...v1.3.0) (2026-09-04)
 
 
