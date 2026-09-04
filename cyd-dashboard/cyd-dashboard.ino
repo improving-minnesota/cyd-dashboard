@@ -185,6 +185,10 @@ String g_otaSha256;            // digest of the pending OTA target
 bool   g_rollbackMarked = false; // OTA rollback safeguard applied once post-boot
 TaskHandle_t g_otaTask = NULL;   // dedicated task running performOTA
 volatile bool g_otaRunning = false; // OTA task owns the display; loop() yields
+// Auto-update status shown at the bottom-left of the dashboard (reuses the
+// idle screen's status line, see drawAutoUpdateStatus()).
+int    g_autoUpdStatus = 0;       // 0 none, 1 scanning, 2 no updates, 3 updating, 4 check failed
+unsigned long g_autoUpdStatusUntil = 0; // millis() deadline to keep showing the transient status
 int   g_ftPage = 0;            // Flight Tracker settings page (0 or 1)
 float g_lat = 0.0f;           // location; loaded from NVS, or guessed from IP on first boot
 float g_lon = 0.0f;
@@ -805,6 +809,31 @@ void updateDashboard() {
     if (overhead || onDetail) drawFlightBackButton();
   }
   if (g_screen == SCR_DASH && g_showTimer && g_trackEnabled) drawCountdownBar(); // updates the bar in place
+  drawAutoUpdateStatus();
+}
+
+// Draw the auto-update status line at the bottom-left of the dashboard.
+// "Scanning" shows while a scan is in flight; the others persist for a few
+// seconds (g_autoUpdStatusUntil) so the outcome is readable on screen.
+void drawAutoUpdateStatus() {
+  if (g_autoUpdStatus == 0) return;
+  // Transient statuses expire after their deadline; the current one stays.
+  if (g_autoUpdStatus != 1 && (long)(millis() - g_autoUpdStatusUntil) > 0) return;
+  const char* msg = "";
+  uint16_t col = TFT_LIGHTGREY;
+  switch (g_autoUpdStatus) {
+    case 1: msg = "Update: Scanning...";  col = TFT_YELLOW; break;
+    case 2: msg = "Update: No Updates"; col = TFT_LIGHTGREY; break;
+    case 3: msg = "Update: Updating..."; col = TFT_GREEN; break;
+    case 4: msg = "Update: Check Failed"; col = TFT_RED; break;
+    default: return;
+  }
+  const int x = 8, y = 224, w = 180, h = 12;   // reuse the bottom-left status line (lastErr)
+  tft.fillRect(x, y, w, h, TFT_BLACK);
+  tft.setTextFont(1);
+  tft.setTextColor(col, TFT_BLACK);
+  tft.setCursor(x, y + 2);
+  tft.print(msg);
 }
 
 void drawDashboard() {
@@ -1772,6 +1801,14 @@ void loop() {
     g_otaActive = false;
     g_otaRunning = true;
     xTaskCreate(otaTaskEntry, "ota", 32768, NULL, 1, &g_otaTask);
+    // The OTA task owns the display from here on. Without this return, the
+    // rest of THIS loop() iteration can still fall through to the
+    // dirty-redraw block below (e.g. because netUpdated was just set true by
+    // the same auto-scan that set g_otaActive), issuing TFT/SPI draw calls
+    // concurrently with the OTA task's drawOtaHeader(). TFT_eSPI has no
+    // cross-task locking, so that race can hang the SPI bus indefinitely
+    // (observed as a full freeze: no crash, no reboot, stale screen content).
+    return;
   }
   // OTA rollback safeguard: after a successful boot grace period, cancel any
   // pending rollback so a freshly-installed slot stays active.
