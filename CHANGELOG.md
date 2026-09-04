@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.3](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.2.2...v1.2.3) (2026-09-04)
+
+
+### Bug Fixes
+
+* **ota:** stop esp_task_wdt_reset spam from the OTA task ([#15](https://github.com/improving-minnesota/cyd-dashboard/issues/15)) ([3c10b4d](https://github.com/improving-minnesota/cyd-dashboard/commit/3c10b4d9ff65ff4717bbbc35bb44006937453010))
+
 ## [1.2.2](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.2.1...v1.2.2) (2026-09-04)
 
 
