@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.2.0...v1.2.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* harden OTA security and fix release-image rollback crash ([#11](https://github.com/improving-minnesota/cyd-dashboard/issues/11)) ([082e856](https://github.com/improving-minnesota/cyd-dashboard/commit/082e856bad24a63bd692f3d5c6674bc192f6c3f0))
+
 ## [1.2.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.1.0...v1.2.0) (2026-09-03)
 
 
