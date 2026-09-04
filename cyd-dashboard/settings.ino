@@ -121,6 +121,7 @@ void handleAboutTouch(uint16_t x, uint16_t y) {
   if (g_updateState == 2 && inRect(x, y, 218, 140, 294, 166)) {
     g_otaVersion = g_updateLatest;
     g_otaUrl = g_updateAsset;
+    g_otaSha256 = g_updateDigest;
     g_otaActive = true;
     return;
   }

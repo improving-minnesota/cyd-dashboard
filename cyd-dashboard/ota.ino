@@ -4,17 +4,21 @@
 // running kVersion, and when newer downloads the raw app .bin and flashes it to
 // the inactive OTA slot with the arduino-esp32 Update library, then reboots.
 //
-// TLS: downloads are verified against a minimal root-CA bundle covering GitHub
-// (github.com / api.github.com via the Sectigo chain -> USERTrust ECC, and the
-// release asset host objects.githubusercontent.com via Let's Encrypt -> ISRG
-// Root X1). If the bundled roots have passed their expiry (OTA_CA_EXPIRY) we
-// fall back to setInsecure(true); if the verified handshake itself fails we
-// also retry once with setInsecure so a cert rotation can't brick an update.
+// TLS: both the release-metadata API call and the firmware download are verified
+// against a minimal root-CA bundle covering GitHub (github.com / api.github.com
+// via the Sectigo chain -> USERTrust ECC, and the release asset host
+// objects.githubusercontent.com via Let's Encrypt -> ISRG Root X1). If the
+// bundled roots have passed their expiry (OTA_CA_EXPIRY) we fall back to
+// setInsecure(true). There is NO insecure retry on a handshake failure -- that
+// would let a man-in-the-middle defeat certificate validation. Firmware
+// integrity is additionally pinned by comparing the streamed image's SHA-256 to
+// the asset digest returned by the GitHub API.
 
 #include <NetworkClientSecure.h>
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include <esp_task_wdt.h>
+#include "mbedtls/sha256.h"
 
 // Minimal root CA bundle. USERTrust ECC Certification Authority verifies the
 // Sectigo chain used by github.com / api.github.com; ISRG Root X1 verifies the
@@ -95,12 +99,14 @@ String stripV(const String& s) { return (s.length() && s[0] == 'v') ? s.substrin
 bool isNewerThanRunning(const String& tagVersion) { return compareVersions(stripV(tagVersion), kVersion) > 0; }
 
 // ---- GitHub latest-release fetch -----------------------------------------
-bool fetchLatestRelease(String& versionOut, String& assetUrlOut) {
+bool fetchLatestRelease(String& versionOut, String& assetUrlOut, String& sha256Out) {
   if (WiFi.status() != WL_CONNECTED) return false;
+  NetworkClientSecure sec = makeSecureClient();
   HTTPClient http;
-  http.begin(OTA_API_URL);
+  if (!http.begin(sec, OTA_API_URL)) { http.end(); return false; }
   http.addHeader("Accept", "application/vnd.github+json");
   http.addHeader("User-Agent", "cyd-dashboard-ota");
+  http.setConnectTimeout(5000);   // bound the TCP connect/TLS handshake, not just the read
   http.setTimeout(10000);
   int code = http.GET();
   if (code != HTTP_CODE_OK) { http.end(); return false; }
@@ -111,26 +117,28 @@ bool fetchLatestRelease(String& versionOut, String& assetUrlOut) {
   if (deserializeJson(doc, payload)) return false;
   const char* tag = doc["tag_name"] | "";
   if (!tag || !tag[0]) return false;
-  String url;
+  String url, digest;
   for (JsonObject a : doc["assets"].as<JsonArray>()) {
     if (String((const char*)(a["name"] | "")) == OTA_ASSET) {
       url = (const char*)(a["browser_download_url"] | "");
+      digest = (const char*)(a["digest"] | "");   // "sha256:<hex>"; "" if GitHub omitted it
       break;
     }
   }
   if (url.length() == 0) return false;
   versionOut = String(tag);
   assetUrlOut = url;
+  sha256Out = digest;
   return true;
 }
 
 // Populate the About-page update state from the GitHub API. Runs on the net
 // task so it never blocks drawing.
 void checkForUpdate() {
-  String ver, url;
-  if (!fetchLatestRelease(ver, url)) { g_updateState = 4; return; }   // error
+  String ver, url, digest;
+  if (!fetchLatestRelease(ver, url, digest)) { g_updateState = 4; return; }   // error
   if (isNewerThanRunning(ver)) {
-    g_updateState = 2; g_updateLatest = stripV(ver); g_updateAsset = url;
+    g_updateState = 2; g_updateLatest = stripV(ver); g_updateAsset = url; g_updateDigest = digest;
   } else {
     g_updateState = 3;                                                 // none
   }
@@ -145,21 +153,36 @@ void maybeAutoUpdate() {
   if (now < 1600000000L) return;                 // NTP not synced yet
   unsigned long day = (unsigned long)(now / 86400UL);
   if (g_lastScanDay == day) return;              // already scanned today
-  String ver, url;
-  if (!fetchLatestRelease(ver, url)) return;     // transient; try next boot
+  String ver, url, digest;
+  if (!fetchLatestRelease(ver, url, digest)) return;     // transient; try next boot
   g_lastScanDay = day;                           // only mark after a good scan
   prefs.begin("flight", false); prefs.putULong("lastscan", day); prefs.end();
   if (isNewerThanRunning(ver)) {
     g_otaVersion = stripV(ver);
     g_otaUrl = url;
+    g_otaSha256 = digest;
     g_otaActive = true;                          // loop() performs the update
   }
 }
 
+// Runs the daily auto-update scan on the net task (NOT the main loop). The
+// synchronous GitHub TLS fetch + JSON parse overflows the small loopTask stack,
+// and running it on the loop would also freeze the UI. Waits briefly for NTP
+// time first so the once-per-day clock is meaningful.
+void autoScanOnce() {
+  unsigned long t0 = millis();
+  while (time(nullptr) < 1600000000L && millis() - t0 < 8000) delay(100);
+  maybeAutoUpdate();
+}
+
 // ---- OTA execution --------------------------------------------------------
-static NetworkClientSecure makeSecureClient(bool forceInsecure) {
+static NetworkClientSecure makeSecureClient() {
   NetworkClientSecure c;
-  if (forceInsecure || time(nullptr) >= (time_t)OTA_CA_EXPIRY) c.setInsecure();
+  // Time-gated fallback ONLY: once the bundled roots have passed OTA_CA_EXPIRY,
+  // accept any cert so a root rotation can't block updates. We never retry an
+  // insecure handshake after a validation failure -- that would let a MITM
+  // defeat certificate verification.
+  if (time(nullptr) >= (time_t)OTA_CA_EXPIRY) c.setInsecure();
   else c.setCACert(kGithubRootCAs);
   return c;
 }
@@ -205,44 +228,70 @@ void drawOtaError(const char* msg) {
 
 // Download + flash. Runs on the main loop (owns the display). Never returns on
 // success (reboots). Returns false only after showing an error screen.
-bool performOTA(const String& url, const String& version) {
-  drawOtaHeader(version);
-  bool ok = false;
-  for (int attempt = 0; attempt < 2 && !ok; attempt++) {   // verified, then insecure
-    NetworkClientSecure sec = makeSecureClient(attempt == 1);
-    HTTPClient http;
-    if (!http.begin(sec, url)) { http.end(); continue; }
-    http.setTimeout(20000);
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    int code = http.GET();
-    if (code != HTTP_CODE_OK) { http.end(); continue; }
-    int total = http.getSize();
-    bool haveTotal = (total > 0);
-    if (!Update.begin(haveTotal ? total : OTA_SIZE_UNKNOWN, U_FLASH)) { http.end(); return false; }
+static bool sha256Matches(const uint8_t hash[32], const String& expected) {
+  char hex[65];
+  for (int i = 0; i < 32; i++) snprintf(&hex[i * 2], 3, "%02x", hash[i]);
+  hex[64] = 0;
+  String exp = expected;
+  if (exp.startsWith("sha256:")) exp = exp.substring(7);
+  exp.trim();
+  return exp.equalsIgnoreCase(hex);
+}
 
-    WiFiClient* stream = http.getStreamPtr();
-    size_t got = 0;
-    uint8_t buf[4096];
-    int lastPct = -1;
-    bool done = false;
-    while (!done) {
-      if (stream->available() == 0) {
-        if (!http.connected()) { done = true; break; }
-        delay(1); continue;
-      }
-      int n = stream->readBytes(buf, min(sizeof buf, (size_t)stream->available()));
-      if (n <= 0) { done = true; break; }
-      Update.write(buf, n); got += n;
-      esp_task_wdt_reset();
-      int pct = haveTotal ? (int)((long)got * 100 / total) : -1;
-      if (pct != lastPct && pct >= 0) { lastPct = pct; drawOtaProgress(total, got); }
-      if (haveTotal && got >= (size_t)total) done = true;
+bool performOTA(const String& url, const String& version, const String& expectedSha256) {
+  drawOtaHeader(version);
+  NetworkClientSecure sec = makeSecureClient();           // verified (unless roots expired)
+  HTTPClient http;
+  if (!http.begin(sec, url)) { drawOtaError("Connect failed"); return false; }
+  http.setConnectTimeout(5000);   // bound the TCP connect/TLS handshake, not just the read
+  http.setTimeout(20000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  int code = http.GET();
+  if (code != HTTP_CODE_OK) { http.end(); drawOtaError("Download failed"); return false; }
+  int total = http.getSize();
+  bool haveTotal = (total > 0);
+  if (!Update.begin(haveTotal ? total : OTA_SIZE_UNKNOWN, U_FLASH)) { http.end(); drawOtaError("Flash failed"); return false; }
+
+  mbedtls_sha256_context sha;
+  mbedtls_sha256_init(&sha);
+  mbedtls_sha256_starts(&sha, 0);
+
+  WiFiClient* stream = http.getStreamPtr();
+  size_t got = 0;
+  uint8_t buf[4096];
+  int lastPct = -1;
+  bool done = false;
+  while (!done) {
+    if (stream->available() == 0) {
+      if (!http.connected()) { done = true; break; }
+      delay(1); continue;
     }
-    http.end();
-    if ((haveTotal && got < (size_t)total) || !Update.end()) { drawOtaError("Flash failed"); return false; }
-    ok = true;
+    int n = stream->readBytes(buf, min(sizeof buf, (size_t)stream->available()));
+    if (n <= 0) { done = true; break; }
+    mbedtls_sha256_update(&sha, buf, n);
+    Update.write(buf, n); got += n;
+    esp_task_wdt_reset();
+    int pct = haveTotal ? (int)((long)got * 100 / total) : -1;
+    if (pct != lastPct && pct >= 0) { lastPct = pct; drawOtaProgress(total, got); }
+    if (haveTotal && got >= (size_t)total) done = true;
   }
-  if (!ok) { drawOtaError("Download failed"); return false; }
+  http.end();
+
+  if (haveTotal && got < (size_t)total) { Update.abort(); drawOtaError("Download failed"); return false; }
+
+  uint8_t hash[32];
+  mbedtls_sha256_finish(&sha, hash);
+  mbedtls_sha256_free(&sha);
+
+  // Enforce the digest only when GitHub supplied one; if the response carried no
+  // digest we skip the check so a digest-less asset can't brick the update.
+  if (!expectedSha256.isEmpty() && !sha256Matches(hash, expectedSha256)) {
+    Update.abort();
+    drawOtaError("Checksum mismatch");
+    return false;
+  }
+
+  if (!Update.end()) { drawOtaError("Flash failed"); return false; }
   drawOtaRestart();
   delay(500);
   ESP.restart();

@@ -49,7 +49,8 @@ The `cyd-dashboard/` sketch targets the **ESP32-2432S028R "CYD"**
 "Partition table" below), so the FQBN must include `:PartitionScheme=custom`:
 
 ```bash
-arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom cyd-dashboard
+arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
+  --build-property "compiler.cpp.extra_flags=-DARDUINO_LOOP_STACK_SIZE=16384" cyd-dashboard
 arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 cyd-dashboard
 ```
 
@@ -140,13 +141,17 @@ releases. All of this lives in `cyd-dashboard/ota.ino`.
 
 ### TLS
 
-Downloads are verified against a minimal root-CA bundle (`kGithubRootCAs` in
-`ota.ino`): **USERTrust ECC** (covers the Sectigo chain for
-github.com/api.github.com) and **ISRG Root X1** (covers Let's Encrypt for
-objects.githubusercontent.com). `OTA_CA_EXPIRY` is the earliest root expiry;
-past that the client falls back to `setInsecure(true)`. If a verified handshake
-fails, `performOTA()` also retries once with `setInsecure` so a cert rotation
-can't brick an update.
+Both the release-metadata API call and the firmware download are verified against
+a minimal root-CA bundle (`kGithubRootCAs` in `ota.ino`): **USERTrust ECC**
+(covers the Sectigo chain for github.com/api.github.com) and **ISRG Root X1**
+(covers Let's Encrypt for objects.githubusercontent.com). `OTA_CA_EXPIRY` is the
+earliest root expiry; past that the client falls back to `setInsecure(true)`.
+There is **no** insecure retry on a failed handshake — that would let a
+man-in-the-middle defeat certificate validation — so the only insecure path is
+the time-gated one (roots expired). Firmware integrity is independently pinned:
+`performOTA()` hashes the streamed image (SHA-256) and compares it to the asset's
+`digest` from the GitHub API before flashing (an empty digest skips the check).
+A mismatch aborts the update without touching the running slot.
 
 ### Rollback
 
