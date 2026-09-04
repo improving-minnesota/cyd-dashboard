@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.8](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.7...v1.3.8) (2026-09-04)
+
+
+### Bug Fixes
+
+* **settings:** sync Sleep Mode display strings from NVS at boot ([c260794](https://github.com/improving-minnesota/cyd-dashboard/commit/c260794f91f6197e424500efa85a4e2be29ed670))
+* **settings:** sync Sleep Mode display strings from NVS at boot ([cacfa85](https://github.com/improving-minnesota/cyd-dashboard/commit/cacfa851b177ecb0e4f96ac387a0395272e94b8f))
+
 ## [1.3.7](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.6...v1.3.7) (2026-09-04)
 
 
