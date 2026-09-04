@@ -1547,6 +1547,21 @@ void setup() {
   g_sleepEndH = prefs.getInt("sleepeH", 8);
   g_sleepEndM = prefs.getInt("sleepeM", 0);
   g_wakeMin = prefs.getInt("wake", 10);
+  // The Sleep Mode screen edits these as HHMM/minute text buffers, but they're
+  // only ever written when the user actually edits a field (see
+  // handleKeyboardTouch()/commitSleepTime() in wifi_config.ino) - they default
+  // to hardcoded strings at declaration, so without this they'd keep showing
+  // "22:00"/"08:00"/"10 min" on the Settings screen after every reboot (OTA,
+  // deep sleep, power cycle) even though the loaded ints above (and the actual
+  // sleep behavior) are correct. Sync them from the just-loaded values now.
+  {
+    char buf[8];
+    snprintf(buf, sizeof buf, "%02d%02d", g_sleepStartH, g_sleepStartM);
+    g_sleepStartStr = buf;
+    snprintf(buf, sizeof buf, "%02d%02d", g_sleepEndH, g_sleepEndM);
+    g_sleepEndStr = buf;
+    g_wakeStr = String(g_wakeMin);
+  }
   g_trackEnabled = prefs.getBool("track", true);
   g_blinkForFlight = prefs.getBool("blinkf", true);
   g_metric = prefs.getBool("metric", false);
