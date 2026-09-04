@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.6](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.2.5...v1.2.6) (2026-09-04)
+
+
+### Bug Fixes
+
+* **ota:** allow a -dev build to upgrade to the release of the same version ([#22](https://github.com/improving-minnesota/cyd-dashboard/issues/22)) ([14c3c6d](https://github.com/improving-minnesota/cyd-dashboard/commit/14c3c6d397cb090086de7d1f674628a45e214ac3))
+
 ## [1.2.5](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.2.4...v1.2.5) (2026-09-04)
 
 
