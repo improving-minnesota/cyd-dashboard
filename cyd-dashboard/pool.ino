@@ -245,10 +245,10 @@ void poolSeriesForTF(unsigned long** times, float** temps, int* count) {
 // window via dataMin/dataMax (before any y-axis padding). Also draws the padded
 // y-axis scale labels (max/min in the chart corners) and a dotted average line
 // with an "avg" label.
-bool plotPoolSeries(unsigned long* times, float* temps, int count,
-                     unsigned long t0, unsigned long nowSec, unsigned long win,
-                     int gx, int gy, int gw, int gh,
-                     float& dataMin, float& dataMax) {
+bool plotSeries(unsigned long* times, float* temps, int count,
+                unsigned long t0, unsigned long nowSec, unsigned long win,
+                int gx, int gy, int gw, int gh,
+                float& dataMin, float& dataMax, uint16_t lineColor) {
   float vmin = 1e9f, vmax = -1e9f;
   float sum = 0.0f;
   int cnt = 0;
@@ -277,7 +277,7 @@ bool plotPoolSeries(unsigned long* times, float* temps, int count,
     int py = gy + gh - (int)((v - vmin) * gh / (vmax - vmin));
     px = constrain(px, gx, gx + gw);
     py = constrain(py, gy, gy + gh);
-    if (prevX >= 0) tft.drawLine(prevX, prevY, px, py, TFT_GREENYELLOW);
+    if (prevX >= 0) tft.drawLine(prevX, prevY, px, py, lineColor);
     prevX = px; prevY = py;
   }
 
@@ -307,6 +307,15 @@ bool plotPoolSeries(unsigned long* times, float* temps, int count,
   snprintf(sbuf, sizeof sbuf, "%.0f", vmin);
   tft.drawRightString(sbuf, gx + gw, gy + gh - 9, 1);   // padded min
   return true;
+}
+
+// Pool temp series wrapper (green line). Weather uses plotWeatherSeries below.
+bool plotPoolSeries(unsigned long* times, float* temps, int count,
+                    unsigned long t0, unsigned long nowSec, unsigned long win,
+                    int gx, int gy, int gw, int gh,
+                    float& dataMin, float& dataMax) {
+  return plotSeries(times, temps, count, t0, nowSec, win, gx, gy, gw, gh,
+                    dataMin, dataMax, TFT_GREENYELLOW);
 }
 
 // Pool temp history graph. Plots the samples we have logged for the selected
