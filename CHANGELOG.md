@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.7](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.6...v1.3.7) (2026-09-04)
+
+
+### Bug Fixes
+
+* **sleep:** don't rely on sntp_get_sync_status(), which never completes ([08217d1](https://github.com/improving-minnesota/cyd-dashboard/commit/08217d1d6e8d1f549f02e30627ba1c7f0ebbcca9))
+* **sleep:** stop gating sleep on sntp_get_sync_status(), which never completes ([6dbad89](https://github.com/improving-minnesota/cyd-dashboard/commit/6dbad89d62a1087df80b1823b82f4539d6d4a266))
+
 ## [1.3.6](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.3.5...v1.3.6) (2026-09-04)
 
 
