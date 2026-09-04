@@ -24,6 +24,7 @@
 #include <time.h>
 #include "esp_sleep.h"
 #include "esp_system.h"
+#include "esp_sntp.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 // Airline logos are loaded at runtime from a dedicated LittleFS partition (see
@@ -1656,6 +1657,12 @@ void enterDeepSleep() {
 // Is the current local time inside the configured sleep window?
 bool inSleepWindowNow() {
   if (!g_sleepOn) return false;
+  // Only trust the clock once NTP has synced. After a soft reset (e.g. OTA),
+  // the RTC retains a valid-looking UTC time, but the timezone isn't set until
+  // configTime() runs after WiFi connects - so getLocalTime() would apply the
+  // default UTC offset and could report a local time that lands in the sleep
+  // window even when the real time is outside it (causing an unwanted sleep).
+  if (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED) return false;
   struct tm t;
   // Explicit 0ms timeout: called every main-loop iteration, and
   // getLocalTime()'s default 5s timeout would block the loop (touch +
