@@ -83,7 +83,7 @@ jobs:
           VERSION="${VERSION#v}"          # strip leading "v" so About shows "1.2.3"
           echo "Building version ${VERSION}"
           arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
-            --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=${VERSION}" \
+            --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=${VERSION} -DARDUINO_LOOP_STACK_SIZE=16384" \
             --output-dir build/ota cyd-dashboard
 
       - name: Upload firmware to release

@@ -173,8 +173,10 @@ unsigned long g_lastScanDay = 0; // epoch day of last auto-update scan (0 = neve
 int    g_updateState = 0;      // 0 idle, 1 checking, 2 available, 3 none, 4 error
 String g_updateLatest;         // latest version label when an update is available
 String g_updateAsset;          // download URL when an update is available
+String g_updateDigest;         // "sha256:<hex>" of the available asset ("" if absent)
 bool   g_otaActive = false;    // loop() should run the pending OTA
 String g_otaVersion, g_otaUrl; // pending OTA target
+String g_otaSha256;            // digest of the pending OTA target
 bool   g_rollbackMarked = false; // OTA rollback safeguard applied once post-boot
 int   g_ftPage = 0;            // Flight Tracker settings page (0 or 1)
 float g_lat = 0.0f;           // location; loaded from NVS, or guessed from IP on first boot
@@ -439,6 +441,7 @@ volatile bool netWantLocation     = false;
 volatile bool netWantPool         = false;   // refresh the current pool temp
 volatile bool netWantPoolDevices  = false;   // list Govee thermometers
 volatile bool netWantUpdateCheck  = false;   // query GitHub for the latest release
+volatile bool netWantAutoScan     = false;   // daily auto-update scan (runs off the loop task)
 volatile bool netBusy             = false;   // a fetch is currently running
 volatile bool netUpdated          = false;   // set when a fetch finishes
 
@@ -446,12 +449,15 @@ void netTask(void* p) {
   for (;;) {
     vTaskDelay(30 / portTICK_PERIOD_MS);
     if (WiFi.status() != WL_CONNECTED) continue;
-    if (netWantFlights)     { netWantFlights = false;     netBusy = true; fetchFlights();      netBusy = false; netUpdated = true; }
+    // User-initiated update check gets priority so the About page responds
+    // quickly even while background fetches (flights/weather/pool) are queued.
+    if (netWantUpdateCheck) { netWantUpdateCheck=false; netBusy=true; checkForUpdate(); netBusy=false; netUpdated=true; }
+    else if (netWantFlights)     { netWantFlights = false;     netBusy = true; fetchFlights();      netBusy = false; netUpdated = true; }
     else if (netWantLocation){ netWantLocation = false;   netBusy = true; fetchIpLocation();    netBusy = false; netUpdated = true; }
     else if (netWantWeather) { netWantWeather = false;    netBusy = true; fetchWeather();       netBusy = false; netUpdated = true; }
     else if (netWantPoolDevices){ netWantPoolDevices = false; netBusy = true; fetchGoveeDevices(); netBusy = false; netUpdated = true; }
     else if (netWantPool)    { netWantPool = false;       netBusy = true; fetchGoveeTemp();     netBusy = false; netUpdated = true; }
-    else if (netWantUpdateCheck){ netWantUpdateCheck=false; netBusy=true; checkForUpdate(); netBusy=false; netUpdated=true; }
+    else if (netWantAutoScan)   { netWantAutoScan=false;   netBusy=true; autoScanOnce();     netBusy=false; netUpdated=true; }
   }
 }
 
@@ -1713,7 +1719,7 @@ void loop() {
 
   // Run a pending OTA (from the About Install button or the daily auto-scan).
   // This blocks, draws its own screen, and reboots on success.
-  if (g_otaActive) { g_otaActive = false; performOTA(g_otaUrl, g_otaVersion); }
+  if (g_otaActive) { g_otaActive = false; performOTA(g_otaUrl, g_otaVersion, g_otaSha256); }
   // OTA rollback safeguard: after a successful boot grace period, cancel any
   // pending rollback so a freshly-installed slot stays active.
   if (!g_rollbackMarked && now > 30000UL) { g_rollbackMarked = true; markAppValidBoot(); }
@@ -1769,13 +1775,10 @@ void loop() {
       }
       dirty = true;
     }
-    // Daily auto-update scan (once/day): wait briefly for NTP time, then check
-    // GitHub. If a newer release exists and Auto-Update is ON, start the OTA.
-    if (g_autoUpdate) {
-      unsigned long t0 = now;
-      while (time(nullptr) < 1600000000L && millis() - t0 < 8000) delay(100);
-      maybeAutoUpdate();
-    }
+    // Daily auto-update scan (once/day): kick it off on the net task so the
+    // synchronous GitHub TLS fetch doesn't run on (and overflow) the small
+    // loopTask stack, and doesn't freeze the main loop.
+    if (g_autoUpdate) netWantAutoScan = true;
   }
 
   // --- Polling runs only while WiFi is up; otherwise updates are suspended ---
