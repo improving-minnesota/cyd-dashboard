@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.5.0...v1.6.0) (2026-09-04)
+
+
+### Features
+
+* add weather temperature history storage and graph ([35a4951](https://github.com/improving-minnesota/cyd-dashboard/commit/35a49516dd0dbf2cf6aad79197c8e1c865d86551))
+* add weather temperature history storage and graph ([28b8544](https://github.com/improving-minnesota/cyd-dashboard/commit/28b8544e73a8eeb4445141f8787f82874df351e0))
+
 ## [1.5.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.4.0...v1.5.0) (2026-09-04)
 
 
