@@ -49,9 +49,17 @@ The `cyd-dashboard/` sketch targets the **ESP32-2432S028R "CYD"**
 "Partition table" below), so the FQBN must include `:PartitionScheme=custom`:
 
 ```bash
-arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom cyd-dashboard
+arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
+  --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(cat version.txt)-dev" cyd-dashboard
 arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 cyd-dashboard
 ```
+
+> **Version flag:** the `-DAPP_VERSION` flag above derives the local build's
+> version from `version.txt` at compile time (e.g. `1.2.4-dev`), so About
+> always shows an accurate dev version without needing manual updates. If you
+> compile without it (e.g. from the Arduino IDE), `kVersion` falls back to a
+> hardcoded literal in `cyd-dashboard.ino` that can drift out of date - prefer
+> the `arduino-cli` command above.
 
 > **Important:** the display pinout is configured in the sketch's own
 > `cyd-dashboard/tft_setup.h`. TFT_eSPI auto-detects a `tft_setup.h` in the

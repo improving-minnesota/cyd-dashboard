@@ -85,16 +85,19 @@ struct Plane;
 // ---------------- CONFIG (edit these) ----------------
 // OpenSky bbox will be computed from g_lat/g_lon at runtime.
 const int OPENSKY_TOTAL_CREDITS = 4000;
-// Build/version shown on the About page. Local/dev builds default to the
-// current branch version with a "-dev" suffix (e.g. "1.1.0-dev"), so About
-// shows a real version and the OTA logic knows it's a dev build. Keep the
-// default in sync with version.txt. CI overrides APP_VERSION at build time with
-// the release version via -DAPP_VERSION=<ver> (see .github/workflows/release.yml).
-// A "-dev" build never auto-updates (see g_autoUpdate handling).
+// Build/version shown on the About page. CI overrides APP_VERSION at build
+// time with the release version via -DAPP_VERSION=<ver> (see
+// .github/workflows/release.yml). Local/dev builds should pass
+// -DAPP_VERSION="$(cat version.txt)-dev" (see DEVELOPER.md) so About shows an
+// accurate version derived from version.txt; the literal below is only a
+// fallback for builds that don't set the flag (e.g. the Arduino IDE) and can
+// drift out of date - it exists solely so any "-dev"-suffixed string is
+// present for isDevBuild() to detect. A "-dev" build never auto-updates (see
+// g_autoUpdate handling).
 #define STRINGIZE_INNER(x) #x
 #define STRINGIZE(x) STRINGIZE_INNER(x)
 #ifndef APP_VERSION
-  #define APP_VERSION "1.1.0-dev"
+  #define APP_VERSION "0.0.0-dev"
   const char* const kVersion = APP_VERSION;
 #else
   const char* const kVersion = STRINGIZE(APP_VERSION);
