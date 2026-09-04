@@ -42,8 +42,12 @@ struct Plane;
 // Serial NVS provisioning (see wifi_config.ino). Defined HERE (not in
 // wifi_config.ino) because Arduino concatenates .ino files alphabetically, and
 // this file uses the macro before wifi_config.ino is reached. Set to 0 to
-// strip out the temporary provisioning listener.
+// strip out the temporary provisioning listener. Guarded with #ifndef so the
+// build can enable it with -DENABLE_SERIAL_PROVISION=1 (an unconditional
+// #define here would otherwise silently override that command-line flag).
+#ifndef ENABLE_SERIAL_PROVISION
 #define ENABLE_SERIAL_PROVISION 0
+#endif
 
 // Pool temperature feature (Govee). Reads the selected thermometer's current
 // temperature via the Govee Open API POST /router/api/v1/device/state
