@@ -104,7 +104,15 @@ String bareVersion(const String& s) {
   while (i < (int)s.length() && (isDigit(s[i]) || s[i] == '.')) i++;
   return s.substring(0, i);
 }
-bool isNewerThanRunning(const String& tagVersion) { return compareVersions(stripV(tagVersion), bareVersion(kVersion)) > 0; }
+bool isNewerThanRunning(const String& tagVersion) {
+  String tag = stripV(tagVersion);
+  int c = compareVersions(tag, bareVersion(kVersion));
+  if (c > 0) return true;
+  // A release is also an upgrade over a -dev build of the same version
+  // (e.g. 1.2.4 offered to a device running 1.2.4-dev), so the device can move
+  // off a dev build onto the equivalent release build.
+  return c == 0 && strstr(kVersion, "-dev") != NULL;
+}
 
 // ---- GitHub latest-release fetch -----------------------------------------
 bool fetchLatestRelease(String& versionOut, String& assetUrlOut, String& sha256Out) {
