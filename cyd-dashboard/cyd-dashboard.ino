@@ -1791,7 +1791,7 @@ void loop() {
   if (g_screen == SCR_DASH) {
     // expire a user-triggered wake once the duration has elapsed
     if (wakeUntil != 0 && (long)(now - wakeUntil) >= 0) wakeUntil = 0;
-    asleep = inSleepWindowNow() && (wakeUntil == 0);
+    asleep = !g_otaActive && !g_otaRunning && inSleepWindowNow() && (wakeUntil == 0);
   }
 
   if (asleep) {
