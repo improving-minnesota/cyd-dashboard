@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.2](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.7.1...v1.7.2) (2026-09-05)
+
+
+### Bug Fixes
+
+* harden TLS handling and radar off-screen tracking ([#57](https://github.com/improving-minnesota/cyd-dashboard/issues/57)) ([7727678](https://github.com/improving-minnesota/cyd-dashboard/commit/772767806b58f83ae198f13d2ded785752fcf923))
+
 ## [1.7.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.7.0...v1.7.1) (2026-09-04)
 
 
