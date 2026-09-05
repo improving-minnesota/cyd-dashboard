@@ -170,7 +170,10 @@ a minimal root-CA bundle (`kGithubRootCAs` in `ota.ino`): **USERTrust ECC**
 earliest root expiry; past that the client falls back to `setInsecure(true)`.
 There is **no** insecure retry on a failed handshake — that would let a
 man-in-the-middle defeat certificate validation — so the only insecure path is
-the time-gated one (roots expired). Firmware integrity is independently pinned:
+the time-gated one (roots expired). Transient transport failures on these
+verified connections (e.g. a connect dropped after prolonged uptime) are retried
+a few times with clean socket teardown between attempts — always over the same
+verified TLS, never insecure. Firmware integrity is independently pinned:
 `performOTA()` hashes the streamed image (SHA-256) and compares it to the asset's
 `digest` from the GitHub API before flashing (an empty digest skips the check).
 A mismatch aborts the update without touching the running slot.
