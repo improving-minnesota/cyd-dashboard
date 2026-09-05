@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.7.3...v1.8.0) (2026-09-05)
+
+
+### Features
+
+* add OpenSky credits screen and ground-track display ([#61](https://github.com/improving-minnesota/cyd-dashboard/issues/61)) ([c54f763](https://github.com/improving-minnesota/cyd-dashboard/commit/c54f763e689cf326e3caba5c89d73ac2cc864f8e))
+
 ## [1.7.3](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.7.2...v1.7.3) (2026-09-05)
 
 
