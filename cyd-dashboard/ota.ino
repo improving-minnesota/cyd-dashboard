@@ -121,8 +121,6 @@ bool fetchLatestRelease(String& versionOut, String& assetUrlOut, String& sha256O
   // an update check that drops after prolonged uptime doesn't fail immediately).
   NetworkClientSecure sec;
   HTTPClient http;
-  http.addHeader("Accept", "application/vnd.github+json");
-  http.addHeader("User-Agent", "cyd-dashboard-ota");
   http.setConnectTimeout(5000);   // bound the TCP connect/TLS handshake, not just the read
   http.setTimeout(10000);
   int code = -1;
@@ -132,6 +130,9 @@ bool fetchLatestRelease(String& versionOut, String& assetUrlOut, String& sha256O
     if (attempt > 1) delay(HTTPS_RETRY_DELAY_MS);
     sec = makeSecureClient();
     if (!http.begin(sec, OTA_API_URL)) continue;   // connect failed -> retry
+    // addHeader() after begin(): HTTPClient clears its headers on begin/end.
+    http.addHeader("Accept", "application/vnd.github+json");
+    http.addHeader("User-Agent", "cyd-dashboard-ota");
     code = http.GET();
     if (code >= 0) break;        // server responded (non-200): don't retry
   }

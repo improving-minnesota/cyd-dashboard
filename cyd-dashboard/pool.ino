@@ -31,14 +31,15 @@ void selectGoveeDevice() {
 // Response shape: data is an array of {sku, device, deviceName, type, capabilities}.
 // Thermometers have type "devices.types.thermometer" / a "sensorTemperature" capability.
 bool fetchGoveeDevices() {
-  if (WiFi.status() != WL_CONNECTED || g_goveeKey.length() == 0) return false;
+  if (WiFi.status() != WL_CONNECTED || g_goveeKey.length() == 0) { g_goveeAuthBad = false; return false; }
   // Govee's Open API is Amazon-signed, verified against Amazon Root CA 1.
   NetworkClientSecure sec;
   HTTPClient http;
-  http.addHeader("Govee-API-Key", g_goveeKey);
   http.setTimeout(5000);
+  const char* devHdrs[] = { "Govee-API-Key", g_goveeKey.c_str(), nullptr };
   int code = httpsRequestRetry(http, sec, "https://openapi.api.govee.com/router/api/v1/user/devices",
-                               kAmazonRootCA1, HTTPS_METHOD_GET, "");
+                               kAmazonRootCA1, HTTPS_METHOD_GET, "", devHdrs);
+  g_goveeAuthBad = (code == HTTP_CODE_UNAUTHORIZED || code == HTTP_CODE_FORBIDDEN);
   if (code != HTTP_CODE_OK) { http.end(); return false; }
   String payload = http.getString();
   http.end();
@@ -73,6 +74,7 @@ bool fetchGoveeDevices() {
 bool fetchGoveeTemp() {
   if (WiFi.status() != WL_CONNECTED || g_goveeKey.length() == 0 || g_poolDeviceId.length() == 0) {
     g_poolValid = false;
+    g_goveeAuthBad = false;
     return false;
   }
   String body = "{\"requestId\":\"pool-1\",\"payload\":{\"sku\":\"" + g_poolModel
@@ -80,11 +82,11 @@ bool fetchGoveeTemp() {
   // Verified TLS against Amazon Root CA 1 (see kAmazonRootCA1).
   NetworkClientSecure sec;
   HTTPClient http;
-  http.addHeader("Govee-API-Key", g_goveeKey);
-  http.addHeader("Content-Type", "application/json");
   http.setTimeout(5000);
+  const char* tempHdrs[] = { "Govee-API-Key", g_goveeKey.c_str(), "Content-Type", "application/json", nullptr };
   int code = httpsRequestRetry(http, sec, "https://openapi.api.govee.com/router/api/v1/device/state",
-                               kAmazonRootCA1, HTTPS_METHOD_POST, body);
+                               kAmazonRootCA1, HTTPS_METHOD_POST, body, tempHdrs);
+  g_goveeAuthBad = (code == HTTP_CODE_UNAUTHORIZED || code == HTTP_CODE_FORBIDDEN);
   if (code != HTTP_CODE_OK) { g_poolValid = false; http.end(); return false; }
   String payload = http.getString();
   http.end();

@@ -91,7 +91,7 @@ void fetchWeather() {
   NetworkClientSecure sec;
   HTTPClient http;
   http.setTimeout(5000);
-  int code = httpsRequestRetry(http, sec, url, kISRGRootCAs, HTTPS_METHOD_GET, "");
+  int code = httpsRequestRetry(http, sec, url, kISRGRootCAs, HTTPS_METHOD_GET, "", nullptr);
   if (code != HTTP_CODE_OK) { http.end(); return; }
   String payload = http.getString();
   http.end();
