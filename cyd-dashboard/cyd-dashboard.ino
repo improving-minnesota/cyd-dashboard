@@ -91,6 +91,7 @@ struct Plane;
 // ---------------- CONFIG (edit these) ----------------
 // OpenSky bbox will be computed from g_lat/g_lon at runtime.
 const int OPENSKY_TOTAL_CREDITS = 4000;
+const int ANON_DAILY_CREDITS   = 400;   // anonymous daily budget (per bucket)
 // Build/version shown on the About page. CI overrides APP_VERSION at build
 // time with the release version via -DAPP_VERSION=<ver> (see
 // .github/workflows/release.yml). Local/dev builds should pass
@@ -216,6 +217,8 @@ float g_lon = 0.0f;
 int   g_creditsRemaining = 0; // OpenSky X-Rate-Limit-Remaining
 bool  g_creditsKnown = false; // false until the first successful fetch
 bool  g_creditsExhausted = false;  // true when at/near the daily credit limit
+int   g_flightsCredits = -1;  // /flights/* bucket remaining (-1 = not seen yet)
+int   g_tracksCredits  = -1;  // /tracks/* bucket remaining (-1 = not seen yet)
 const int LOW_CREDIT_THRESHOLD = 0;         // "at the limit"
 const unsigned long CREDIT_RECOVERY_MS = 15UL * 60UL * 1000UL;  // retry cadence while exhausted
 
@@ -345,8 +348,9 @@ String g_sleepStartStr = "2200";  // HHMM for editing in settings
 String g_sleepEndStr   = "0800";
 String g_wakeStr       = "10";
 
-enum Screen { SCR_DASH, SCR_SETTINGS, SCR_GENERAL, SCR_ABOUT, SCR_HELP, SCR_WIFI, SCR_RESET, SCR_SLEEP, SCR_FTRACKER, SCR_POOL, SCR_POOLGRAPH, SCR_WXGRAPH, SCR_LOCATION, SCR_CALIB, SCR_FLIGHTDETAIL };
+enum Screen { SCR_DASH, SCR_SETTINGS, SCR_GENERAL, SCR_ABOUT, SCR_HELP, SCR_WIFI, SCR_RESET, SCR_SLEEP, SCR_FTRACKER, SCR_POOL, SCR_POOLGRAPH, SCR_WXGRAPH, SCR_LOCATION, SCR_CALIB, SCR_FLIGHTDETAIL, SCR_CREDITS };
 Screen g_screen = SCR_DASH;
+Screen g_creditsReturn = SCR_DASH;   // screen to return to from the OpenSky Credits page
 int g_helpScroll = 0;   // Help page vertical scroll offset (px)
 int g_resetConfirm = 0;  // Reset screen sub-state: 0=choose, 1=confirm All, 2=confirm Settings
 
@@ -414,14 +418,28 @@ bool g_flashIncoming  = false;
 bool g_flashTop50     = false;
 bool g_flashWhite     = false;
 
-// Route details for the overhead flight (origin/destination), fetched lazily
-// only when the user taps "Details" and cached per plane. Defined in
+// Route details for the overhead flight (origin/destination), fetched
+// automatically the first time a new plane is overhead and cached per plane
+// (reset whenever the overhead identity changes). Defined in
 // flight_details.ino.
 String g_routeOrigin = "";      // "KDAL"
 String g_routeDest   = "";      // "KDFW"
 bool   g_routeFetched = false;  // true once we've tried (success or not)
 volatile bool g_routeBusy = false;  // true while a route fetch is in flight (cross-task)
-String g_homeAirport = "";      // home airport to hide from route data ("" = show all)
+
+// Ground track for the tracked overhead plane, fetched once per new plane from
+// the OpenSky /tracks endpoint and used to draw the past flight path and to
+// dead-reckon the blip along the plane's real bearing. Points are stored as
+// (dx,dy) miles relative to the observer. See fetchTrack() in flight_details.ino.
+#define MAX_TRACK_PTS 64
+struct TrackPoint { float dxMi, dyMi; };
+TrackPoint g_trackPts[MAX_TRACK_PTS];
+int   g_trackCount = 0;              // number of valid track points
+float g_trackBearingDeg = -1.0f;     // latest track true-track bearing (-1 = none)
+bool  g_trackFetched = false;        // tried once for the current plane
+volatile bool g_trackBusy = false;   // cross-task guard
+
+String g_homeAirport = "";      // home airport: drives the incoming/outgoing LED flash ("" = fall back to KDFW)
 
 // ---- small helpers ----
 float hav(float lat1, float lon1, float lat2, float lon2) {
@@ -894,23 +912,33 @@ void fetchFlights() {
       g_routeFetched = false;
       g_routeOrigin = "";
       g_routeDest = "";
+      g_trackFetched = false;
+      g_trackCount = 0;
+      g_trackBearingDeg = -1.0f;
       ledFlashedIcao[0] = 0;
     }
-    // Fetch the route automatically the first time this plane is overhead, and
-    // cache it (fetchRoute sets g_routeFetched=true, so it runs once per plane).
+    // Fetch the route and the ground track automatically the first time this
+    // plane is overhead, caching each once per plane (g_routeFetched /
+    // g_trackFetched). A failed/empty track just leaves g_trackCount=0 so the
+    // radar draws no line and dead-reckoning falls back to heading/speed.
     if (!g_routeFetched) fetchRoute(planes[0].icao24);
-    // Queue an LED flash for this new overhead flight. Red = departing DFW,
-    // green = incoming to DFW, extra blue = top-50 airport. A flight with NO
-    // route data (origin and destination both unknown) flashes white instead.
-    // The flash itself is deferred to loop() so the flight view draws first.
+    if (!g_trackFetched) fetchTrack(planes[0].icao24);
+    // Queue an LED flash for this new overhead flight. Red = departing the
+    // home airport, green = incoming to the home airport, extra blue = top-50
+    // airport. A flight with NO route data (origin and destination both
+    // unknown) flashes white instead. The flash itself is deferred to loop()
+    // so the flight view draws first.
     if (strncmp(planes[0].icao24, ledFlashedIcao, 6) != 0) {
       bool noData = (g_routeOrigin.length() == 0 && g_routeDest.length() == 0);
       g_flashDeparting = g_flashIncoming = g_flashTop50 = false;
       g_flashWhite = noData;
       bool shouldFlash = noData;
       if (!noData) {
-        g_flashDeparting = (g_routeOrigin == "KDFW");
-        g_flashIncoming  = (g_routeDest   == "KDFW");
+        // Incoming/outgoing is relative to the Home airport setting (fall back
+        // to the project's DFW home base when none is set).
+        const char* home = g_homeAirport.length() ? g_homeAirport.c_str() : "KDFW";
+        g_flashDeparting = (g_routeOrigin == home);
+        g_flashIncoming  = (g_routeDest   == home);
         g_flashTop50     = isTopAirport(g_routeOrigin.c_str()) || isTopAirport(g_routeDest.c_str());
         shouldFlash = (g_flashDeparting || g_flashIncoming || g_flashTop50);
       }
@@ -1033,6 +1061,50 @@ void drawHeaderBand() {
   tft.setTextSize(1);
 }
 
+// One row of the OpenSky Credits screen: a bucket label + its last-known
+// remaining / daily budget.
+void drawCreditsRow(int y, const char* label, int remaining, bool known, int budget) {
+  tft.setTextColor(TFT_CYAN, TFT_BLACK);
+  tft.setTextFont(2);
+  tft.setCursor(8, y);
+  tft.print(label);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setCursor(8, y + 20);
+  if (known) tft.printf("%d / %d", remaining, budget);
+  else tft.print("-- / " + String(budget));
+}
+
+// OpenSky Credits screen: shows the three independent daily credit buckets
+// (states = radar polling, flights = route lookup, tracks = flight tracking)
+// with their last-known remaining balances. Reached by tapping the credits
+// ("C<remaining>") in the header band. Back returns to the previous screen.
+void drawCredits() {
+  tft.fillScreen(TFT_BLACK);
+  uint16_t bg = g_clockCol;
+  tft.fillRect(0, 0, 320, HEADER_H, bg);
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.setTextFont(2);
+  tft.setTextSize(1);
+  tft.setCursor(4, 11);
+  tft.print("OpenSky Credits");
+  tft.fillRect(265, 4, 50, 20, TFT_DARKGREY);
+  tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
+  tft.setCursor(272, 8);
+  tft.print("Back");
+
+  int budget = (g_authState == AUTH_ANON || g_authState == AUTH_BAD)
+               ? ANON_DAILY_CREDITS : OPENSKY_TOTAL_CREDITS;
+  int y = 48;
+  drawCreditsRow(y,     "Radar Polling",   g_creditsRemaining, g_creditsKnown,      budget);
+  drawCreditsRow(y+48,  "Route Lookup",    g_flightsCredits,   g_flightsCredits >= 0, budget);
+  drawCreditsRow(y+96,  "Flight Tracking", g_tracksCredits,    g_tracksCredits >= 0,  budget);
+
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.setTextFont(1);
+  tft.setCursor(8, y + 158);
+  tft.print("Last-known remaining per bucket.");
+}
+
 // Incremental 1-second update for the dashboard. Instead of clearing and
 // redrawing the whole screen (which flickers), it only redraws the header band
 // (the clock) and the countdown bar. The rest of the screen is unchanged. Full
@@ -1114,7 +1186,8 @@ void drawDashboard() {
                   && (planeCount > 0 && planes[0].distMi <= g_radiusMi);
   if (overhead) {
     // Route details are drawn inline by drawFlightInfo (above the Details
-    // button); they only appear if the user tapped Details to fetch them.
+    // button). They appear once the route is auto-fetched (see fetchRoute in
+    // flight_details.ino); the Details tap only recalls the cached result.
     drawFlightInfo(planes[0]);
     drawRadar();
   } else {
@@ -1313,19 +1386,15 @@ void drawFlightInfo(Plane& p) {
 
   // Origin/destination (route fetched automatically once per plane and cached).
   // Each endpoint shows the airport code and the city on separate lines, in
-  // FONT2 (same as alt/speed/distance). An airport set in the "Home airport"
-  // setting (e.g. the local home base) is hidden from both ends; when it's
-  // empty (default) every airport is shown. The city line shows "--" for
-  // airports not in the lookup table rather than echoing the code.
-  // The route is fetched on the network task; while it's being written, don't
-  // read g_routeOrigin/g_routeDest (String isn't thread-safe) - just show no
-  // route for that frame.
+  // FONT2 (same as alt/speed/distance). The city line shows "--" for airports
+  // not in the lookup table rather than echoing the code. The route is fetched
+  // on the network task; while it's being written, don't read
+  // g_routeOrigin/g_routeDest (String isn't thread-safe) - just show no route
+  // for that frame.
   const char* origin = g_routeBusy ? "" : g_routeOrigin.c_str();
   const char* dest   = g_routeBusy ? "" : g_routeDest.c_str();
-  const char* ign    = g_homeAirport.c_str();
-  bool ignoring = (ign[0] != 0);
-  bool origKnown = origin[0] != 0 && !(ignoring && strcmp(origin, ign) == 0);
-  bool destKnown = dest[0] != 0 && !(ignoring && strcmp(dest, ign) == 0);
+  bool origKnown = (origin[0] != 0);
+  bool destKnown = (dest[0] != 0);
   bool destEmpty = (dest[0] == 0);
   int y = 114;
   tft.setTextFont(2);
@@ -1384,6 +1453,37 @@ void drawRadarFrame(int cx, int cy, int r) {
   tft.setCursor(cx - 12, cy + r + 6);
   if (g_metric) tft.printf("%dkm", (int)round(g_radiusMi * 1.60934f));
   else tft.printf("%dmi", (int)round(g_radiusMi));
+}
+
+// Draw a dashed (dotted) line segment, used for the ground track so it stays
+// visually distinct from the solid radar rings.
+void drawDottedLine(int x0, int y0, int x1, int y1, uint16_t col, int dash, int gap) {
+  float dx = x1 - x0, dy = y1 - y0;
+  float len = sqrtf(dx * dx + dy * dy);
+  if (len < 0.5f) return;
+  float ux = dx / len, uy = dy / len;
+  float t = 0.0f;
+  while (t < len) {
+    float a = t, b = t + dash;
+    if (b > len) b = len;
+    tft.drawLine((int)(x0 + ux * a), (int)(y0 + uy * a),
+                 (int)(x0 + ux * b), (int)(y0 + uy * b), col);
+    t += dash + gap;
+  }
+}
+
+// Draw the tracked flight's past ground-track polyline on a radar. Points are
+// stored as (dx,dy) miles from the observer; off-screen dashes are clipped.
+void drawTrackPolyline(int cx, int cy, float scale) {
+  if (g_trackCount < 2) return;
+  int prevX = cx + (int)(g_trackPts[0].dxMi * scale);
+  int prevY = cy - (int)(g_trackPts[0].dyMi * scale);
+  for (int i = 1; i < g_trackCount; i++) {
+    int x = cx + (int)(g_trackPts[i].dxMi * scale);
+    int y = cy - (int)(g_trackPts[i].dyMi * scale);
+    drawDottedLine(prevX, prevY, x, y, TFT_LIGHTGREY, 3, 3);
+    prevX = x; prevY = y;
+  }
 }
 
 // Bounding radius of a blip (plane icon or its dot fallback), used both for
@@ -1510,6 +1610,7 @@ void drawRadar() {
   int cx = kRadarCX, cy = kRadarCY, r = kRadarR;
   drawRadarFrame(cx, cy, r);
   float scale = r / g_radiusMi;
+  drawTrackPolyline(cx, cy, scale);
   // Draw other flights first, then the tracked flight last so its cyan dot is
   // always painted on top and can't be hidden by a neighbor drawn after it.
   for (int i = 1; i < planeCount; i++) {
@@ -1534,6 +1635,9 @@ void drawRadarInPlace() {
     if (p.blipOn) eraseRadarBlip(p.lastPx, p.lastPy);
   }
   drawRadarFrame(cx, cy, r);
+  // Redraw the ground track after erasing blips so a moved blip doesn't leave a
+  // black hole through the track, then draw blips on top.
+  drawTrackPolyline(cx, cy, scale);
   // Draw other flights first, then the tracked flight last so its cyan dot is
   // always on top (see drawRadar).
   for (int i = 1; i < planeCount; i++) {
@@ -1549,6 +1653,7 @@ void drawRadarInPlace() {
 void drawFlightDetailRadar() {
   int cx = kRadarCX, cy = kRadarCY, r = kRadarR;
   drawRadarFrame(cx, cy, r);
+  drawTrackPolyline(cx, cy, r / g_radiusMi);
   // Cyan so the flight whose details are shown is easy to pick out.
   g_flightBlipOn = plotRadarBlip(cx, cy, r / g_radiusMi,
                                  g_lastFlight.dxMi, g_lastFlight.dyMi, g_lastFlight.distMi,
@@ -1562,6 +1667,7 @@ void drawFlightDetailRadarInPlace() {
   int cx = kRadarCX, cy = kRadarCY, r = kRadarR;
   if (g_flightBlipOn) eraseRadarBlip(g_flightLastPx, g_flightLastPy);
   drawRadarFrame(cx, cy, r);
+  drawTrackPolyline(cx, cy, r / g_radiusMi);
   g_flightBlipOn = plotRadarBlip(cx, cy, r / g_radiusMi,
                                  g_lastFlight.dxMi, g_lastFlight.dyMi, g_lastFlight.distMi,
                                  g_flightLastPx, g_flightLastPy, TFT_CYAN, g_lastFlight.hdgDeg,
@@ -1595,14 +1701,21 @@ void stepRadar() {
     unsigned long dt = now - p.lastStepMs;
     p.lastStepMs = now;
     if (dt > 2000) continue;          // gap too long: don't extrapolate
-    deadReckonPosition(p.dxMi, p.dyMi, p.distMi, p.hdgDeg, p.spdKt, dt);
+    // The tracked (overhead) flight dead-reckons along its real ground track's
+    // bearing when we have it; everyone else uses the live heading.
+    float hdg = p.hdgDeg;
+    if (i == 0 && g_trackBearingDeg >= 0.0f) hdg = g_trackBearingDeg;
+    deadReckonPosition(p.dxMi, p.dyMi, p.distMi, hdg, p.spdKt, dt);
   }
   if (g_lastFlight.valid) {
     unsigned long dt = now - g_lastFlight.tickMs;
     g_lastFlight.tickMs = now;
-    if (dt <= 2000)
+    if (dt <= 2000) {
+      float hdg = g_lastFlight.hdgDeg;
+      if (g_trackBearingDeg >= 0.0f) hdg = g_trackBearingDeg;
       deadReckonPosition(g_lastFlight.dxMi, g_lastFlight.dyMi, g_lastFlight.distMi,
-                         g_lastFlight.hdgDeg, g_lastFlight.spdKt, dt);
+                         hdg, g_lastFlight.spdKt, dt);
+    }
   }
 
   // Move blips in place only on a screen that is actually showing a radar;
@@ -1652,10 +1765,8 @@ void drawFlightDetailPage() {
     // Origin/destination from the snapshot (same rules as drawFlightInfo).
     const char* origin = g_lastFlight.origin;
     const char* dest   = g_lastFlight.dest;
-    const char* ign    = g_homeAirport.c_str();
-    bool ignoring = (ign[0] != 0);
-    bool origKnown = origin[0] != 0 && !(ignoring && strcmp(origin, ign) == 0);
-    bool destKnown = dest[0] != 0 && !(ignoring && strcmp(dest, ign) == 0);
+    bool origKnown = (origin[0] != 0);
+    bool destKnown = (dest[0] != 0);
     int y = 114;
     if (origKnown) {
       tft.setTextColor(TFT_CYAN, TFT_BLACK);
@@ -1836,6 +1947,11 @@ void handleTouch() {
 
   if (g_screen == SCR_WXGRAPH) { handleWxGraphTouch(x, y); return; }
 
+  if (g_screen == SCR_CREDITS) {
+    if (inRect(x, y, 265, 4, 315, 24)) { g_screen = g_creditsReturn; dirty = true; return; }  // Back
+    return;
+  }
+
   if (g_screen == SCR_RESET) {
     if (g_resetConfirm == 0) {
       // Step 1: choose what to reset.
@@ -1948,6 +2064,10 @@ void handleTouch() {
     bool overhead = g_trackEnabled && !g_suppressFlight
                     && (planeCount > 0 && planes[0].distMi <= g_radiusMi);
 
+    // tapping the credits ("C<remaining>") in the header opens the OpenSky
+    // Credits screen (three buckets). Zone avoids the flight Back button.
+    if (inRect(x, y, 194, 0, 264, 33)) { g_creditsReturn = SCR_DASH; g_screen = SCR_CREDITS; dirty = true; return; }
+
     // settings cog -> settings. Generous tap zone so it's easy to hit even with
     // a small touch-calibration offset (the cog itself is only ~28x24).
     if (inRect(x, y, 278, 184, 320, 234)) { g_screen = SCR_SETTINGS; dirty = true; return; }
@@ -1996,8 +2116,10 @@ void handleTouch() {
 
   if (g_screen == SCR_FLIGHTDETAIL) {
     // Any tap keeps the page open (resets the 30s auto-return); the upper-right
-    // Back button returns to the dashboard.
+    // Back button returns to the dashboard; tapping the header credits opens
+    // the OpenSky Credits screen (returning back here).
     g_flightDetailUntil = millis() + 30000UL;
+    if (inRect(x, y, 194, 0, 264, 33)) { g_creditsReturn = SCR_FLIGHTDETAIL; g_screen = SCR_CREDITS; dirty = true; return; }
     if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_DASH; dirty = true; return; }
     return;
   }
@@ -2478,6 +2600,7 @@ void loop() {
     else if (g_screen == SCR_POOLGRAPH) drawPoolGraph();
     else if (g_screen == SCR_WXGRAPH) drawWxGraph();
     else if (g_screen == SCR_FLIGHTDETAIL) drawFlightDetailPage();
+    else if (g_screen == SCR_CREDITS) drawCredits();
     else drawDashboard();
     dirty = false;
   }
