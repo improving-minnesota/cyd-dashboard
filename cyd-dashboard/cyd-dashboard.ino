@@ -254,6 +254,7 @@ int g_goveeSel = 0;           // selected index
 float g_poolTemp = 0;         // latest temperature (F)
 char  g_poolUnit = 'F';       // unit of the fetched value
 bool  g_poolValid = false;    // true when a temp was fetched successfully
+bool  g_goveeAuthBad = false; // Govee API rejected the key (401/403) -> invalid creds
 bool  g_poolEnabled = false;  // Pool Temp feature on/off (defaults off)
 unsigned long g_lastPool = 0;
 const unsigned long POOL_REFRESH_MS = 300UL * 1000UL;  // 5 min (respect Govee API limits)
@@ -567,17 +568,28 @@ bool httpsBegin(HTTPClient& http, NetworkClientSecure& sec, const char* url, con
 // tearing down and re-establishing the connection with a short pause between
 // attempts. Any real HTTP response (code >= 0, even a non-200) ends the loop,
 // since a server reply proves the network path works. Returns the final HTTP
-// code, or -1 if every attempt failed at the transport layer. Callers must set
-// timeouts/headers before calling (they persist across the internal re-begins)
-// and must keep `sec`/`http` alive to read the response afterwards.
+// code, or -1 if every attempt failed at the transport layer.
+//
+// `headers` is a nullptr-terminated array of alternating "name"/"value"
+// strings (e.g. {"Content-Type","application/json",nullptr}); an empty value
+// skips that header. Headers must be passed here rather than set with
+// addHeader() before calling, because arduino-esp32's HTTPClient clears its
+// header list on begin()/end() and would otherwise drop them. Keep `sec`/`http`
+// alive to read the response afterwards.
 int httpsRequestRetry(HTTPClient& http, NetworkClientSecure& sec, const char* url,
-                      const char* roots, int method, const String& body) {
+                      const char* roots, int method, const String& body,
+                      const char* const* headers) {
   int code = -1;
   for (int attempt = 1; attempt <= HTTPS_RETRY_ATTEMPTS; attempt++) {
     http.end();                // release any previous attempt's connection
     sec.stop();                // close the TLS socket cleanly
     if (attempt > 1) delay(HTTPS_RETRY_DELAY_MS);
     if (!httpsBegin(http, sec, url, roots)) continue;   // connect failed -> retry
+    if (headers) {
+      for (int i = 0; headers[i] && headers[i + 1]; i += 2) {
+        if (headers[i + 1][0]) http.addHeader(headers[i], headers[i + 1]);
+      }
+    }
     code = (method == HTTPS_METHOD_POST) ? http.POST(body) : http.GET();
     if (code >= 0) break;      // server responded (non-200): don't retry
   }
@@ -618,23 +630,29 @@ bool openskyEnsureToken() {
   // TLS is verified against the bundled ISRG roots. Unlike the OTA path there
   // is no insecure fallback, so a handshake/validation failure (e.g. expired
   // CA or a MITM) is a hard error, never a silent downgrade to anonymous. The
-  // exchange is retried on transient transport failures, since a dropped token
-  // refresh is the classic way this auth path flakes out after prolonged uptime.
+  // exchange is retried on transient transport failures.
+  //
+  // Failure classification (drives whether the dashboard flags bad credentials):
+  //   - transport failure, 429/5xx, or a malformed 200 -> transient; set
+  //     g_osHandshakeFailed so the caller keeps the last known auth state.
+  //   - token endpoint 400/401 (Keycloak "invalid_client") -> genuine bad
+  //     credentials; leave g_osHandshakeFailed false so AUTH_BAD is surfaced.
   NetworkClientSecure sec;
   HTTPClient http;
   http.setTimeout(5000);
-  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   String body = "grant_type=client_credentials&client_id=" + urlEncode(g_osClientId) +
                 "&client_secret=" + urlEncode(g_osClientSecret);
-  int code = httpsRequestRetry(http, sec, kOsTokenUrl, kISRGRootCAs, HTTPS_METHOD_POST, body);
+  const char* tokenHdrs[] = { "Content-Type", "application/x-www-form-urlencoded", nullptr };
+  int code = httpsRequestRetry(http, sec, kOsTokenUrl, kISRGRootCAs, HTTPS_METHOD_POST, body, tokenHdrs);
   if (code < 0) { g_osHandshakeFailed = true; return false; }  // TLS/transport failure on all attempts
-  if (code != HTTP_CODE_OK) return false;
+  if (code == HTTP_CODE_UNAUTHORIZED || code == HTTP_CODE_BAD_REQUEST) return false;  // genuine bad creds
+  if (code != HTTP_CODE_OK) { g_osHandshakeFailed = true; return false; }  // transient server error (429/5xx)
   String payload = http.getString();
   http.end();
   JsonDocument doc;
-  if (deserializeJson(doc, payload)) return false;
+  if (deserializeJson(doc, payload)) { g_osHandshakeFailed = true; return false; }
   const char* tok = doc["access_token"];
-  if (!tok || !tok[0]) return false;
+  if (!tok || !tok[0]) { g_osHandshakeFailed = true; return false; }
   g_osToken = tok;
   int expiresIn = doc["expires_in"] | (kOsTokenLifetimeMs / 1000);
   int margin = (expiresIn > 30) ? 30 : 5;   // refresh shortly before expiry
@@ -721,10 +739,10 @@ void fetchFlights() {
   // the (anonymous) response, so a blip can't show a false "Invalid
   // Credentials" error or freeze the dashboard.
   bool authed = openskyEnsureToken();
-  if (authed) {
-    http.addHeader("Authorization", "Bearer " + g_osToken);
-  }
-  int code = httpsRequestRetry(http, sec, osurl, kISRGRootCAs, HTTPS_METHOD_GET, "");
+  String authHdr;
+  if (authed) authHdr = "Bearer " + g_osToken;
+  const char* flightHdrs[] = { "Authorization", authHdr.c_str(), nullptr };
+  int code = httpsRequestRetry(http, sec, osurl, kISRGRootCAs, HTTPS_METHOD_GET, "", flightHdrs);
   g_authChecked = true;   // we've made a real OpenSky attempt; auth state is now meaningful
   // Negative code = the flight-data request itself hit a TLS handshake /
   // transport failure (e.g. cert rejected or connection reset). That is a
@@ -738,9 +756,10 @@ void fetchFlights() {
     return;
   }
   if (code == HTTP_CODE_UNAUTHORIZED) {
-    // Token was rejected/expired; drop it so the next poll refreshes.
+    // Token was rejected/expired; drop it so the next poll refreshes. Don't
+    // flag AUTH_BAD here: a stale/expired token is transient, and the refresh
+    // on the next poll determines whether the credentials are truly bad.
     g_osTokenValid = false;
-    g_authState = AUTH_BAD;
     snprintf(lastErr, sizeof lastErr, "401");
     http.end();
     dirty = true;
@@ -939,9 +958,9 @@ bool geocodeAddress() {
   // Nominatim is Let's Encrypt signed, verified against the same ISRG roots.
   NetworkClientSecure sec;
   HTTPClient http;
-  http.addHeader("User-Agent", "cyd-dashboard/1.0 (contact: user@localhost)");
   http.setTimeout(5000);
-  int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTPS_METHOD_GET, "");
+  const char* geoHdrs[] = { "User-Agent", "cyd-dashboard/1.0 (contact: user@localhost)", nullptr };
+  int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTPS_METHOD_GET, "", geoHdrs);
   if (code != HTTP_CODE_OK) {
     http.end();
     snprintf(lastErr, sizeof lastErr, "geo %d", code);
@@ -1118,11 +1137,11 @@ void drawDashboard() {
 const char* dashboardCriticalLabel() {
   if (WiFi.status() != WL_CONNECTED) return "No WIFI";
   if (g_trackEnabled) {
-    if (g_authState == AUTH_BAD) return "Invalid Credentials";
+    if (g_authState == AUTH_BAD) return "Invalid OpenSky Creds";
     if (g_creditsKnown && g_creditsExhausted) return "No Flight Credits";
   }
 #if POOL_FEATURE
-  if (g_poolEnabled && !g_poolValid) return "Pool Temp Data Unavailable";
+  if (g_poolEnabled && !g_poolValid) return g_goveeAuthBad ? "Invalid Govee Creds" : "Pool Temp Data Unavailable";
 #endif
   return nullptr;
 }
