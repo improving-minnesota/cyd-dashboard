@@ -531,6 +531,71 @@ static const char* const kISRGRootCAs =
   "zj0EAwMDaAAwZQIwe3lORlCEwkSHRhtFcP9Ymd70/aTSVaYgLXTWNLxBo1BfASdW\n"
   "tL4ndQavEi51mI38AjEAi/V3bNTIZargCyzuFJ0nN6T5U6VR5CmD1/iQMVtCnwr1\n"
   "/q4AaOeMSQ+2b1tbFfLn\n"
+  "-----END CERTIFICATE-----\n"
+  // Let's Encrypt intermediates so verification works when the served chain
+  // omits them (was intermittently MBEDTLS_ERR_X509_CERT_VERIFY_FAILED).
+  "-----BEGIN CERTIFICATE-----\n"
+  "MIIE2zCCAsOgAwIBAgIRAKICU/FfJpHAXcHOE7m8yk4wDQYJKoZIhvcNAQELBQAw\n"
+  "LjELMAkGA1UEBhMCVVMxDTALBgNVBAoTBElTUkcxEDAOBgNVBAMTB1Jvb3QgWVIw\n"
+  "HhcNMjUwOTAzMDAwMDAwWhcNMjgwOTAyMjM1OTU5WjAzMQswCQYDVQQGEwJVUzEW\n"
+  "MBQGA1UEChMNTGV0J3MgRW5jcnlwdDEMMAoGA1UEAxMDWVIxMIIBIjANBgkqhkiG\n"
+  "9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoVi8X2xCYgMXvJxNPKp/oF13UMgmPABB07VC\n"
+  "LNDtoXmt9luEZNJSBV10VyT1Pz6LD8Zq1d2gc43WNl1AdRrj4sEnazbOiz0nPpmG\n"
+  "Bp2hui49oZtDIY6wdKeZAi5BbNU20CH6RSBBMLSQ9cXrH8dxdv4PAJ45ssGML68U\n"
+  "SE3BsjC2a6cAN9L5CgXVIQi5tfNiTPoFZZ3S0OlXqLmmtdV95udWAb5b6e/F49Di\n"
+  "CsH0Y00Ag72BVIb1hzynmKe+X0mERBTtsb3BwmpV9ipeBjMLoR/D9cHxHQCWoi5l\n"
+  "TmXwY015J5rGelz1nZjJuxc2kioaX29XJBnhMkP531rSdG5uMwIDAQABo4HuMIHr\n"
+  "MA4GA1UdDwEB/wQEAwIBhjATBgNVHSUEDDAKBggrBgEFBQcDATASBgNVHRMBAf8E\n"
+  "CDAGAQH/AgEAMB0GA1UdDgQWBBQfLzW+RhSCzUCxrnksVXj699Ro+zAfBgNVHSME\n"
+  "GDAWgBTe51tg0CJtQCh9Pw0B/qS1UrRRlDAyBggrBgEFBQcBAQQmMCQwIgYIKwYB\n"
+  "BQUHMAKGFmh0dHA6Ly95ci5pLmxlbmNyLm9yZy8wEwYDVR0gBAwwCjAIBgZngQwB\n"
+  "AgEwJwYDVR0fBCAwHjAcoBqgGIYWaHR0cDovL3lyLmMubGVuY3Iub3JnLzANBgkq\n"
+  "hkiG9w0BAQsFAAOCAgEA0+zvMq3kHig1ddTmmm+RibTr9/RpX7k4buanMMRqbV/y\n"
+  "IvP82zAHN3mvaw+cASuVsdpd0ikjhr4hnhJQLQOzOp2ccKrsdGOAgo0vddeISFAq\n"
+  "EWEV4lmUM3vFF796up+bSgmJ1u6RupDCMxDgF8M3eLvGuj6L0lu3zkQ0KuQLnKxL\n"
+  "tB0oQqn1Idg5CuuGpMvQzk29Pa3D/qHurc0EIM9SxukQuJqq63lxsYyRQFU8yMBO\n"
+  "hq1w5LbfaWNRrz1uklOfI/pYkAb2E2MTZrAMQkBIE2S8Jt1F8gRc96o/xOsrgvSk\n"
+  "a84AisX6xq1lz1Z7jGvrnXc4TMcjxZTjiTaihcYI1JIXZiLtEMSCa5l3cu8YWd6z\n"
+  "dLRQlqRdclVjuQfNHawRJ6GWlkK0QJosivTKwdBw3KxEtzGo8yMHERbsy57gP1UX\n"
+  "HOMcmZYQC0gtyR3SxfenIM/MxC3Ia2Ypab/kQ/CTnlIn2KQ5JUC6NYrGCbhFN9bp\n"
+  "5lKJStEwCUnLpntcrXk5XVDCNv/5RyWpRThkGOV7GetKkQ0qAY8hCzWK6oqnAhDZ\n"
+  "cjlYVdWfqOw3DIOX6EDNBgAqHarRVxyF9QZdOaXSyPJ0ueD2BYJEBgaCGQ8rAaU/\n"
+  "Qc123V5LTXDZW4CcsPBDyhy4v+c8hClAyw/IkJlfBqxB9D+/wvIMHgECZ4ptP6o=\n"
+  "-----END CERTIFICATE-----\n"
+  "-----BEGIN CERTIFICATE-----\n"
+  "MIIF9DCCA9ygAwIBAgIRAPJLbRf52a18scn+p4eCaZ8wDQYJKoZIhvcNAQELBQAw\n"
+  "TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh\n"
+  "cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMjYwNTEzMDAwMDAw\n"
+  "WhcNMzIwOTAyMjM1OTU5WjAuMQswCQYDVQQGEwJVUzENMAsGA1UEChMESVNSRzEQ\n"
+  "MA4GA1UEAxMHUm9vdCBZUjCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIB\n"
+  "ANvGJnN78CTJdWL3+eGfsLN5TrNBJs+VH9hRXqRbwxu9sGNiB0BD1fcOxbSUQCJI\n"
+  "M1xE13Db+5Cw1w0s0EBYsvuIP/6joF0w8cuImbgR1OGgYbSQ4OpzI+DG8SGuTlcE\n"
+  "873OCS+kh3srlo6vl43M5OJg4Aeo1sfHp6kTJDoIiFBNJAY+OKfX/FUvYKuhjT+n\n"
+  "o49lmqmupSBI5PkBQiqrEGtWU5uxU/cQWHGu8jSjFBznZqvbNPLMXMLFxCb3WTfr\n"
+  "JBXXjqvWG+v4bjzxjjeAtOlU7qarRDvNOyAuQYLln904M+faKx8hnLCpJ15ZqaEg\n"
+  "cNlY+9MMWcC5yvL2A2j3l9+2buggZX+dOE91zYmIdawTvSZuVvlbRrAlLxIB6pwM\n"
+  "BjneXCjYQ8+3BCCjssbSNpZU3hTcBDdhfAlEDlYr6pEatnMdmDT5BqnKC92bd0Eh\n"
+  "M1fbLHioLccLCuievT8ZkPhZrq7Mii7gNXAcUEAR8+lzYal+9zTg7C5DALyVOeG/\n"
+  "CqfRAMn1KSHCR0NSA6P8tn/mGRlnCct5rtVCLnVySVpU6H1qGg3DgTOuskf8eahT\n"
+  "MiYbI5ezPJmO5ertalskQ1utp74+eDy92PI4ftHKTbq9IWhH4YZKh3WnJEIt+oQv\n"
+  "lYZbY8tpEroKrFB6PFGzrJIDRyts4HqvuH52RFj2zv/BAgMBAAGjgeswgegwDgYD\n"
+  "VR0PAQH/BAQDAgEGMBMGA1UdJQQMMAoGCCsGAQUFBwMBMA8GA1UdEwEB/wQFMAMB\n"
+  "Af8wHQYDVR0OBBYEFN7nW2DQIm1AKH0/DQH+pLVStFGUMB8GA1UdIwQYMBaAFHm0\n"
+  "WeZ7tuXkAXOACIjIGlj26ZtuMDIGCCsGAQUFBwEBBCYwJDAiBggrBgEFBQcwAoYW\n"
+  "aHR0cDovL3gxLmkubGVuY3Iub3JnLzATBgNVHSAEDDAKMAgGBmeBDAECATAnBgNV\n"
+  "HR8EIDAeMBygGqAYhhZodHRwOi8veDEuYy5sZW5jci5vcmcvMA0GCSqGSIb3DQEB\n"
+  "CwUAA4ICAQA8spSI95KKfn2W6GMmDpHBJSPaLbsS3W93cijJCRCYAc1fsJgL1FIL\n"
+  "7C0C9ecPOdcwB2fi0Dk2p94j9iTJCxmt5CFSKLRWwnXT2MMSXexVxqoVB79BdWPx\n"
+  "VXETkVme/qYSAuKVHh5Ps+5BixgmwS1JkjSAc+MfrUbNssVEEnH0aEiAh+rotXAV\n"
+  "JSP/Ye7LJPEwD9DWG72vVWbhAcuOf5OLjz57Ctk7MgQHynZ7+PlHJtajroCaIbtC\n"
+  "r6tcZZaAwUQm+jQyeWdV+2hv9deOYFmKeQyjjcSrN5Nadrw+L9DZJLbA1HqeNvLh\n"
+  "BgqpP0fvJq2N6EtD574N6eMI7uMsJTnji2UDz9el5XLSv9fqJMuDQtYVb2oTNoKp\n"
+  "oUqhxPVC0aq4eG5MESaIdn8b5ZGSSeAJLMHXljEdlNza+ncfkviXk1POLnnFdvx8\n"
+  "/gk6M374WbLWFXw8N141B/Rl/tINGfl1TxOIiqtiMYkL02RSGb1kq34BL9NPP27z\n"
+  "RGMuHGnzS3hFIrRTfKxrzUZ9RzQWzEG3K6fJ3r2nqSltkeytis9DIBoFY9VmVyjL\n"
+  "M71DMi+y1+TRSJVClEMwvA4yL++7q9XZx5r5wBRWB4kQTKH5qyoZnDw7iiuh1lID\n"
+  "yDFx8r7i9vIJU5HS3moZLkYWAOilMaV9N56A9Bgb6dNcHkvg3NoaYA==\n"
+  "-----END CERTIFICATE-----\n"
   "-----END CERTIFICATE-----\n";
 
 // Root CA bundle for hosts NOT served by Let's Encrypt. Govee's Open API
@@ -724,9 +789,8 @@ void fetchFlights() {
     if (WiFi.status() != WL_CONNECTED) { snprintf(lastErr, sizeof lastErr, "no wifi"); dirty = true; return; }
     connected = true;
   }
-
-  // Flight-data request uses verified TLS against the bundled ISRG roots, the
-  // same as the token exchange (no insecure fallback).
+  // Scope so sec/http (and their TLS buffers) are freed before route/track TLS.
+  {
   NetworkClientSecure sec;
   HTTPClient http;
   char osurl[240];
@@ -879,6 +943,7 @@ void fetchFlights() {
     p.dyMi = dlat * 69.0f;
     p.dxMi = dlon * 69.0f;
   }
+  }  // end scoped fetch block (frees states sec/http + TLS context before route/track handshake)
   sortPlanes();
   // A freshly found overhead flight re-shows the flight view even if the user
   // had dismissed it earlier via the countdown bar. If the overhead plane's
@@ -984,6 +1049,8 @@ bool geocodeAddress() {
              + urlEncode(g_addrSearch);
 
   // Nominatim is Let's Encrypt signed, verified against the same ISRG roots.
+  // Scope so sec/http (and their TLS buffers) are freed before fetchWeather().
+  {
   NetworkClientSecure sec;
   HTTPClient http;
   http.setTimeout(5000);
@@ -1017,6 +1084,7 @@ bool geocodeAddress() {
   if (g_lastPlace.length() > 40) g_lastPlace = g_lastPlace.substring(0, 40);
   saveFloat("lat", g_lat);
   saveFloat("lon", g_lon);
+  }  // end geocode scoped block (frees sec/http + TLS buffers before fetchWeather)
   fetchWeather();   // refresh weather immediately for the new location
   snprintf(lastErr, sizeof lastErr, "ok");
   return true;
@@ -1048,10 +1116,24 @@ void drawHeaderBand() {
   tft.setTextSize(1);
   tft.setCursor(4, 11);
   tft.print(fmtDate());
+  // Three independent OpenSky credit buckets, one per line, in the right side
+  // of the header: CRP (radar polling), CRL (route lookup), CFT (flight
+  // tracking). A "?" means that bucket's balance hasn't been observed yet. The
+  // block sits inside the header's credits tap zone (see the touch handler).
   tft.setTextColor(HEADER_ACCENT, bg);
-  tft.setCursor(198, 11);
-  if (g_creditsKnown) tft.printf("C%d", g_creditsRemaining);
-  else tft.print("C?");
+  tft.setCursor(194, 4);   tft.print("CRP:");
+  tft.setCursor(194, 14);  tft.print("CRL:");
+  tft.setCursor(194, 24);  tft.print("CFT:");
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.setCursor(230, 4);
+  if (g_creditsKnown) tft.printf("%d", g_creditsRemaining);
+  else tft.print("?");
+  tft.setCursor(230, 14);
+  if (g_flightsCredits >= 0) tft.printf("%d", g_flightsCredits);
+  else tft.print("?");
+  tft.setCursor(230, 24);
+  if (g_tracksCredits >= 0) tft.printf("%d", g_tracksCredits);
+  else tft.print("?");
   // bigger, bolder clock: FONT2 doubled
   tft.setTextFont(2);
   tft.setTextSize(2);
@@ -1121,13 +1203,16 @@ void updateDashboard() {
     dirty = true;
     return;
   }
-  // Only redraw the header when the clock text actually changes (once a minute).
-  // Redrawing the whole header band every second caused visible flicker even
-  // though the time/date text does not change that often.
+  // Only redraw the header when the clock text or any credit value actually
+  // changes. Redrawing the whole header band every second caused visible
+  // flicker even though the time/date text does not change that often.
   static String lastClock;
+  static int lastC = -1, lastF = -1, lastT = -1;
   String curClock = fmtClock();
-  if (curClock != lastClock) {
+  int c = g_creditsKnown ? g_creditsRemaining : -1;
+  if (curClock != lastClock || c != lastC || g_flightsCredits != lastF || g_tracksCredits != lastT) {
     lastClock = curClock;
+    lastC = c; lastF = g_flightsCredits; lastT = g_tracksCredits;
     drawHeaderBand();
     // The header redraw covers the Back button (it sits inside the header band),
     // so restore it. On the dashboard only when a flight is overhead; the
@@ -1289,6 +1374,7 @@ void drawCog() {
   tft.fillCircle(cx, cy, 4, TFT_BLACK);
 }
 
+// ---- LED flash notifications ----
 // CYD RGB LED pins (active-low). Used to flash when a noteworthy flight is overhead.
 #define CYD_LED_RED   4
 #define CYD_LED_GREEN 16
@@ -1331,6 +1417,7 @@ void flashLed(bool departingDFW, bool incomingDFW, bool top50, bool white) {
   digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
 }
 
+// ---- Flight details card ----
 // Back button (upper-right) that dismisses the overhead flight back to idle.
 void drawFlightBackButton() {
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
@@ -1413,13 +1500,13 @@ void drawFlightInfo(Plane& p) {
     tft.setCursor(8, y + 16); tft.print(dest);           // airport code
     tft.setCursor(8, y + 32); tft.print(airportCity(dest));     // city
   } else if (g_routeFetched && destEmpty && origKnown) {
-    // Origin known but OpenSky had no destination for this in-flight aircraft
-    // (it doesn't populate the arrival airport until after landing). Show it
-    // explicitly as unknown so it can't be misread as origin == destination.
+    // OpenSky leaves arrival unknown until landing; show "--" (code + city) so
+    // the block height matches a known endpoint and isn't read as origin==dest.
     tft.setTextColor(TFT_CYAN, TFT_BLACK);
     tft.setCursor(8, y); tft.print("Destination");
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-    tft.setCursor(8, y + 16); tft.print("--");
+    tft.setCursor(8, y + 16); tft.print("--");   // airport code placeholder
+    tft.setCursor(8, y + 32); tft.print("--");   // city placeholder
   }
   // If neither side had route data, say so so it is clear the feature is there.
   if (g_routeFetched && !origKnown && !destKnown) {
@@ -1438,6 +1525,7 @@ void drawFlightInfo(Plane& p) {
   }
 }
 
+// ---- Radar (frame, blips, ground track, projection) ----
 // Shared radar geometry: the dashboard overhead radar and the flight-detail
 // radar both use the same center/radius, so blips can be redrawn in place.
 static const int kRadarCX = 235, kRadarCY = 155, kRadarR = 48;
@@ -1472,6 +1560,15 @@ void drawDottedLine(int x0, int y0, int x1, int y1, uint16_t col, int dash, int 
   }
 }
 
+// Which UI zones a dotted line is clipped against.
+enum ClipZones {
+  CLIP_DYN,       // dynamic: header/menu bar+clock, countdown bar
+  CLIP_DYN_COG,   // + settings cog (flight track)
+  CLIP_ALL        // + flight-info text, airline logo (projection)
+};
+// Forward decl (defined after kBlipR, which the keep-out rects reference).
+void drawDottedLineSafe(int x0, int y0, int x1, int y1, uint16_t col, int dash, int gap, ClipZones zones);
+
 // Draw the tracked flight's past ground-track polyline on a radar. Points are
 // stored as (dx,dy) miles from the observer; off-screen dashes are clipped.
 void drawTrackPolyline(int cx, int cy, float scale) {
@@ -1481,9 +1578,35 @@ void drawTrackPolyline(int cx, int cy, float scale) {
   for (int i = 1; i < g_trackCount; i++) {
     int x = cx + (int)(g_trackPts[i].dxMi * scale);
     int y = cy - (int)(g_trackPts[i].dyMi * scale);
-    drawDottedLine(prevX, prevY, x, y, TFT_LIGHTGREY, 3, 3);
+    drawDottedLineSafe(prevX, prevY, x, y, TFT_CYAN, 3, 3, CLIP_DYN_COG);
     prevX = x; prevY = y;
   }
+}
+
+// From the track's end, extend to the screen edge along the track bearing.
+// Static, redrawn each frame so the blip doesn't leave a hole; only with a track.
+void drawTrackProjection(int cx, int cy, float scale) {
+  if (g_trackCount < 1 || g_trackBearingDeg < 0.0f) return;
+  // Start exactly where the historical track ends, so it is contiguous.
+  int sx = cx + (int)(g_trackPts[g_trackCount - 1].dxMi * scale);
+  int sy = cy - (int)(g_trackPts[g_trackCount - 1].dyMi * scale);
+  // Direction = the track's end bearing (north-up, clockwise; screen flips y).
+  float rad = g_trackBearingDeg * PI / 180.0f;
+  float ux = sinf(rad) * scale;    // east -> +x
+  float uy = -cosf(rad) * scale;   // north -> -y
+  float um = sqrtf(ux * ux + uy * uy);
+  if (um == 0.0f) return;
+  ux /= um; uy /= um;
+  // Extend the ray from the track end until it leaves the screen.
+  float t = 1e9f;
+  if (ux > 0.0001f) t = fminf(t, (319 - sx) / ux);
+  if (ux < -0.0001f) t = fminf(t, (0 - sx) / ux);
+  if (uy > 0.0001f) t = fminf(t, (239 - sy) / uy);
+  if (uy < -0.0001f) t = fminf(t, (0 - sy) / uy);
+  int ex = sx + (int)(ux * t);
+  int ey = sy + (int)(uy * t);
+  // Same grey as the trail but sparser dots; clipped to safe (non-UI) areas.
+  drawDottedLineSafe(sx, sy, ex, ey, TFT_LIGHTGREY, 1, 6, CLIP_ALL);
 }
 
 // Bounding radius of a blip (plane icon or its dot fallback), used both for
@@ -1496,6 +1619,79 @@ const int kBlipR = 11;
 // bigger so it stands out from the other (smaller) planes.
 const float kOtherScale   = 1.0f;   // non-tracked flights
 const float kTrackedScale = 1.6f;   // tracked (overhead) flight
+
+// ---- line clipping for the track/projection ----
+struct Seg { int x0, y0, x1, y1; };
+
+// Liang-Barsky: the parameter interval [t0,t1] of the segment that lies INSIDE
+// rect [rx0..rx1]x[ry0..ry1]. Returns false if the segment never enters.
+static bool segInsideRect(int x0, int y0, int x1, int y1,
+                          int rx0, int ry0, int rx1, int ry1,
+                          float& t0, float& t1) {
+  float dx = (float)(x1 - x0), dy = (float)(y1 - y0);
+  t0 = 0.0f; t1 = 1.0f;
+  float p[4] = { -dx, dx, -dy, dy };
+  float q[4] = { (float)x0 - rx0, (float)rx1 - x0, (float)y0 - ry0, (float)ry1 - y0 };
+  for (int i = 0; i < 4; i++) {
+    if (p[i] == 0.0f) {
+      if (q[i] < 0) return false;
+    } else {
+      float r = q[i] / p[i];
+      if (p[i] < 0) { if (r > t1) return false; if (r > t0) t0 = r; }
+      else          { if (r < t0) return false; if (r < t1) t1 = r; }
+    }
+  }
+  return true;
+}
+
+// Dotted line that skips the same UI keep-out zones blipBlocked() protects.
+void drawDottedLineSafe(int x0, int y0, int x1, int y1, uint16_t col, int dash, int gap, ClipZones zones) {
+  const int R = kBlipR;
+  Seg rects[5]; int nRects = 0;
+  // Dynamic zones are always clipped: the header/menu bar (with the clock) and
+  // the countdown bar when enabled. These change/redraw frequently, so a line
+  // drawn over them would leave stale artifacts.
+  rects[nRects++] = { -50, -50, 370, 33 + R };              // header/menu bar + clock
+  if (g_screen == SCR_DASH && g_showTimer && g_trackEnabled)
+    rects[nRects++] = { 302 - R, 34 - R, 320 + R, 200 + R };   // countdown bar
+  // The settings cog is clipped for the track and projection.
+  if (g_screen == SCR_DASH && zones != CLIP_DYN)
+    rects[nRects++] = { 296 - R, 200 - R, 320 + R, 213 + R };  // settings cog
+  // Static zones (flight-info text, airline logo) are only clipped for the
+  // projection; the track is allowed to pass over them.
+  if (zones == CLIP_ALL) {
+    rects[nRects++] = { -R, 34 - R, 171 + R, 208 + R };     // flight-info text
+    rects[nRects++] = { 222 - R, 34 - R, 320 + R, 93 + R }; // airline logo
+  }
+  Seg cur[32]; int m = 1;                       // current segments (safe portions)
+  cur[0] = { x0, y0, x1, y1 };
+  for (int r = 0; r < nRects && m > 0; r++) {
+    Seg next[32]; int k = 0;
+    for (int i = 0; i < m; i++) {
+      float t0, t1;
+      if (!segInsideRect(cur[i].x0, cur[i].y0, cur[i].x1, cur[i].y1,
+                         rects[r].x0, rects[r].y0, rects[r].x1, rects[r].y1, t0, t1)) {
+        if (k < 32) next[k++] = cur[i];         // fully outside this rect: keep
+      } else {
+        if (t0 > 0.001f && k < 32) {            // keep [0,t0]
+          next[k] = cur[i];
+          next[k].x1 = (int)(cur[i].x0 + (cur[i].x1 - cur[i].x0) * t0);
+          next[k].y1 = (int)(cur[i].y0 + (cur[i].y1 - cur[i].y0) * t0);
+          k++;
+        }
+        if (t1 < 0.999f && k < 32) {            // keep [t1,1]
+          next[k] = cur[i];
+          next[k].x0 = (int)(cur[i].x0 + (cur[i].x1 - cur[i].x0) * t1);
+          next[k].y0 = (int)(cur[i].y0 + (cur[i].y1 - cur[i].y0) * t1);
+          k++;
+        }
+      }
+    }
+    m = k;
+    for (int i = 0; i < m; i++) cur[i] = next[i];
+  }
+  for (int i = 0; i < m; i++) drawDottedLine(cur[i].x0, cur[i].y0, cur[i].x1, cur[i].y1, col, dash, gap);
+}
 
 // Returns true if a blip centered at (px,py) would overlap an on-screen object
 // (header text, flight-info text, airline logo, or countdown bar). Such blips
@@ -1611,6 +1807,7 @@ void drawRadar() {
   drawRadarFrame(cx, cy, r);
   float scale = r / g_radiusMi;
   drawTrackPolyline(cx, cy, scale);
+  drawTrackProjection(cx, cy, scale);
   // Draw other flights first, then the tracked flight last so its cyan dot is
   // always painted on top and can't be hidden by a neighbor drawn after it.
   for (int i = 1; i < planeCount; i++) {
@@ -1638,6 +1835,7 @@ void drawRadarInPlace() {
   // Redraw the ground track after erasing blips so a moved blip doesn't leave a
   // black hole through the track, then draw blips on top.
   drawTrackPolyline(cx, cy, scale);
+  drawTrackProjection(cx, cy, scale);
   // Draw other flights first, then the tracked flight last so its cyan dot is
   // always on top (see drawRadar).
   for (int i = 1; i < planeCount; i++) {
@@ -1654,6 +1852,7 @@ void drawFlightDetailRadar() {
   int cx = kRadarCX, cy = kRadarCY, r = kRadarR;
   drawRadarFrame(cx, cy, r);
   drawTrackPolyline(cx, cy, r / g_radiusMi);
+  drawTrackProjection(cx, cy, r / g_radiusMi);
   // Cyan so the flight whose details are shown is easy to pick out.
   g_flightBlipOn = plotRadarBlip(cx, cy, r / g_radiusMi,
                                  g_lastFlight.dxMi, g_lastFlight.dyMi, g_lastFlight.distMi,
@@ -1668,6 +1867,7 @@ void drawFlightDetailRadarInPlace() {
   if (g_flightBlipOn) eraseRadarBlip(g_flightLastPx, g_flightLastPy);
   drawRadarFrame(cx, cy, r);
   drawTrackPolyline(cx, cy, r / g_radiusMi);
+  drawTrackProjection(cx, cy, r / g_radiusMi);
   g_flightBlipOn = plotRadarBlip(cx, cy, r / g_radiusMi,
                                  g_lastFlight.dxMi, g_lastFlight.dyMi, g_lastFlight.distMi,
                                  g_flightLastPx, g_flightLastPy, TFT_CYAN, g_lastFlight.hdgDeg,
@@ -2125,6 +2325,7 @@ void handleTouch() {
   }
 }
 
+// ---- Program setup ----
 void setup() {
   Serial.begin(115200);
   prefs.begin("flight", false);
@@ -2308,11 +2509,13 @@ void setup() {
 
   // Start the async network task on the other core so blocking HTTP calls never
   // freeze the main loop (touch + drawing).
-  xTaskCreatePinnedToCore(netTask, "net", 12288, NULL, 1, NULL, 0);
+  // 32KB: deep mbedTLS TLS handshake; netTask runs it one frame deeper now.
+  xTaskCreatePinnedToCore(netTask, "net", 32768, NULL, 1, NULL, 0);
 
   dirty = true;
 }
 
+// ---- Sleep / deep-sleep ----
 // Enter deep sleep with a timer wakeup (to keep logging the pool temp), plus
 // a touch-IRQ wakeup if TOUCH_IRQ_ENABLED and wired. Never returns.
 void enterDeepSleep() {
