@@ -18,9 +18,10 @@ no computer needed.
   logged to flash (always on) and graphed over Day / Week / Month / Year with the
   low, average, and high.
 - **Flight tracker** — live aircraft overhead (from OpenSky) with a mini radar,
-  callsign, altitude/speed/distance, origin & destination, and airline logo. The
-  LED flashes red or green when a flight is departing or arriving at DFW, and
-  blue for flights to/from a top US airport.
+  callsign, altitude/speed/distance, origin & destination, airline logo, and a
+  dotted ground-track line showing where the plane actually came from. The LED
+  flashes red or green when a flight is departing or arriving at your home
+  airport (DFW by default), and blue for flights to/from a top US airport.
 - **Govee pool temp monitor** — current pool water temperature from a Govee
   thermometer, with a history graph (Day / Week / Month / Year) showing the
   low, average, and high.
@@ -77,6 +78,9 @@ Where to get each credential is explained below.
 ## Using the device
 
 - Tap the **Settings** cog to open the settings menu.
+- Tap the **credits** ("C…") in the top-right header to open the **OpenSky
+  Credits** screen, which shows your daily credit usage for each bucket (radar
+  polling, route lookups, and flight tracking).
 - On the idle screen, tap the **weather temperature** (top-left) to open the
   weather temperature history graph.
 - On the idle screen, tap the **Pool** reading to open its history graph.
@@ -105,11 +109,12 @@ Defaults for a freshly reset device are shown with each setting.
 - **WiFi** — your network, plus any API credentials (OpenSky, Govee). Default:
   none — you must enter your WiFi.
 - **Flight Tracker** — on/off, units (mi or km), radar radius, altitude ceiling,
-  poll interval, the countdown/timer bar on the dashboard, your home airport,
-  and whether to blink the LED when a noteworthy flight is overhead. Also where
-  you enter your OpenSky credentials. Defaults: **on**, imperial units,
-  **3.5 mi** radius, **15,000 ft** ceiling, **60 s** poll, timer **off**, no
-  home airport, blinking **on**.
+  poll interval, the countdown/timer bar on the dashboard, your home airport
+  (which determines incoming/outgoing flights for the LED flash), and whether
+  to blink the LED when a noteworthy flight is overhead. Also where you enter
+  your OpenSky credentials. Defaults: **on**, imperial units, **3.5 mi** radius,
+  **15,000 ft** ceiling, **60 s** poll, timer **off**, no home airport (falls
+  back to DFW), blinking **on**.
 - **Sleep Mode** — enable it, set the start/end time, and the wake duration.
   Defaults: **on**, sleeps 10:00 PM – 8:00 AM, **10 min** wake.
 - **Pool Temp** — enable it, enter your Govee API key, and pick your

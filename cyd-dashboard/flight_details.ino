@@ -1,10 +1,13 @@
 // flight_details.ino - origin/destination + flight details view.
 //
-// When a plane is overhead and the user taps "Details", we look up its route
-// (origin/destination airports) via the OpenSky `flights/aircraft` endpoint and
-// show a details overlay. Airport ICAO codes are mapped to city names via a
-// small embedded table; unknown codes fall back to showing the raw code. The
-// route is fetched once per plane and cached, so it only costs credits once.
+// When a new plane becomes the nearest overhead aircraft, its route
+// (origin/destination airports) is fetched automatically the first time it is
+// seen via the OpenSky `flights/aircraft` endpoint and cached (g_routeFetched,
+// reset whenever the overhead identity changes), so it only costs credits once
+// per distinct plane. Tapping "Details" only recalls/redisplays that cached
+// route — it does not trigger a new fetch. Airport ICAO codes are mapped to
+// city names via a small embedded table; unknown codes fall back to showing
+// the raw code.
 
 // ---- Airport ICAO -> city lookup (major US + some intl). Fallback = raw code.
 struct Airport { const char* icao; const char* city; };
@@ -205,10 +208,15 @@ void fetchRoute(const char* icao24) {
   NetworkClientSecure sec;
   HTTPClient http;
   http.setTimeout(5000);
+  // Capture the /flights/* bucket's remaining credits for the Credits screen.
+  const char* hdrKeys[] = { "X-Rate-Limit-Remaining" };
+  http.collectHeaders(hdrKeys, 1);
   String authHdr;
   if (openskyEnsureToken()) authHdr = "Bearer " + g_osToken;
   const char* routeHdrs[] = { "Authorization", authHdr.c_str(), nullptr };
   int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTPS_METHOD_GET, "", routeHdrs);
+  String rem = http.header("X-Rate-Limit-Remaining");
+  if (rem.length()) g_flightsCredits = rem.toInt();
   if (code == HTTP_CODE_OK) {
     String payload = http.getString();
     JsonDocument doc;
@@ -225,5 +233,71 @@ void fetchRoute(const char* icao24) {
   http.end();
   g_routeFetched = true;
   g_routeBusy = false;
+}
+
+// Fetch the real ground track (past positions + current bearing) for the given
+// aircraft via the OpenSky /tracks endpoint, into g_trackPts (bounded, points
+// within ~2x radar range of the observer) and g_trackBearingDeg (the true-track
+// bearing of the newest near point, used to dead-reckon the blip along the
+// actual path). Also captures the /tracks/* bucket's remaining credits for the
+// Credits screen. A failed/empty/no-credit response simply leaves g_trackCount
+// = 0, so no track is drawn and dead-reckoning falls back to heading/speed.
+void fetchTrack(const char* icao24) {
+  g_trackBusy = true;
+  g_trackCount = 0;
+  g_trackBearingDeg = -1.0f;
+  if (WiFi.status() != WL_CONNECTED) { g_trackFetched = true; g_trackBusy = false; return; }
+  time_t now = time(nullptr);
+  String url = String("https://opensky-network.org/api/tracks/all?icao24=") + icao24
+               + "&time=" + String((long)now);
+  NetworkClientSecure sec;
+  HTTPClient http;
+  http.setTimeout(5000);
+  const char* hdrKeys[] = { "X-Rate-Limit-Remaining" };
+  http.collectHeaders(hdrKeys, 1);
+  String authHdr;
+  if (openskyEnsureToken()) authHdr = "Bearer " + g_osToken;
+  const char* trackHdrs[] = { "Authorization", authHdr.c_str(), nullptr };
+  int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTPS_METHOD_GET, "", trackHdrs);
+  String rem = http.header("X-Rate-Limit-Remaining");
+  if (rem.length()) g_tracksCredits = rem.toInt();
+  if (code == HTTP_CODE_OK) {
+    String payload = http.getString();
+    BoundedAllocator trackAlloc(32768);
+    JsonDocument doc(&trackAlloc);
+    if (!deserializeJson(doc, payload)) {
+      JsonArray path = doc["path"].as<JsonArray>();
+      if (!path.isNull()) {
+        float maxRange = max(g_radiusMi * 2.0f, 8.0f);
+        float cosLat = cosf(g_lat * PI / 180.0f);
+        bool haveBearing = false;
+        float bearing = -1.0f;
+        for (JsonVariant v : path) {
+          if (!v.is<JsonArray>()) continue;
+          JsonArray pt = v.as<JsonArray>();
+          if (pt.size() < 5) continue;
+          float lat = pt[1].as<float>();
+          float lon = pt[2].as<float>();
+          float dlat = lat - g_lat;
+          float dlon = (lon - g_lon) * cosLat;
+          float dxMi = dlon * 69.0f;
+          float dyMi = dlat * 69.0f;
+          if (sqrtf(dxMi * dxMi + dyMi * dyMi) <= maxRange) {
+            if (g_trackCount < MAX_TRACK_PTS) {
+              g_trackPts[g_trackCount].dxMi = dxMi;
+              g_trackPts[g_trackCount].dyMi = dyMi;
+              g_trackCount++;
+            }
+            // Keep the newest near point's true-track as the follow bearing.
+            if (!pt[4].isNull()) { bearing = pt[4].as<float>(); haveBearing = true; }
+          }
+        }
+        if (haveBearing) g_trackBearingDeg = bearing;
+      }
+    }
+  }
+  http.end();
+  g_trackFetched = true;
+  g_trackBusy = false;
 }
 

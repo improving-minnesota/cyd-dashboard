@@ -298,6 +298,23 @@ shown above.
 > moving app0/app1 shifts where OTA updates land, and any table change
 > reformats the LittleFS partitions.
 
+> **⚠ Do NOT flash the full `*.merged.bin` at offset `0x0` for a routine
+> firmware update.** The merged image is a complete 4 MB dump of the entire
+> flash — it overwrites **NVS** (all settings, credentials, and touch
+> calibration at `0x9000`), the **spiffs** pool/weather history (`0x310000`),
+> and the **logos** partition (`0x370000`) with erased (`0xFF`) data. Flashing
+> it wipes the device's saved data and forces a full first-boot re-setup.
+>
+> To update the firmware while keeping NVS / history / logos, flash **only the
+> app image** to the active app slot:
+> ```bash
+> esptool.py --chip esp32 --port /dev/cu.usbserial-XXXX --baud 460800 \
+>   write_flash 0x10000 <build>/cyd-dashboard.ino.bin
+> ```
+> (or use `arduino-cli upload` / OTA, both of which write only the app).
+> Reserve a full `0x0` merged flash for a deliberate clean re-provision /
+> factory reset.
+
 ### Reducing flash usage
 
 1. **Partition scheme** (see above) - the single biggest lever. Going from the
@@ -490,6 +507,7 @@ Settings are stored in NVS under the `"flight"` namespace (see `setup()` in
 |---|---|---|---|
 | `timer` | bool | `false` | Show the dashboard countdown/timer bar (Flight Tracker → Enable timer). |
 | `clkcol` | uint32 | `TFT_BLUE` | Dashboard clock-bar color (General → Clock Color). |
+| `homeap` | string | `""` | Home airport (ICAO). Determines incoming/outgoing for the LED flash (red = departing, green = arriving); falls back to `KDFW` when empty. |
 
 `prefs.clear()` in the Reset handler removes **all** keys for both "All" and
 "Settings" resets (the "Settings" reset only re-writes the four touch-
@@ -509,4 +527,29 @@ state (`drawAuthBorder` / `drawStatusBorder` in `cyd-dashboard.ino`):
 `dashboardCriticalLabel()` and `dashboardWarningLabel()` decide the two cases;
 the clock bar color is `g_clockCol` (persisted `clkcol`) except when a critical
 issue overrides it with maroon.
+
+## OpenSky Credits screen & ground track
+
+Tapping the credits ("C<remaining>") in the header band opens an **OpenSky
+Credits** screen showing the three independent daily credit buckets with their
+last-known remaining balances:
+
+| Bucket | Endpoint | Device uses for |
+|---|---|---|
+| Radar Polling | `/states/*` | live positions (the per-second poll) |
+| Route Lookup | `/flights/*` | origin/destination (`/flights/aircraft`) |
+| Flight Tracking | `/tracks/*` | ground track (`/tracks`) |
+
+Each bucket's `X-Rate-Limit-Remaining` is captured from its own endpoint's
+response header: the states bucket on every poll, the flights bucket in
+`fetchRoute()`, and the tracks bucket in `fetchTrack()`. The screen shows the
+last-known values (they update as the device calls each endpoint).
+
+`fetchTrack()` (in `flight_details.ino`) also retrieves the tracked plane's
+ground-track polyline from `/tracks` and stores a bounded set of points (max 64,
+within ~2× the radar range of the observer). The radar draws them as a
+light-grey **dotted line** on the dashboard and the flight-detail recall page,
+and the overhead flight dead-recks along the track's real bearing when it's
+available (falling back to heading/speed otherwise). A failed or empty track
+(e.g. no `/tracks/*` credits) simply draws no line.
 
