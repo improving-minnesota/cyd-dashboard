@@ -689,19 +689,23 @@ void fetchFlights() {
   // Authenticate via OAuth2 client-credentials for the higher 4000-credit/day
   // rate. If no client is configured, openskyEnsureToken() returns false and we
   // fall back to anonymous (400 credits/day). A TLS/handshake failure on the
-  // token exchange is NOT a fallback: it's flagged via g_osHandshakeFailed and
-  // handled below as a hard error so a MITM can't silently downgrade auth.
+  // token exchange is flagged via g_osHandshakeFailed, but it is a transient
+  // network error, NOT invalid credentials: if the flight-data request below
+  // still succeeds over verified TLS we keep the last known auth state and use
+  // the (anonymous) response, so a blip can't show a false "Invalid
+  // Credentials" error or freeze the dashboard.
   bool authed = openskyEnsureToken();
   if (authed) {
     http.addHeader("Authorization", "Bearer " + g_osToken);
   }
   int code = http.GET();
   g_authChecked = true;   // we've made a real OpenSky attempt; auth state is now meaningful
-  // Negative code = TLS handshake / transport failure (e.g. cert rejected or
-  // expired CA). Treat as a hard error, never fall back to anonymous.
-  if (code < 0 || g_osHandshakeFailed) {
+  // Negative code = the flight-data request itself hit a TLS handshake /
+  // transport failure (e.g. cert rejected or connection reset). That is a
+  // transient network error, not bad credentials, so keep the last known auth
+  // state instead of flagging "Invalid Credentials"; the next poll recovers.
+  if (code < 0) {
     g_osHandshakeFailed = true;
-    if (g_osClientId.length() > 0) g_authState = AUTH_BAD;
     snprintf(lastErr, sizeof lastErr, "tls fail %d", code);
     http.end();
     dirty = true;
@@ -735,10 +739,16 @@ void fetchFlights() {
   }
   // Auth state reflects what OpenSky actually accepted, so invalid credentials
   // can't silently run as anonymous. A configured client whose token exchange
-  // failed is bad credentials (warn); otherwise OK when a token was used, or
-  // ANON when the request went out unauthenticated.
-  if (g_osClientId.length() > 0) g_authState = (authed ? AUTH_OK : AUTH_BAD);
-  else g_authState = AUTH_ANON;
+  // was rejected (a non-200 response from the token endpoint) is bad
+  // credentials (warn); otherwise OK when a token was used, or ANON when the
+  // request went out unauthenticated. A token-exchange transport/TLS failure
+  // (g_osHandshakeFailed) already invalidated the cached token inside
+  // openskyEnsureToken() so the next poll retries it, and it is transient
+  // (not invalid creds), so we leave the last known auth state unchanged.
+  if (!g_osHandshakeFailed) {
+    if (g_osClientId.length() > 0) g_authState = (authed ? AUTH_OK : AUTH_BAD);
+    else g_authState = AUTH_ANON;
+  }
   // Capture remaining credits from the rate-limit header (collected via
   // http.collectHeaders() above).
   String rem = http.header("X-Rate-Limit-Remaining");
