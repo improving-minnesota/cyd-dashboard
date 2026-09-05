@@ -554,6 +554,11 @@ bool httpsBegin(HTTPClient& http, NetworkClientSecure& sec, const char* url, con
 // makes before giving up on a transport-layer failure. Mirrors the OTA retry.
 #define HTTPS_RETRY_ATTEMPTS 3
 #define HTTPS_RETRY_DELAY_MS 1500
+// HTTP method selector for httpsRequestRetry(). Some arduino-esp32 core
+// versions scope HTTPClient's http_method enumerators (HTTP_METHOD_GET etc.)
+// to the class, so we use our own plain constants instead.
+#define HTTPS_METHOD_GET 0
+#define HTTPS_METHOD_POST 1
 
 // Perform a verified-TLS request with retries on transient transport failures
 // (a fresh TLS connect can drop after prolonged uptime until a reboot clears
@@ -573,7 +578,7 @@ int httpsRequestRetry(HTTPClient& http, NetworkClientSecure& sec, const char* ur
     sec.stop();                // close the TLS socket cleanly
     if (attempt > 1) delay(HTTPS_RETRY_DELAY_MS);
     if (!httpsBegin(http, sec, url, roots)) continue;   // connect failed -> retry
-    code = (method == HTTP_METHOD_POST) ? http.POST(body) : http.GET();
+    code = (method == HTTPS_METHOD_POST) ? http.POST(body) : http.GET();
     if (code >= 0) break;      // server responded (non-200): don't retry
   }
   return code;
@@ -621,7 +626,7 @@ bool openskyEnsureToken() {
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   String body = "grant_type=client_credentials&client_id=" + urlEncode(g_osClientId) +
                 "&client_secret=" + urlEncode(g_osClientSecret);
-  int code = httpsRequestRetry(http, sec, kOsTokenUrl, kISRGRootCAs, HTTP_METHOD_POST, body);
+  int code = httpsRequestRetry(http, sec, kOsTokenUrl, kISRGRootCAs, HTTPS_METHOD_POST, body);
   if (code < 0) { g_osHandshakeFailed = true; return false; }  // TLS/transport failure on all attempts
   if (code != HTTP_CODE_OK) return false;
   String payload = http.getString();
@@ -719,7 +724,7 @@ void fetchFlights() {
   if (authed) {
     http.addHeader("Authorization", "Bearer " + g_osToken);
   }
-  int code = httpsRequestRetry(http, sec, osurl, kISRGRootCAs, HTTP_METHOD_GET, "");
+  int code = httpsRequestRetry(http, sec, osurl, kISRGRootCAs, HTTPS_METHOD_GET, "");
   g_authChecked = true;   // we've made a real OpenSky attempt; auth state is now meaningful
   // Negative code = the flight-data request itself hit a TLS handshake /
   // transport failure (e.g. cert rejected or connection reset). That is a
@@ -936,7 +941,7 @@ bool geocodeAddress() {
   HTTPClient http;
   http.addHeader("User-Agent", "cyd-dashboard/1.0 (contact: user@localhost)");
   http.setTimeout(5000);
-  int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTP_METHOD_GET, "");
+  int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTPS_METHOD_GET, "");
   if (code != HTTP_CODE_OK) {
     http.end();
     snprintf(lastErr, sizeof lastErr, "geo %d", code);

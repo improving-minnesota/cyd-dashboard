@@ -38,7 +38,7 @@ bool fetchGoveeDevices() {
   http.addHeader("Govee-API-Key", g_goveeKey);
   http.setTimeout(5000);
   int code = httpsRequestRetry(http, sec, "https://openapi.api.govee.com/router/api/v1/user/devices",
-                               kAmazonRootCA1, HTTP_METHOD_GET, "");
+                               kAmazonRootCA1, HTTPS_METHOD_GET, "");
   if (code != HTTP_CODE_OK) { http.end(); return false; }
   String payload = http.getString();
   http.end();
@@ -84,7 +84,7 @@ bool fetchGoveeTemp() {
   http.addHeader("Content-Type", "application/json");
   http.setTimeout(5000);
   int code = httpsRequestRetry(http, sec, "https://openapi.api.govee.com/router/api/v1/device/state",
-                               kAmazonRootCA1, HTTP_METHOD_POST, body);
+                               kAmazonRootCA1, HTTPS_METHOD_POST, body);
   if (code != HTTP_CODE_OK) { g_poolValid = false; http.end(); return false; }
   String payload = http.getString();
   http.end();

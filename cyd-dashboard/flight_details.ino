@@ -206,7 +206,7 @@ void fetchRoute(const char* icao24) {
   HTTPClient http;
   http.setTimeout(5000);
   if (openskyEnsureToken()) http.addHeader("Authorization", "Bearer " + g_osToken);
-  int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTP_METHOD_GET, "");
+  int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTPS_METHOD_GET, "");
   if (code == HTTP_CODE_OK) {
     String payload = http.getString();
     JsonDocument doc;
