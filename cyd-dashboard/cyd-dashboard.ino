@@ -184,14 +184,6 @@ bool g_radarShown = false;
 int  g_flightLastPx, g_flightLastPy;
 bool g_flightBlipOn = false;
 
-// The tracked (overhead) flight's original spot, and whether an off-screen
-// magenta marker is currently drawn there. When the tracked plane dead-reckons
-// off the screen while its view is still up, we draw a static magenta marker
-// at where it was first tracked so the user still knows where it is.
-float g_trackedOrigDx = 0, g_trackedOrigDy = 0;
-bool  g_trackedOrigValid = false;
-bool  g_trackedOffOn = false;
-
 // Settings (persisted)
 float g_radiusMi = 3.5;
 int   g_ceilingFt = 15000;
@@ -848,12 +840,6 @@ void fetchFlights() {
       g_routeOrigin = "";
       g_routeDest = "";
       ledFlashedIcao[0] = 0;
-      // Remember where this tracked flight was when it first appeared, so that
-      // if it later dead-reckons off-screen we can show a static marker there.
-      g_trackedOrigDx = planes[0].dxMi;
-      g_trackedOrigDy = planes[0].dyMi;
-      g_trackedOrigValid = true;
-      g_trackedOffOn = false;
     }
     // Fetch the route automatically the first time this plane is overhead, and
     // cache it (fetchRoute sets g_routeFetched=true, so it runs once per plane).
@@ -1452,26 +1438,17 @@ uint16_t blipColor(const Plane& p, int index) {
          : ((p.distMi <= g_radiusMi) ? TFT_RED : TFT_GREEN);
 }
 
-// Draw the tracked (overhead) flight, always on top. While it's on screen it
-// draws the larger cyan icon; once it dead-reckons off the screen (but before
-// the view is dismissed), it draws a static magenta icon at the spot where it
-// was first tracked so the user can still see where it is.
+// Draw the tracked (overhead) flight, always on top, as a larger cyan icon.
+// If it dead-reckons off the screen (before the view is dismissed) it simply
+// isn't drawn.
 void drawTrackedBlip(int cx, int cy, float scale, Plane& p) {
   int px = cx + (int)(p.dxMi * scale);
   int py = cy - (int)(p.dyMi * scale);
   if (px >= 0 && px <= 319 && py >= 0 && py <= 239) {
-    g_trackedOffOn = false;
     p.blipOn = plotRadarBlip(cx, cy, scale, p.dxMi, p.dyMi, p.distMi,
                              p.lastPx, p.lastPy, TFT_CYAN, p.hdgDeg, kTrackedScale);
-  } else if (g_trackedOrigValid) {
-    p.blipOn = false;
-    int opx = cx + (int)(g_trackedOrigDx * scale);
-    int opy = cy - (int)(g_trackedOrigDy * scale);
-    drawPlaneIcon(opx, opy, p.hdgDeg, TFT_MAGENTA, kTrackedScale);
-    g_trackedOffOn = true;
   } else {
     p.blipOn = false;
-    g_trackedOffOn = false;
   }
 }
 
@@ -1504,14 +1481,6 @@ void drawRadarInPlace() {
   for (int i = 0; i < planeCount; i++) {
     Plane &p = planes[i];
     if (p.blipOn) eraseRadarBlip(p.lastPx, p.lastPy);
-  }
-  // Erase the off-screen magenta marker too (it lives at the tracked flight's
-  // original spot).
-  if (g_trackedOffOn && g_trackedOrigValid) {
-    int opx = cx + (int)(g_trackedOrigDx * scale);
-    int opy = cy - (int)(g_trackedOrigDy * scale);
-    eraseRadarBlip(opx, opy);
-    g_trackedOffOn = false;
   }
   drawRadarFrame(cx, cy, r);
   // Draw other flights first, then the tracked flight last so its cyan dot is
