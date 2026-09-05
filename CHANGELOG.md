@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.3](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.7.2...v1.7.3) (2026-09-05)
+
+
+### Bug Fixes
+
+* keep HTTP headers across TLS retries and report invalid creds per provider ([#59](https://github.com/improving-minnesota/cyd-dashboard/issues/59)) ([bfd9e8c](https://github.com/improving-minnesota/cyd-dashboard/commit/bfd9e8c5376e008b4cc8ab6ac9a2098bc8d99454))
+
 ## [1.7.2](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.7.1...v1.7.2) (2026-09-05)
 
 
