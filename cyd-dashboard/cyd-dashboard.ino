@@ -184,14 +184,6 @@ bool g_radarShown = false;
 int  g_flightLastPx, g_flightLastPy;
 bool g_flightBlipOn = false;
 
-// The tracked (overhead) flight's original spot, and whether an off-screen
-// magenta marker is currently drawn there. When the tracked plane dead-reckons
-// off the screen while its view is still up, we draw a static magenta marker
-// at where it was first tracked so the user still knows where it is.
-float g_trackedOrigDx = 0, g_trackedOrigDy = 0;
-bool  g_trackedOrigValid = false;
-bool  g_trackedOffOn = false;
-
 // Settings (persisted)
 float g_radiusMi = 3.5;
 int   g_ceilingFt = 15000;
@@ -558,6 +550,40 @@ bool httpsBegin(HTTPClient& http, NetworkClientSecure& sec, const char* url, con
   return http.begin(sec, url);
 }
 
+// How many connection attempts (and ms between them) a retrying HTTPS request
+// makes before giving up on a transport-layer failure. Mirrors the OTA retry.
+#define HTTPS_RETRY_ATTEMPTS 3
+#define HTTPS_RETRY_DELAY_MS 1500
+// HTTP method selector for httpsRequestRetry(). Some arduino-esp32 core
+// versions scope HTTPClient's http_method enumerators (HTTP_METHOD_GET etc.)
+// to the class, so we use our own plain constants instead.
+#define HTTPS_METHOD_GET 0
+#define HTTPS_METHOD_POST 1
+
+// Perform a verified-TLS request with retries on transient transport failures
+// (a fresh TLS connect can drop after prolonged uptime until a reboot clears
+// the socket state - the same issue the OTA path guards against). Runs
+// httpsBegin() plus the request (GET or POST) up to HTTPS_RETRY_ATTEMPTS times,
+// tearing down and re-establishing the connection with a short pause between
+// attempts. Any real HTTP response (code >= 0, even a non-200) ends the loop,
+// since a server reply proves the network path works. Returns the final HTTP
+// code, or -1 if every attempt failed at the transport layer. Callers must set
+// timeouts/headers before calling (they persist across the internal re-begins)
+// and must keep `sec`/`http` alive to read the response afterwards.
+int httpsRequestRetry(HTTPClient& http, NetworkClientSecure& sec, const char* url,
+                      const char* roots, int method, const String& body) {
+  int code = -1;
+  for (int attempt = 1; attempt <= HTTPS_RETRY_ATTEMPTS; attempt++) {
+    http.end();                // release any previous attempt's connection
+    sec.stop();                // close the TLS socket cleanly
+    if (attempt > 1) delay(HTTPS_RETRY_DELAY_MS);
+    if (!httpsBegin(http, sec, url, roots)) continue;   // connect failed -> retry
+    code = (method == HTTPS_METHOD_POST) ? http.POST(body) : http.GET();
+    if (code >= 0) break;      // server responded (non-200): don't retry
+  }
+  return code;
+}
+
 // Percent-encode a string for an application/x-www-form-urlencoded body.
 String urlEncode(const String& s) {
   String out;
@@ -591,20 +617,20 @@ bool openskyEnsureToken() {
   }
   // TLS is verified against the bundled ISRG roots. Unlike the OTA path there
   // is no insecure fallback, so a handshake/validation failure (e.g. expired
-  // CA or a MITM) is a hard error, never a silent downgrade to anonymous.
+  // CA or a MITM) is a hard error, never a silent downgrade to anonymous. The
+  // exchange is retried on transient transport failures, since a dropped token
+  // refresh is the classic way this auth path flakes out after prolonged uptime.
   NetworkClientSecure sec;
-  sec.setCACert(kISRGRootCAs);
   HTTPClient http;
-  if (!http.begin(sec, kOsTokenUrl)) { g_osHandshakeFailed = true; return false; }
   http.setTimeout(5000);
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   String body = "grant_type=client_credentials&client_id=" + urlEncode(g_osClientId) +
                 "&client_secret=" + urlEncode(g_osClientSecret);
-  int code = http.POST(body);
+  int code = httpsRequestRetry(http, sec, kOsTokenUrl, kISRGRootCAs, HTTPS_METHOD_POST, body);
+  if (code < 0) { g_osHandshakeFailed = true; return false; }  // TLS/transport failure on all attempts
+  if (code != HTTP_CODE_OK) return false;
   String payload = http.getString();
   http.end();
-  if (code < 0) { g_osHandshakeFailed = true; return false; }  // TLS/transport failure
-  if (code != HTTP_CODE_OK) return false;
   JsonDocument doc;
   if (deserializeJson(doc, payload)) return false;
   const char* tok = doc["access_token"];
@@ -666,7 +692,6 @@ void fetchFlights() {
   // Flight-data request uses verified TLS against the bundled ISRG roots, the
   // same as the token exchange (no insecure fallback).
   NetworkClientSecure sec;
-  sec.setCACert(kISRGRootCAs);
   HTTPClient http;
   char osurl[240];
   // Bound the query to what the radar can actually draw: the ring is g_radiusMi
@@ -681,13 +706,6 @@ void fetchFlights() {
   snprintf(osurl, sizeof osurl,
     "https://opensky-network.org/api/states/all?lamin=%.4f&lomin=%.4f&lamax=%.4f&lomax=%.4f",
     g_lat - dLat, g_lon - dLon, g_lat + dLat, g_lon + dLon);
-  if (!http.begin(sec, osurl)) {
-    g_osHandshakeFailed = true;
-    snprintf(lastErr, sizeof lastErr, "tls setup");
-    http.end();
-    dirty = true;
-    return;
-  }
   http.setTimeout(5000);
   // Tell HTTPClient which response headers to capture. Without this it discards
   // everything except a small built-in set, so X-Rate-Limit-Remaining (the
@@ -697,19 +715,23 @@ void fetchFlights() {
   // Authenticate via OAuth2 client-credentials for the higher 4000-credit/day
   // rate. If no client is configured, openskyEnsureToken() returns false and we
   // fall back to anonymous (400 credits/day). A TLS/handshake failure on the
-  // token exchange is NOT a fallback: it's flagged via g_osHandshakeFailed and
-  // handled below as a hard error so a MITM can't silently downgrade auth.
+  // token exchange is flagged via g_osHandshakeFailed, but it is a transient
+  // network error, NOT invalid credentials: if the flight-data request below
+  // still succeeds over verified TLS we keep the last known auth state and use
+  // the (anonymous) response, so a blip can't show a false "Invalid
+  // Credentials" error or freeze the dashboard.
   bool authed = openskyEnsureToken();
   if (authed) {
     http.addHeader("Authorization", "Bearer " + g_osToken);
   }
-  int code = http.GET();
+  int code = httpsRequestRetry(http, sec, osurl, kISRGRootCAs, HTTPS_METHOD_GET, "");
   g_authChecked = true;   // we've made a real OpenSky attempt; auth state is now meaningful
-  // Negative code = TLS handshake / transport failure (e.g. cert rejected or
-  // expired CA). Treat as a hard error, never fall back to anonymous.
-  if (code < 0 || g_osHandshakeFailed) {
+  // Negative code = the flight-data request itself hit a TLS handshake /
+  // transport failure (e.g. cert rejected or connection reset). That is a
+  // transient network error, not bad credentials, so keep the last known auth
+  // state instead of flagging "Invalid Credentials"; the next poll recovers.
+  if (code < 0) {
     g_osHandshakeFailed = true;
-    if (g_osClientId.length() > 0) g_authState = AUTH_BAD;
     snprintf(lastErr, sizeof lastErr, "tls fail %d", code);
     http.end();
     dirty = true;
@@ -743,10 +765,16 @@ void fetchFlights() {
   }
   // Auth state reflects what OpenSky actually accepted, so invalid credentials
   // can't silently run as anonymous. A configured client whose token exchange
-  // failed is bad credentials (warn); otherwise OK when a token was used, or
-  // ANON when the request went out unauthenticated.
-  if (g_osClientId.length() > 0) g_authState = (authed ? AUTH_OK : AUTH_BAD);
-  else g_authState = AUTH_ANON;
+  // was rejected (a non-200 response from the token endpoint) is bad
+  // credentials (warn); otherwise OK when a token was used, or ANON when the
+  // request went out unauthenticated. A token-exchange transport/TLS failure
+  // (g_osHandshakeFailed) already invalidated the cached token inside
+  // openskyEnsureToken() so the next poll retries it, and it is transient
+  // (not invalid creds), so we leave the last known auth state unchanged.
+  if (!g_osHandshakeFailed) {
+    if (g_osClientId.length() > 0) g_authState = (authed ? AUTH_OK : AUTH_BAD);
+    else g_authState = AUTH_ANON;
+  }
   // Capture remaining credits from the rate-limit header (collected via
   // http.collectHeaders() above).
   String rem = http.header("X-Rate-Limit-Remaining");
@@ -848,12 +876,6 @@ void fetchFlights() {
       g_routeOrigin = "";
       g_routeDest = "";
       ledFlashedIcao[0] = 0;
-      // Remember where this tracked flight was when it first appeared, so that
-      // if it later dead-reckons off-screen we can show a static marker there.
-      g_trackedOrigDx = planes[0].dxMi;
-      g_trackedOrigDy = planes[0].dyMi;
-      g_trackedOrigValid = true;
-      g_trackedOffOn = false;
     }
     // Fetch the route automatically the first time this plane is overhead, and
     // cache it (fetchRoute sets g_routeFetched=true, so it runs once per plane).
@@ -917,13 +939,9 @@ bool geocodeAddress() {
   // Nominatim is Let's Encrypt signed, verified against the same ISRG roots.
   NetworkClientSecure sec;
   HTTPClient http;
-  if (!httpsBegin(http, sec, url.c_str(), kISRGRootCAs)) {
-    snprintf(lastErr, sizeof lastErr, "geo tls");
-    return false;
-  }
   http.addHeader("User-Agent", "cyd-dashboard/1.0 (contact: user@localhost)");
   http.setTimeout(5000);
-  int code = http.GET();
+  int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTPS_METHOD_GET, "");
   if (code != HTTP_CODE_OK) {
     http.end();
     snprintf(lastErr, sizeof lastErr, "geo %d", code);
@@ -1452,26 +1470,17 @@ uint16_t blipColor(const Plane& p, int index) {
          : ((p.distMi <= g_radiusMi) ? TFT_RED : TFT_GREEN);
 }
 
-// Draw the tracked (overhead) flight, always on top. While it's on screen it
-// draws the larger cyan icon; once it dead-reckons off the screen (but before
-// the view is dismissed), it draws a static magenta icon at the spot where it
-// was first tracked so the user can still see where it is.
+// Draw the tracked (overhead) flight, always on top, as a larger cyan icon.
+// If it dead-reckons off the screen (before the view is dismissed) it simply
+// isn't drawn.
 void drawTrackedBlip(int cx, int cy, float scale, Plane& p) {
   int px = cx + (int)(p.dxMi * scale);
   int py = cy - (int)(p.dyMi * scale);
   if (px >= 0 && px <= 319 && py >= 0 && py <= 239) {
-    g_trackedOffOn = false;
     p.blipOn = plotRadarBlip(cx, cy, scale, p.dxMi, p.dyMi, p.distMi,
                              p.lastPx, p.lastPy, TFT_CYAN, p.hdgDeg, kTrackedScale);
-  } else if (g_trackedOrigValid) {
-    p.blipOn = false;
-    int opx = cx + (int)(g_trackedOrigDx * scale);
-    int opy = cy - (int)(g_trackedOrigDy * scale);
-    drawPlaneIcon(opx, opy, p.hdgDeg, TFT_MAGENTA, kTrackedScale);
-    g_trackedOffOn = true;
   } else {
     p.blipOn = false;
-    g_trackedOffOn = false;
   }
 }
 
@@ -1504,14 +1513,6 @@ void drawRadarInPlace() {
   for (int i = 0; i < planeCount; i++) {
     Plane &p = planes[i];
     if (p.blipOn) eraseRadarBlip(p.lastPx, p.lastPy);
-  }
-  // Erase the off-screen magenta marker too (it lives at the tracked flight's
-  // original spot).
-  if (g_trackedOffOn && g_trackedOrigValid) {
-    int opx = cx + (int)(g_trackedOrigDx * scale);
-    int opy = cy - (int)(g_trackedOrigDy * scale);
-    eraseRadarBlip(opx, opy);
-    g_trackedOffOn = false;
   }
   drawRadarFrame(cx, cy, r);
   // Draw other flights first, then the tracked flight last so its cyan dot is

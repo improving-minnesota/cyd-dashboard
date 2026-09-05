@@ -204,10 +204,9 @@ void fetchRoute(const char* icao24) {
   // Verified TLS against the same ISRG roots used by the main OpenSky calls.
   NetworkClientSecure sec;
   HTTPClient http;
-  if (!httpsBegin(http, sec, url.c_str(), kISRGRootCAs)) { g_routeFetched = true; g_routeBusy = false; return; }
   http.setTimeout(5000);
   if (openskyEnsureToken()) http.addHeader("Authorization", "Bearer " + g_osToken);
-  int code = http.GET();
+  int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTPS_METHOD_GET, "");
   if (code == HTTP_CODE_OK) {
     String payload = http.getString();
     JsonDocument doc;

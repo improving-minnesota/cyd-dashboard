@@ -35,12 +35,10 @@ bool fetchGoveeDevices() {
   // Govee's Open API is Amazon-signed, verified against Amazon Root CA 1.
   NetworkClientSecure sec;
   HTTPClient http;
-  if (!httpsBegin(http, sec, "https://openapi.api.govee.com/router/api/v1/user/devices", kAmazonRootCA1)) {
-    return false;
-  }
   http.addHeader("Govee-API-Key", g_goveeKey);
   http.setTimeout(5000);
-  int code = http.GET();
+  int code = httpsRequestRetry(http, sec, "https://openapi.api.govee.com/router/api/v1/user/devices",
+                               kAmazonRootCA1, HTTPS_METHOD_GET, "");
   if (code != HTTP_CODE_OK) { http.end(); return false; }
   String payload = http.getString();
   http.end();
@@ -82,14 +80,11 @@ bool fetchGoveeTemp() {
   // Verified TLS against Amazon Root CA 1 (see kAmazonRootCA1).
   NetworkClientSecure sec;
   HTTPClient http;
-  if (!httpsBegin(http, sec, "https://openapi.api.govee.com/router/api/v1/device/state", kAmazonRootCA1)) {
-    g_poolValid = false;
-    return false;
-  }
   http.addHeader("Govee-API-Key", g_goveeKey);
   http.addHeader("Content-Type", "application/json");
   http.setTimeout(5000);
-  int code = http.POST(body);
+  int code = httpsRequestRetry(http, sec, "https://openapi.api.govee.com/router/api/v1/device/state",
+                               kAmazonRootCA1, HTTPS_METHOD_POST, body);
   if (code != HTTP_CODE_OK) { g_poolValid = false; http.end(); return false; }
   String payload = http.getString();
   http.end();

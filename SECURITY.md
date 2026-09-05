@@ -69,11 +69,16 @@ and the Govee pool-temp API — are all TLS-verified against root-CA bundles
 embedded in the firmware. OpenSky, open-meteo, and Nominatim are Let's Encrypt
 signed and use the shared `kISRGRootCAs` bundle (ISRG Root X1 + X2); Govee is
 Amazon-signed and uses `kAmazonRootCA1`. Unlike
-the OTA path there is **no** `setInsecure()` fallback: a certificate-validation
-or handshake failure is treated as a hard error, never a silent downgrade to an
-unauthenticated connection. A failed OpenSky token exchange is surfaced as a
+the OTA path there is **no** `setInsecure()` fallback, so a certificate
+validation failure is never downgraded to an insecure connection. Transient
+transport/TLS failures are retried a few times (`httpsRequestRetry`) before
+being reported. A genuine OpenSky credential rejection (a non-200 response from
+the token exchange, or a 401 on the flight-data call) is surfaced as a
 failed-auth state rather than falling back to anonymous, so a man-in-the-middle
-cannot quietly capture credentials by defeating verification.
+cannot quietly capture credentials by defeating verification. A mere transport
+blip on the token exchange is treated as transient: the last known auth state is
+kept and a flight-data response that still arrives over verified TLS is used, so
+it won't show a false "Invalid Credentials" error.
 
 Note: the default-location lookup (`ip-api.com`) intentionally uses plain HTTP
 (supported by that endpoint) and sends no credentials.

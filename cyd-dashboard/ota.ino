@@ -117,14 +117,24 @@ bool isNewerThanRunning(const String& tagVersion) {
 // ---- GitHub latest-release fetch -----------------------------------------
 bool fetchLatestRelease(String& versionOut, String& assetUrlOut, String& sha256Out) {
   if (WiFi.status() != WL_CONNECTED) return false;
-  NetworkClientSecure sec = makeSecureClient();
+  // Retry a transient TLS connect/GET (same class of failure as performOTA, so
+  // an update check that drops after prolonged uptime doesn't fail immediately).
+  NetworkClientSecure sec;
   HTTPClient http;
-  if (!http.begin(sec, OTA_API_URL)) { http.end(); return false; }
   http.addHeader("Accept", "application/vnd.github+json");
   http.addHeader("User-Agent", "cyd-dashboard-ota");
   http.setConnectTimeout(5000);   // bound the TCP connect/TLS handshake, not just the read
   http.setTimeout(10000);
-  int code = http.GET();
+  int code = -1;
+  for (int attempt = 1; attempt <= HTTPS_RETRY_ATTEMPTS; attempt++) {
+    http.end();                  // release the previous attempt's connection
+    sec.stop();                  // close the TLS socket cleanly
+    if (attempt > 1) delay(HTTPS_RETRY_DELAY_MS);
+    sec = makeSecureClient();
+    if (!http.begin(sec, OTA_API_URL)) continue;   // connect failed -> retry
+    code = http.GET();
+    if (code >= 0) break;        // server responded (non-200): don't retry
+  }
   if (code != HTTP_CODE_OK) { http.end(); return false; }
   String payload = http.getString();
   http.end();
@@ -277,13 +287,29 @@ static bool sha256Matches(const uint8_t hash[32], const String& expected) {
 
 bool performOTA(const String& url, const String& version, const String& expectedSha256) {
   drawOtaHeader(version);
-  NetworkClientSecure sec = makeSecureClient();           // verified (unless roots expired)
+
+  // The TLS connect/download to the release host can transiently fail after the
+  // device has been up a while (a fresh connect to the asset host sometimes gets
+  // dropped until a reboot clears the socket state). Retry the connect + GET a
+  // few times with a clean teardown and a short pause between attempts rather
+  // than failing immediately; a real server response (non-200, e.g. 404) is not
+  // retried.
+  NetworkClientSecure sec;
   HTTPClient http;
-  if (!http.begin(sec, url)) { drawOtaError("Connect failed"); return false; }
-  http.setConnectTimeout(5000);   // bound the TCP connect/TLS handshake, not just the read
-  http.setTimeout(20000);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  int code = http.GET();
+  int code = -1;
+  for (int attempt = 1; attempt <= 3; attempt++) {
+    http.end();                  // release the previous attempt's connection
+    sec.stop();                  // close the TLS socket cleanly
+    if (attempt > 1) delay(1500);
+    sec = makeSecureClient();    // verified (unless roots expired)
+    if (!http.begin(sec, url)) { continue; }   // connect failed -> retry
+    http.setConnectTimeout(5000);   // bound the TCP connect/TLS handshake, not just the read
+    http.setTimeout(20000);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    code = http.GET();
+    if (code == HTTP_CODE_OK) break;
+    if (code >= 0) break;        // server responded (non-200): don't retry
+  }
   if (code != HTTP_CODE_OK) { http.end(); drawOtaError("Download failed"); return false; }
   int total = http.getSize();
   bool haveTotal = (total > 0);
