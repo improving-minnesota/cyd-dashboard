@@ -117,14 +117,24 @@ bool isNewerThanRunning(const String& tagVersion) {
 // ---- GitHub latest-release fetch -----------------------------------------
 bool fetchLatestRelease(String& versionOut, String& assetUrlOut, String& sha256Out) {
   if (WiFi.status() != WL_CONNECTED) return false;
-  NetworkClientSecure sec = makeSecureClient();
+  // Retry a transient TLS connect/GET (same class of failure as performOTA, so
+  // an update check that drops after prolonged uptime doesn't fail immediately).
+  NetworkClientSecure sec;
   HTTPClient http;
-  if (!http.begin(sec, OTA_API_URL)) { http.end(); return false; }
   http.addHeader("Accept", "application/vnd.github+json");
   http.addHeader("User-Agent", "cyd-dashboard-ota");
   http.setConnectTimeout(5000);   // bound the TCP connect/TLS handshake, not just the read
   http.setTimeout(10000);
-  int code = http.GET();
+  int code = -1;
+  for (int attempt = 1; attempt <= HTTPS_RETRY_ATTEMPTS; attempt++) {
+    http.end();                  // release the previous attempt's connection
+    sec.stop();                  // close the TLS socket cleanly
+    if (attempt > 1) delay(HTTPS_RETRY_DELAY_MS);
+    sec = makeSecureClient();
+    if (!http.begin(sec, OTA_API_URL)) continue;   // connect failed -> retry
+    code = http.GET();
+    if (code >= 0) break;        // server responded (non-200): don't retry
+  }
   if (code != HTTP_CODE_OK) { http.end(); return false; }
   String payload = http.getString();
   http.end();

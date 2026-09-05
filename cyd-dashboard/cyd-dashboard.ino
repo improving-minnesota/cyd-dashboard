@@ -550,6 +550,35 @@ bool httpsBegin(HTTPClient& http, NetworkClientSecure& sec, const char* url, con
   return http.begin(sec, url);
 }
 
+// How many connection attempts (and ms between them) a retrying HTTPS request
+// makes before giving up on a transport-layer failure. Mirrors the OTA retry.
+#define HTTPS_RETRY_ATTEMPTS 3
+#define HTTPS_RETRY_DELAY_MS 1500
+
+// Perform a verified-TLS request with retries on transient transport failures
+// (a fresh TLS connect can drop after prolonged uptime until a reboot clears
+// the socket state - the same issue the OTA path guards against). Runs
+// httpsBegin() plus the request (GET or POST) up to HTTPS_RETRY_ATTEMPTS times,
+// tearing down and re-establishing the connection with a short pause between
+// attempts. Any real HTTP response (code >= 0, even a non-200) ends the loop,
+// since a server reply proves the network path works. Returns the final HTTP
+// code, or -1 if every attempt failed at the transport layer. Callers must set
+// timeouts/headers before calling (they persist across the internal re-begins)
+// and must keep `sec`/`http` alive to read the response afterwards.
+int httpsRequestRetry(HTTPClient& http, NetworkClientSecure& sec, const char* url,
+                      const char* roots, int method, const String& body) {
+  int code = -1;
+  for (int attempt = 1; attempt <= HTTPS_RETRY_ATTEMPTS; attempt++) {
+    http.end();                // release any previous attempt's connection
+    sec.stop();                // close the TLS socket cleanly
+    if (attempt > 1) delay(HTTPS_RETRY_DELAY_MS);
+    if (!httpsBegin(http, sec, url, roots)) continue;   // connect failed -> retry
+    code = (method == HTTP_METHOD_POST) ? http.POST(body) : http.GET();
+    if (code >= 0) break;      // server responded (non-200): don't retry
+  }
+  return code;
+}
+
 // Percent-encode a string for an application/x-www-form-urlencoded body.
 String urlEncode(const String& s) {
   String out;
@@ -583,20 +612,20 @@ bool openskyEnsureToken() {
   }
   // TLS is verified against the bundled ISRG roots. Unlike the OTA path there
   // is no insecure fallback, so a handshake/validation failure (e.g. expired
-  // CA or a MITM) is a hard error, never a silent downgrade to anonymous.
+  // CA or a MITM) is a hard error, never a silent downgrade to anonymous. The
+  // exchange is retried on transient transport failures, since a dropped token
+  // refresh is the classic way this auth path flakes out after prolonged uptime.
   NetworkClientSecure sec;
-  sec.setCACert(kISRGRootCAs);
   HTTPClient http;
-  if (!http.begin(sec, kOsTokenUrl)) { g_osHandshakeFailed = true; return false; }
   http.setTimeout(5000);
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   String body = "grant_type=client_credentials&client_id=" + urlEncode(g_osClientId) +
                 "&client_secret=" + urlEncode(g_osClientSecret);
-  int code = http.POST(body);
+  int code = httpsRequestRetry(http, sec, kOsTokenUrl, kISRGRootCAs, HTTP_METHOD_POST, body);
+  if (code < 0) { g_osHandshakeFailed = true; return false; }  // TLS/transport failure on all attempts
+  if (code != HTTP_CODE_OK) return false;
   String payload = http.getString();
   http.end();
-  if (code < 0) { g_osHandshakeFailed = true; return false; }  // TLS/transport failure
-  if (code != HTTP_CODE_OK) return false;
   JsonDocument doc;
   if (deserializeJson(doc, payload)) return false;
   const char* tok = doc["access_token"];
@@ -658,7 +687,6 @@ void fetchFlights() {
   // Flight-data request uses verified TLS against the bundled ISRG roots, the
   // same as the token exchange (no insecure fallback).
   NetworkClientSecure sec;
-  sec.setCACert(kISRGRootCAs);
   HTTPClient http;
   char osurl[240];
   // Bound the query to what the radar can actually draw: the ring is g_radiusMi
@@ -673,13 +701,6 @@ void fetchFlights() {
   snprintf(osurl, sizeof osurl,
     "https://opensky-network.org/api/states/all?lamin=%.4f&lomin=%.4f&lamax=%.4f&lomax=%.4f",
     g_lat - dLat, g_lon - dLon, g_lat + dLat, g_lon + dLon);
-  if (!http.begin(sec, osurl)) {
-    g_osHandshakeFailed = true;
-    snprintf(lastErr, sizeof lastErr, "tls setup");
-    http.end();
-    dirty = true;
-    return;
-  }
   http.setTimeout(5000);
   // Tell HTTPClient which response headers to capture. Without this it discards
   // everything except a small built-in set, so X-Rate-Limit-Remaining (the
@@ -698,7 +719,7 @@ void fetchFlights() {
   if (authed) {
     http.addHeader("Authorization", "Bearer " + g_osToken);
   }
-  int code = http.GET();
+  int code = httpsRequestRetry(http, sec, osurl, kISRGRootCAs, HTTP_METHOD_GET, "");
   g_authChecked = true;   // we've made a real OpenSky attempt; auth state is now meaningful
   // Negative code = the flight-data request itself hit a TLS handshake /
   // transport failure (e.g. cert rejected or connection reset). That is a
@@ -913,13 +934,9 @@ bool geocodeAddress() {
   // Nominatim is Let's Encrypt signed, verified against the same ISRG roots.
   NetworkClientSecure sec;
   HTTPClient http;
-  if (!httpsBegin(http, sec, url.c_str(), kISRGRootCAs)) {
-    snprintf(lastErr, sizeof lastErr, "geo tls");
-    return false;
-  }
   http.addHeader("User-Agent", "cyd-dashboard/1.0 (contact: user@localhost)");
   http.setTimeout(5000);
-  int code = http.GET();
+  int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTP_METHOD_GET, "");
   if (code != HTTP_CODE_OK) {
     http.end();
     snprintf(lastErr, sizeof lastErr, "geo %d", code);
