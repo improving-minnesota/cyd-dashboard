@@ -42,6 +42,28 @@ Keep PRs small and focused on a single logical change so they're quick to
 review. The primary branch is `main`; everything that lands there is intended
 to be shippable.
 
+## Code comments
+
+Comments serve two purposes: they explain *why* (not *what*), and they organize
+code into readable sections. The code already shows what it does; a comment
+should either add context that reading it doesn't reveal, or group related code
+so it's easier to scan. Keep comments short and current — a stale comment is
+worse than none.
+
+- Say **why**, not **what**; don't restate the line you're commenting.
+- **Organize** with short section/grouping headers that break long functions or
+  files into readable blocks (e.g. `// ---- OpenSky fetch + parse ----`,
+  `// network row`, `// 7-day forecast (right/bottom)`).
+- Document **non-obvious constraints**: ordering, concurrency, why a workaround
+  exists, what a magic number means, and edge cases you're guarding against.
+- **Prefer clear names** so most code needs no comment at all.
+- Keep inline `//` notes to a few words.
+
+Good: the `configTime()` lwip-crash note, the `collectHeaders()` header-drop
+note, the `g_timeReady` timezone gotcha, and section headers that group a
+function's steps. Avoid: paragraphs that re-narrate the `if/else` they sit
+above.
+
 ## The sketch
 
 The `cyd-dashboard/` sketch targets the **ESP32-2432S028R "CYD"**
@@ -53,6 +75,22 @@ arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(cat version.txt)-dev" cyd-dashboard
 arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 cyd-dashboard
 ```
+
+> **Use `--clean` for reliable local builds.** `arduino-cli` incremental-build
+> caching can silently reuse a stale object file for a `.ino` that changed, and
+> `arduino-cli upload` will happily flash that stale binary — so what runs on
+> the device may not match your source. This bit us in practice: a TLS fix was
+> added to `flight_details.ino` but the flashed image was an older build, which
+> masked the result of a hardware test and wasted several flash cycles. For any
+> build whose output you intend to trust (especially before flashing), add
+> `--clean` to force a full rebuild:
+> ```bash
+> arduino-cli compile --clean --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
+>   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(cat version.txt)-dev" cyd-dashboard
+> ```
+> A `--clean` build also surfaces compile errors that a stale cache would hide
+> (e.g. a call to a method that doesn't exist in the installed core), so it's a
+> good habit before flashing when you're iterating on the device.
 
 > **Version flag:** the `-DAPP_VERSION` flag above derives the local build's
 > version from `version.txt` at compile time (e.g. `1.2.4-dev`), so About
@@ -528,11 +566,13 @@ state (`drawAuthBorder` / `drawStatusBorder` in `cyd-dashboard.ino`):
 the clock bar color is `g_clockCol` (persisted `clkcol`) except when a critical
 issue overrides it with maroon.
 
-## OpenSky Credits screen & ground track
+## OpenSky Credits screen & header readout
 
-Tapping the credits ("C<remaining>") in the header band opens an **OpenSky
-Credits** screen showing the three independent daily credit buckets with their
-last-known remaining balances:
+With **Flight Tracker** enabled, the header band shows the three independent
+credit buckets as stacked readouts — **CRP** (radar polling), **CRL** (route
+lookup), **CFT** (flight tracking) — drawn in FONT1 by `drawHeaderCredit()`.
+Tapping them opens an **OpenSky Credits** screen (`drawCredits()`) showing the
+same three buckets with their last-known remaining balances:
 
 | Bucket | Endpoint | Device uses for |
 |---|---|---|
@@ -542,8 +582,16 @@ last-known remaining balances:
 
 Each bucket's `X-Rate-Limit-Remaining` is captured from its own endpoint's
 response header: the states bucket on every poll, the flights bucket in
-`fetchRoute()`, and the tracks bucket in `fetchTrack()`. The screen shows the
-last-known values (they update as the device calls each endpoint).
+`fetchRoute()`, and the tracks bucket in `fetchTrack()`. Both the header readout
+and the Credits screen show the last-known values (they update as the device
+calls each endpoint); the header redraws on change via `updateDashboard()`, and
+until a bucket is first fetched it shows a yellow "?".
+
+The header value color is tiered by absolute remaining amounts (no assumed
+daily budget): **grey** when healthy, **yellow** below 500, **pink** below 50.
+A pending (unfetched) bucket shows "?" in yellow. Because the tiers don't assume
+a fixed limit, they stay meaningful for contributors whose credit allocation
+differs from the standard anonymous/token quotas.
 
 `fetchTrack()` (in `flight_details.ino`) also retrieves the tracked plane's
 ground-track polyline from `/tracks` and stores a bounded set of points (max 64,

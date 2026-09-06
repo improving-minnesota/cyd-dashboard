@@ -132,7 +132,7 @@ bool fetchLatestRelease(String& versionOut, String& assetUrlOut, String& sha256O
     if (!http.begin(sec, OTA_API_URL)) continue;   // connect failed -> retry
     // addHeader() after begin(): HTTPClient clears its headers on begin/end.
     http.addHeader("Accept", "application/vnd.github+json");
-    http.addHeader("User-Agent", "cyd-dashboard-ota");
+    http.setUserAgent(appUserAgent());
     code = http.GET();
     if (code >= 0) break;        // server responded (non-200): don't retry
   }
@@ -297,6 +297,7 @@ bool performOTA(const String& url, const String& version, const String& expected
   // retried.
   NetworkClientSecure sec;
   HTTPClient http;
+  http.setUserAgent(appUserAgent());   // persistent across begin()/end()
   int code = -1;
   for (int attempt = 1; attempt <= 3; attempt++) {
     http.end();                  // release the previous attempt's connection

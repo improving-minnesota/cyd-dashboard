@@ -231,7 +231,8 @@ void fetchRoute(const char* icao24) {
     }
   }
   http.end();
-  g_routeFetched = true;
+  // Don't cache a transport failure as "done", so it retries next poll.
+  if (code >= 0) g_routeFetched = true;
   g_routeBusy = false;
 }
 
@@ -297,7 +298,8 @@ void fetchTrack(const char* icao24) {
     }
   }
   http.end();
-  g_trackFetched = true;
+  // Don't cache a transport failure as "done", so it retries next poll.
+  if (code >= 0) g_trackFetched = true;
   g_trackBusy = false;
 }
 
