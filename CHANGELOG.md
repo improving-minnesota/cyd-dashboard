@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.4](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.3...v1.9.4) (2026-09-06)
+
+
+### Bug Fixes
+
+* stream JSON responses to reduce TLS heap fragmentation ([1201c53](https://github.com/improving-minnesota/cyd-dashboard/commit/1201c53822b0560db55b03e2152643aada74e0b6))
+* stream JSON responses to reduce TLS heap fragmentation ([4ffb7e7](https://github.com/improving-minnesota/cyd-dashboard/commit/4ffb7e728573e2d13ebf23348ec89462d5d09ec1))
+
 ## [1.9.3](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.2...v1.9.3) (2026-09-06)
 
 
