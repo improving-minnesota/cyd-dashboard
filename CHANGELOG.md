@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.3](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.2...v1.9.3) (2026-09-06)
+
+
+### Bug Fixes
+
+* clarify OpenSky radar-polling credit exhaustion fallback ([38dc84c](https://github.com/improving-minnesota/cyd-dashboard/commit/38dc84c2ce0321f1e44fe6328743533860dcb94e))
+* clarify OpenSky radar-polling credit exhaustion fallback ([820f641](https://github.com/improving-minnesota/cyd-dashboard/commit/820f64186ae39cd639a9cf441450455eb2bc0627))
+
 ## [1.9.2](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.1...v1.9.2) (2026-09-06)
 
 
