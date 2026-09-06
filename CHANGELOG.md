@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.0...v1.9.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* restore heap headroom so OTA and TLS validation work reliably ([#65](https://github.com/improving-minnesota/cyd-dashboard/issues/65)) ([f7417b9](https://github.com/improving-minnesota/cyd-dashboard/commit/f7417b9aa659cbbc5831c1dff1e050e93968b441))
+
 ## [1.9.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.8.0...v1.9.0) (2026-09-06)
 
 
