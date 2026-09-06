@@ -751,6 +751,11 @@ bool httpsBegin(HTTPClient& http, NetworkClientSecure& sec, const char* url, boo
 int httpsRequestRetry(HTTPClient& http, NetworkClientSecure& sec, const char* url,
                       int method, const String& body, const char* const* headers,
                       bool allowInsecure) {
+  // Use HTTP/1.0 so the response body is not chunked; this lets callers parse
+  // directly from http.getStream() without buffering the whole response in a
+  // String. HTTP/1.0 disables keep-alive, but this helper tears down and
+  // reopens the connection on each attempt anyway.
+  http.useHTTP10(true);
   // Persistent per-client: setUserAgent() survives begin()/end(), unlike
   // addHeader(), so setting it here covers every request this helper makes.
   http.setUserAgent(appUserAgent());
@@ -822,10 +827,9 @@ bool openskyEnsureToken() {
   if (code < 0) { g_osHandshakeFailed = true; return false; }  // TLS/transport failure on all attempts
   if (code == HTTP_CODE_UNAUTHORIZED || code == HTTP_CODE_BAD_REQUEST) return false;  // genuine bad creds
   if (code != HTTP_CODE_OK) { g_osHandshakeFailed = true; return false; }  // transient server error (429/5xx)
-  String payload = http.getString();
-  http.end();
   JsonDocument doc;
-  if (deserializeJson(doc, payload)) { g_osHandshakeFailed = true; return false; }
+  if (deserializeJson(doc, http.getStream())) { http.end(); g_osHandshakeFailed = true; return false; }
+  http.end();
   const char* tok = doc["access_token"];
   if (!tok || !tok[0]) { g_osHandshakeFailed = true; return false; }
   g_osToken = tok;
@@ -976,14 +980,15 @@ void fetchFlights() {
     g_creditsKnown = true;
     g_creditsExhausted = (g_creditsRemaining <= LOW_CREDIT_THRESHOLD);
   }
-  String payload = http.getString();
-  http.end();
-
   // Cap parse memory at 48KB; a busy airspace can return a very large
   // states array and we'd rather fail this fetch than risk an OOM.
   BoundedAllocator openskyAlloc(49152);
   JsonDocument doc(&openskyAlloc);
-  DeserializationError err = deserializeJson(doc, payload);
+  // Parse directly from the HTTP stream instead of buffering the whole body
+  // in a String. useHTTP10(true) in httpsRequestRetry disables chunked
+  // transfer encoding, so the stream is a plain JSON body.
+  DeserializationError err = deserializeJson(doc, http.getStream());
+  http.end();
   if (err) {
     snprintf(lastErr, sizeof lastErr, "json %s", err.c_str());
     dirty = true;

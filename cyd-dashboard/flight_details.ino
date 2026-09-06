@@ -218,9 +218,8 @@ void fetchRoute(const char* icao24) {
   String rem = http.header("X-Rate-Limit-Remaining");
   if (rem.length()) g_flightsCredits = rem.toInt();
   if (code == HTTP_CODE_OK) {
-    String payload = http.getString();
     JsonDocument doc;
-    if (!deserializeJson(doc, payload)) {
+    if (!deserializeJson(doc, http.getStream())) {
       JsonArray arr = doc.as<JsonArray>();
       if (arr.size() > 0) {
         const char* dep = arr[0]["estDepartureAirport"] | "";
@@ -263,10 +262,9 @@ void fetchTrack(const char* icao24) {
   String rem = http.header("X-Rate-Limit-Remaining");
   if (rem.length()) g_tracksCredits = rem.toInt();
   if (code == HTTP_CODE_OK) {
-    String payload = http.getString();
     BoundedAllocator trackAlloc(32768);
     JsonDocument doc(&trackAlloc);
-    if (!deserializeJson(doc, payload)) {
+    if (!deserializeJson(doc, http.getStream())) {
       JsonArray path = doc["path"].as<JsonArray>();
       if (!path.isNull()) {
         float maxRange = max(g_radiusMi * 2.0f, 8.0f);
