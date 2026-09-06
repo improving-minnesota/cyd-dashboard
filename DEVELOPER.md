@@ -215,14 +215,17 @@ releases. All of this lives in `cyd-dashboard/ota.ino`.
 
 ### TLS
 
-Both the release-metadata API call and the firmware download are verified against
-a minimal root-CA bundle (`kGithubRootCAs` in `ota.ino`): **USERTrust ECC**
-(covers the Sectigo chain for github.com/api.github.com) and **ISRG Root X1**
-(covers Let's Encrypt for objects.githubusercontent.com). `OTA_CA_EXPIRY` is the
-earliest root expiry; past that the client falls back to `setInsecure(true)`.
-There is **no** insecure retry on a failed handshake — that would let a
-man-in-the-middle defeat certificate validation — so the only insecure path is
-the time-gated one (roots expired). Transient transport failures on these
+All data fetches and the OTA path share one **global trust store**
+(`kRootCAs` in `cyd-dashboard.ino`): a deduplicated union of the former
+`kGithubRootCAs`, `kISRGRootCAs` and `kAmazonRootCA1`, covering USERTrust ECC
+(Sectigo/GitHub), the ISRG/Let's Encrypt roots (open-meteo, OpenSky,
+GitHub's asset host) and Amazon Root CA 1 (Govee). Every verified connection
+goes through the same `httpsBegin()`/`httpsRequestRetry()` helpers.
+`OTA_CA_EXPIRY` is the earliest root expiry; past that **only the OTA path**
+falls back to `setInsecure(true)` so a root rotation can't block updates. Data
+fetches never take that fallback. There is **no** insecure retry on a failed
+handshake — that would let a man-in-the-middle defeat certificate validation.
+Transient transport failures on these
 verified connections (e.g. a connect dropped after prolonged uptime) are retried
 a few times with clean socket teardown between attempts — always over the same
 verified TLS, never insecure. Firmware integrity is independently pinned:
