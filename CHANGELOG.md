@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.2](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.1...v1.9.2) (2026-09-06)
+
+
+### Bug Fixes
+
+* consolidate TLS into a single global trust store ([#67](https://github.com/improving-minnesota/cyd-dashboard/issues/67)) ([16c0b35](https://github.com/improving-minnesota/cyd-dashboard/commit/16c0b35942f9486a2be868ec31daeca65551a8c1))
+
 ## [1.9.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.0...v1.9.1) (2026-09-06)
 
 
