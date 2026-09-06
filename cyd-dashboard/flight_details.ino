@@ -214,7 +214,7 @@ void fetchRoute(const char* icao24) {
   String authHdr;
   if (openskyEnsureToken()) authHdr = "Bearer " + g_osToken;
   const char* routeHdrs[] = { "Authorization", authHdr.c_str(), nullptr };
-  int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTPS_METHOD_GET, "", routeHdrs);
+  int code = httpsRequestRetry(http, sec, url.c_str(), HTTPS_METHOD_GET, "", routeHdrs, false);
   String rem = http.header("X-Rate-Limit-Remaining");
   if (rem.length()) g_flightsCredits = rem.toInt();
   if (code == HTTP_CODE_OK) {
@@ -259,7 +259,7 @@ void fetchTrack(const char* icao24) {
   String authHdr;
   if (openskyEnsureToken()) authHdr = "Bearer " + g_osToken;
   const char* trackHdrs[] = { "Authorization", authHdr.c_str(), nullptr };
-  int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTPS_METHOD_GET, "", trackHdrs);
+  int code = httpsRequestRetry(http, sec, url.c_str(), HTTPS_METHOD_GET, "", trackHdrs, false);
   String rem = http.header("X-Rate-Limit-Remaining");
   if (rem.length()) g_tracksCredits = rem.toInt();
   if (code == HTTP_CODE_OK) {

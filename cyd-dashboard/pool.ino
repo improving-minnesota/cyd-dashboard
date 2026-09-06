@@ -32,13 +32,13 @@ void selectGoveeDevice() {
 // Thermometers have type "devices.types.thermometer" / a "sensorTemperature" capability.
 bool fetchGoveeDevices() {
   if (WiFi.status() != WL_CONNECTED || g_goveeKey.length() == 0) { g_goveeAuthBad = false; return false; }
-  // Govee's Open API is Amazon-signed, verified against Amazon Root CA 1.
+  // Govee's Open API is Amazon-signed (Amazon Root CA 1 is in the global store).
   NetworkClientSecure sec;
   HTTPClient http;
   http.setTimeout(5000);
   const char* devHdrs[] = { "Govee-API-Key", g_goveeKey.c_str(), nullptr };
   int code = httpsRequestRetry(http, sec, "https://openapi.api.govee.com/router/api/v1/user/devices",
-                               kAmazonRootCA1, HTTPS_METHOD_GET, "", devHdrs);
+                               HTTPS_METHOD_GET, "", devHdrs, false);
   g_goveeAuthBad = (code == HTTP_CODE_UNAUTHORIZED || code == HTTP_CODE_FORBIDDEN);
   if (code != HTTP_CODE_OK) { http.end(); return false; }
   String payload = http.getString();
@@ -79,13 +79,13 @@ bool fetchGoveeTemp() {
   }
   String body = "{\"requestId\":\"pool-1\",\"payload\":{\"sku\":\"" + g_poolModel
                 + "\",\"device\":\"" + g_poolDeviceId + "\"}}";
-  // Verified TLS against Amazon Root CA 1 (see kAmazonRootCA1).
+  // Verified TLS via the global trust store (Amazon Root CA 1).
   NetworkClientSecure sec;
   HTTPClient http;
   http.setTimeout(5000);
   const char* tempHdrs[] = { "Govee-API-Key", g_goveeKey.c_str(), "Content-Type", "application/json", nullptr };
   int code = httpsRequestRetry(http, sec, "https://openapi.api.govee.com/router/api/v1/device/state",
-                               kAmazonRootCA1, HTTPS_METHOD_POST, body, tempHdrs);
+                               HTTPS_METHOD_POST, body, tempHdrs, false);
   g_goveeAuthBad = (code == HTTP_CODE_UNAUTHORIZED || code == HTTP_CODE_FORBIDDEN);
   if (code != HTTP_CODE_OK) { g_poolValid = false; http.end(); return false; }
   String payload = http.getString();
