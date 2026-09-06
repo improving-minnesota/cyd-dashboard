@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.8.0...v1.9.0) (2026-09-06)
+
+
+### Features
+
+* add track projection, header credit tiers, and harden OpenSky TLS ([#63](https://github.com/improving-minnesota/cyd-dashboard/issues/63)) ([d1bde87](https://github.com/improving-minnesota/cyd-dashboard/commit/d1bde87af2b60d0bb89358b5d8e8eb11d3aab480))
+
 ## [1.8.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.7.3...v1.8.0) (2026-09-05)
 
 
