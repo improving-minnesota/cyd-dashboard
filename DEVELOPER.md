@@ -566,11 +566,13 @@ state (`drawAuthBorder` / `drawStatusBorder` in `cyd-dashboard.ino`):
 the clock bar color is `g_clockCol` (persisted `clkcol`) except when a critical
 issue overrides it with maroon.
 
-## OpenSky Credits screen & ground track
+## OpenSky Credits screen & header readout
 
-Tapping the credits ("C<remaining>") in the header band opens an **OpenSky
-Credits** screen showing the three independent daily credit buckets with their
-last-known remaining balances:
+With **Flight Tracker** enabled, the header band shows the three independent
+credit buckets as stacked readouts — **CRP** (radar polling), **CRL** (route
+lookup), **CFT** (flight tracking) — drawn in FONT1 by `drawHeaderCredit()`.
+Tapping them opens an **OpenSky Credits** screen (`drawCredits()`) showing the
+same three buckets with their last-known remaining balances:
 
 | Bucket | Endpoint | Device uses for |
 |---|---|---|
@@ -580,8 +582,16 @@ last-known remaining balances:
 
 Each bucket's `X-Rate-Limit-Remaining` is captured from its own endpoint's
 response header: the states bucket on every poll, the flights bucket in
-`fetchRoute()`, and the tracks bucket in `fetchTrack()`. The screen shows the
-last-known values (they update as the device calls each endpoint).
+`fetchRoute()`, and the tracks bucket in `fetchTrack()`. Both the header readout
+and the Credits screen show the last-known values (they update as the device
+calls each endpoint); the header redraws on change via `updateDashboard()`, and
+until a bucket is first fetched it shows a yellow "?".
+
+The header value color is tiered by absolute remaining amounts (no assumed
+daily budget): **grey** when healthy, **yellow** below 500, **pink** below 50.
+A pending (unfetched) bucket shows "?" in yellow. Because the tiers don't assume
+a fixed limit, they stay meaningful for contributors whose credit allocation
+differs from the standard anonymous/token quotas.
 
 `fetchTrack()` (in `flight_details.ino`) also retrieves the tracked plane's
 ground-track polyline from `/tracks` and stores a bounded set of points (max 64,

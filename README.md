@@ -78,9 +78,12 @@ Where to get each credential is explained below.
 ## Using the device
 
 - Tap the **Settings** cog to open the settings menu.
-- Tap the **credits** ("C…") in the top-right header to open the **OpenSky
-  Credits** screen, which shows your daily credit usage for each bucket (radar
-  polling, route lookups, and flight tracking).
+- With **Flight Tracker** on, the header shows your remaining **OpenSky
+  credits** as three small readouts — **CRP** (radar polling), **CRL** (route
+  lookup), and **CFT** (flight tracking). A value is **grey** when healthy,
+  turns **yellow** below 500 (or shows a yellow **?** until that bucket's first
+  fetch), and **pink** below 50. Tap the readouts to open the **OpenSky
+  Credits** screen.
 - On the idle screen, tap the **weather temperature** (top-left) to open the
   weather temperature history graph.
 - On the idle screen, tap the **Pool** reading to open its history graph.

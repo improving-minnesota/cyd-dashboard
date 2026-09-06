@@ -90,8 +90,6 @@ struct Plane;
 
 // ---------------- CONFIG (edit these) ----------------
 // OpenSky bbox will be computed from g_lat/g_lon at runtime.
-const int OPENSKY_TOTAL_CREDITS = 4000;
-const int ANON_DAILY_CREDITS   = 400;   // anonymous daily budget (per bucket)
 // Build/version shown on the About page. CI overrides APP_VERSION at build
 // time with the release version via -DAPP_VERSION=<ver> (see
 // .github/workflows/release.yml). Local/dev builds should pass
@@ -1104,7 +1102,29 @@ bool geocodeAddress() {
 // "clkcol".
 #define DEFAULT_CLOCK_COL TFT_BLUE
 uint16_t g_clockCol = DEFAULT_CLOCK_COL;
-#define HEADER_ACCENT  TFT_YELLOW
+
+// Draw one header credit bucket: a white label (e.g. "CRP:") with its value.
+// The value is color-tiered by absolute remaining amounts (no assumed daily
+// budget): pink below 50, yellow below 500, grey otherwise. An unobserved
+// bucket shows "?" in yellow (awaiting a value, not yet an error). Drawn in
+// FONT1 (6x8) so the three stacked rows fit inside the 36px header band.
+void drawHeaderCredit(int x, int y, const char* label, int value, bool known,
+                      uint16_t bg) {
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.setCursor(x, y);
+  tft.print(label);
+  uint16_t valCol = TFT_LIGHTGREY;
+  if (known && value >= 0) {
+    if (value < 50)        valCol = TFT_PINK;     // critical
+    else if (value < 500)  valCol = TFT_YELLOW;   // warning
+  } else if (!known) {
+    valCol = TFT_YELLOW;    // awaiting a value
+  }
+  tft.setTextColor(valCol, bg);
+  tft.setCursor(x + 30, y);
+  if (known) tft.printf("%d", value);
+  else tft.print("?");
+}
 
 void drawHeaderBand() {
   bool err = (dashboardCriticalLabel() != nullptr);
@@ -1116,24 +1136,19 @@ void drawHeaderBand() {
   tft.setTextSize(1);
   tft.setCursor(4, 11);
   tft.print(fmtDate());
-  // Three independent OpenSky credit buckets, one per line, in the right side
-  // of the header: CRP (radar polling), CRL (route lookup), CFT (flight
-  // tracking). A "?" means that bucket's balance hasn't been observed yet. The
-  // block sits inside the header's credits tap zone (see the touch handler).
-  tft.setTextColor(HEADER_ACCENT, bg);
-  tft.setCursor(194, 4);   tft.print("CRP:");
-  tft.setCursor(194, 14);  tft.print("CRL:");
-  tft.setCursor(194, 24);  tft.print("CFT:");
-  tft.setTextColor(TFT_WHITE, bg);
-  tft.setCursor(230, 4);
-  if (g_creditsKnown) tft.printf("%d", g_creditsRemaining);
-  else tft.print("?");
-  tft.setCursor(230, 14);
-  if (g_flightsCredits >= 0) tft.printf("%d", g_flightsCredits);
-  else tft.print("?");
-  tft.setCursor(230, 24);
-  if (g_tracksCredits >= 0) tft.printf("%d", g_tracksCredits);
-  else tft.print("?");
+  // Three independent OpenSky credit buckets (CRP: radar polling, CRL: route
+  // lookup, CFT: flight tracking), one per line in the right side of the
+  // header. Drawn in FONT1 so all three fit inside the 36px band. The block
+  // sits inside the header's credits tap zone (see the touch handler). Only
+  // shown while flight tracking is enabled; when it's off the header's right
+  // side is left empty.
+  if (g_trackEnabled) {
+    tft.setTextFont(1);
+    tft.setTextSize(1);
+    drawHeaderCredit(194, 4,  "CRP:", g_creditsRemaining, g_creditsKnown,        bg);
+    drawHeaderCredit(194, 14, "CRL:", g_flightsCredits,   g_flightsCredits >= 0, bg);
+    drawHeaderCredit(194, 24, "CFT:", g_tracksCredits,    g_tracksCredits >= 0,  bg);
+  }
   // bigger, bolder clock: FONT2 doubled
   tft.setTextFont(2);
   tft.setTextSize(2);
@@ -1144,22 +1159,22 @@ void drawHeaderBand() {
 }
 
 // One row of the OpenSky Credits screen: a bucket label + its last-known
-// remaining / daily budget.
-void drawCreditsRow(int y, const char* label, int remaining, bool known, int budget) {
+// remaining balance.
+void drawCreditsRow(int y, const char* label, int remaining, bool known) {
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
   tft.setTextFont(2);
   tft.setCursor(8, y);
   tft.print(label);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setCursor(8, y + 20);
-  if (known) tft.printf("%d / %d", remaining, budget);
-  else tft.print("-- / " + String(budget));
+  if (known) tft.printf("%d", remaining);
+  else tft.print("--");
 }
 
 // OpenSky Credits screen: shows the three independent daily credit buckets
 // (states = radar polling, flights = route lookup, tracks = flight tracking)
-// with their last-known remaining balances. Reached by tapping the credits
-// ("C<remaining>") in the header band. Back returns to the previous screen.
+// with their last-known remaining balances. Reached by tapping the credits in
+// the header band. Back returns to the previous screen.
 void drawCredits() {
   tft.fillScreen(TFT_BLACK);
   uint16_t bg = g_clockCol;
@@ -1174,12 +1189,10 @@ void drawCredits() {
   tft.setCursor(272, 8);
   tft.print("Back");
 
-  int budget = (g_authState == AUTH_ANON || g_authState == AUTH_BAD)
-               ? ANON_DAILY_CREDITS : OPENSKY_TOTAL_CREDITS;
   int y = 48;
-  drawCreditsRow(y,     "Radar Polling",   g_creditsRemaining, g_creditsKnown,      budget);
-  drawCreditsRow(y+48,  "Route Lookup",    g_flightsCredits,   g_flightsCredits >= 0, budget);
-  drawCreditsRow(y+96,  "Flight Tracking", g_tracksCredits,    g_tracksCredits >= 0,  budget);
+  drawCreditsRow(y,     "Radar Polling",   g_creditsRemaining, g_creditsKnown);
+  drawCreditsRow(y+48,  "Route Lookup",    g_flightsCredits,   g_flightsCredits >= 0);
+  drawCreditsRow(y+96,  "Flight Tracking", g_tracksCredits,    g_tracksCredits >= 0);
 
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setTextFont(1);
@@ -2264,9 +2277,10 @@ void handleTouch() {
     bool overhead = g_trackEnabled && !g_suppressFlight
                     && (planeCount > 0 && planes[0].distMi <= g_radiusMi);
 
-    // tapping the credits ("C<remaining>") in the header opens the OpenSky
-    // Credits screen (three buckets). Zone avoids the flight Back button.
-    if (inRect(x, y, 194, 0, 264, 33)) { g_creditsReturn = SCR_DASH; g_screen = SCR_CREDITS; dirty = true; return; }
+    // tapping the header credits opens the OpenSky Credits screen (three
+    // buckets). Only active when flight tracking is on (the indicator is only
+    // drawn then). Zone avoids the flight Back button.
+    if (g_trackEnabled && inRect(x, y, 194, 0, 264, 33)) { g_creditsReturn = SCR_DASH; g_screen = SCR_CREDITS; dirty = true; return; }
 
     // settings cog -> settings. Generous tap zone so it's easy to hit even with
     // a small touch-calibration offset (the cog itself is only ~28x24).
@@ -2319,7 +2333,7 @@ void handleTouch() {
     // Back button returns to the dashboard; tapping the header credits opens
     // the OpenSky Credits screen (returning back here).
     g_flightDetailUntil = millis() + 30000UL;
-    if (inRect(x, y, 194, 0, 264, 33)) { g_creditsReturn = SCR_FLIGHTDETAIL; g_screen = SCR_CREDITS; dirty = true; return; }
+    if (g_trackEnabled && inRect(x, y, 194, 0, 264, 33)) { g_creditsReturn = SCR_FLIGHTDETAIL; g_screen = SCR_CREDITS; dirty = true; return; }
     if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_DASH; dirty = true; return; }
     return;
   }
