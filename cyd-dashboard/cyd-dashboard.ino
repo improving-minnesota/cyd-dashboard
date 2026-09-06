@@ -108,6 +108,9 @@ struct Plane;
   const char* const kVersion = STRINGIZE(APP_VERSION);
 #endif
 bool isDevBuild() { return strstr(kVersion, "-dev") != NULL; }
+// User-Agent sent on every network call so servers can identify the client,
+// e.g. "cyd-dashboard/v1.8.0" (dev builds carry the "-dev" suffix).
+String appUserAgent() { return "cyd-dashboard/v" + String(kVersion); }
 // ------------------------------------------------------
 
 TFT_eSPI tft = TFT_eSPI();
@@ -660,6 +663,9 @@ bool httpsBegin(HTTPClient& http, NetworkClientSecure& sec, const char* url, con
 int httpsRequestRetry(HTTPClient& http, NetworkClientSecure& sec, const char* url,
                       const char* roots, int method, const String& body,
                       const char* const* headers) {
+  // Persistent per-client: setUserAgent() survives begin()/end(), unlike
+  // addHeader(), so setting it here covers every request this helper makes.
+  http.setUserAgent(appUserAgent());
   int code = -1;
   for (int attempt = 1; attempt <= HTTPS_RETRY_ATTEMPTS; attempt++) {
     http.end();                // release any previous attempt's connection
@@ -1021,6 +1027,7 @@ void fetchIpLocation() {
   if (WiFi.status() != WL_CONNECTED) return;
   HTTPClient http;
   http.begin("http://ip-api.com/json/");  // plain HTTP is allowed by this endpoint
+  http.setUserAgent(appUserAgent());
   http.setTimeout(5000);
   int code = http.GET();
   if (code == HTTP_CODE_OK) {
@@ -1052,8 +1059,8 @@ bool geocodeAddress() {
   NetworkClientSecure sec;
   HTTPClient http;
   http.setTimeout(5000);
-  const char* geoHdrs[] = { "User-Agent", "cyd-dashboard/1.0 (contact: user@localhost)", nullptr };
-  int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTPS_METHOD_GET, "", geoHdrs);
+  // User-Agent is set centrally in httpsRequestRetry (appUserAgent()).
+  int code = httpsRequestRetry(http, sec, url.c_str(), kISRGRootCAs, HTTPS_METHOD_GET, "", nullptr);
   if (code != HTTP_CODE_OK) {
     http.end();
     snprintf(lastErr, sizeof lastErr, "geo %d", code);
@@ -1228,12 +1235,13 @@ void updateDashboard() {
     lastC = c; lastF = g_flightsCredits; lastT = g_tracksCredits;
     drawHeaderBand();
     // The header redraw covers the Back button (it sits inside the header band),
-    // so restore it. On the dashboard only when a flight is overhead; the
-    // flight-detail page always shows it.
+    // so restore it - but only when a radar/flight view is actually on screen
+    // (the dashboard overhead view or the flight-detail page). Not when the idle
+    // dashboard is showing: a plane may have dead-reckoned into range (so a live
+    // overhead check would pass) before the view has switched on a full redraw,
+    // and drawing the Back button there would show it on the wrong screen.
     bool onDetail = (g_screen == SCR_FLIGHTDETAIL);
-    bool overhead = !onDetail && g_trackEnabled && !g_suppressFlight
-                    && (planeCount > 0 && planes[0].distMi <= g_radiusMi);
-    if (overhead || onDetail) drawFlightBackButton();
+    if (g_radarShown || onDetail) drawFlightBackButton();
   }
   if (g_screen == SCR_DASH && g_showTimer && g_trackEnabled) drawCountdownBar(); // updates the bar in place
   drawAutoUpdateStatus();
@@ -1596,21 +1604,34 @@ void drawTrackPolyline(int cx, int cy, float scale) {
   }
 }
 
-// From the track's end, extend to the screen edge along the track bearing.
-// Static, redrawn each frame so the blip doesn't leave a hole; only with a track.
-void drawTrackProjection(int cx, int cy, float scale) {
-  if (g_trackCount < 1 || g_trackBearingDeg < 0.0f) return;
-  // Start exactly where the historical track ends, so it is contiguous.
-  int sx = cx + (int)(g_trackPts[g_trackCount - 1].dxMi * scale);
-  int sy = cy - (int)(g_trackPts[g_trackCount - 1].dyMi * scale);
-  // Direction = the track's end bearing (north-up, clockwise; screen flips y).
-  float rad = g_trackBearingDeg * PI / 180.0f;
-  float ux = sinf(rad) * scale;    // east -> +x
-  float uy = -cosf(rad) * scale;   // north -> -y
+// Extend a line to the screen edge along a direction, from the track's end when
+// a track is available, else from the plane's current position along its live
+// heading (so the projection always shows and the plane follows it). Static,
+// redrawn each frame so the blip doesn't leave a hole.
+void drawTrackProjection(int cx, int cy, float scale, float planeDxMi, float planeDyMi, float planeHdgDeg) {
+  float sxMi, syMi, dirDx, dirDy;
+  if (g_trackCount >= 1 && g_trackBearingDeg >= 0.0f) {
+    // Track available: start at its end and continue along its end bearing.
+    sxMi = g_trackPts[g_trackCount - 1].dxMi;
+    syMi = g_trackPts[g_trackCount - 1].dyMi;
+    float rad = g_trackBearingDeg * PI / 180.0f;
+    dirDx = sinf(rad); dirDy = cosf(rad);   // east / north
+  } else if (planeHdgDeg >= 0.0f) {
+    // No track: project from the plane's current position along its heading.
+    sxMi = planeDxMi; syMi = planeDyMi;
+    float rad = planeHdgDeg * PI / 180.0f;
+    dirDx = sinf(rad); dirDy = cosf(rad);
+  } else {
+    return;   // no track and no heading to project along
+  }
+  int sx = cx + (int)(sxMi * scale);
+  int sy = cy - (int)(syMi * scale);
+  float ux = dirDx * scale;    // east -> +x
+  float uy = -dirDy * scale;   // north -> -y
   float um = sqrtf(ux * ux + uy * uy);
   if (um == 0.0f) return;
   ux /= um; uy /= um;
-  // Extend the ray from the track end until it leaves the screen.
+  // Extend the ray from the start point until it leaves the screen.
   float t = 1e9f;
   if (ux > 0.0001f) t = fminf(t, (319 - sx) / ux);
   if (ux < -0.0001f) t = fminf(t, (0 - sx) / ux);
@@ -1820,7 +1841,8 @@ void drawRadar() {
   drawRadarFrame(cx, cy, r);
   float scale = r / g_radiusMi;
   drawTrackPolyline(cx, cy, scale);
-  drawTrackProjection(cx, cy, scale);
+  if (planeCount > 0)
+    drawTrackProjection(cx, cy, scale, planes[0].dxMi, planes[0].dyMi, planes[0].hdgDeg);
   // Draw other flights first, then the tracked flight last so its cyan dot is
   // always painted on top and can't be hidden by a neighbor drawn after it.
   for (int i = 1; i < planeCount; i++) {
@@ -1848,7 +1870,8 @@ void drawRadarInPlace() {
   // Redraw the ground track after erasing blips so a moved blip doesn't leave a
   // black hole through the track, then draw blips on top.
   drawTrackPolyline(cx, cy, scale);
-  drawTrackProjection(cx, cy, scale);
+  if (planeCount > 0)
+    drawTrackProjection(cx, cy, scale, planes[0].dxMi, planes[0].dyMi, planes[0].hdgDeg);
   // Draw other flights first, then the tracked flight last so its cyan dot is
   // always on top (see drawRadar).
   for (int i = 1; i < planeCount; i++) {
@@ -1865,7 +1888,7 @@ void drawFlightDetailRadar() {
   int cx = kRadarCX, cy = kRadarCY, r = kRadarR;
   drawRadarFrame(cx, cy, r);
   drawTrackPolyline(cx, cy, r / g_radiusMi);
-  drawTrackProjection(cx, cy, r / g_radiusMi);
+  drawTrackProjection(cx, cy, r / g_radiusMi, g_lastFlight.dxMi, g_lastFlight.dyMi, g_lastFlight.hdgDeg);
   // Cyan so the flight whose details are shown is easy to pick out.
   g_flightBlipOn = plotRadarBlip(cx, cy, r / g_radiusMi,
                                  g_lastFlight.dxMi, g_lastFlight.dyMi, g_lastFlight.distMi,
@@ -1880,7 +1903,7 @@ void drawFlightDetailRadarInPlace() {
   if (g_flightBlipOn) eraseRadarBlip(g_flightLastPx, g_flightLastPy);
   drawRadarFrame(cx, cy, r);
   drawTrackPolyline(cx, cy, r / g_radiusMi);
-  drawTrackProjection(cx, cy, r / g_radiusMi);
+  drawTrackProjection(cx, cy, r / g_radiusMi, g_lastFlight.dxMi, g_lastFlight.dyMi, g_lastFlight.hdgDeg);
   g_flightBlipOn = plotRadarBlip(cx, cy, r / g_radiusMi,
                                  g_lastFlight.dxMi, g_lastFlight.dyMi, g_lastFlight.distMi,
                                  g_flightLastPx, g_flightLastPy, TFT_CYAN, g_lastFlight.hdgDeg,
