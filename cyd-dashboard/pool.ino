@@ -41,11 +41,9 @@ bool fetchGoveeDevices() {
                                HTTPS_METHOD_GET, "", devHdrs, false);
   g_goveeAuthBad = (code == HTTP_CODE_UNAUTHORIZED || code == HTTP_CODE_FORBIDDEN);
   if (code != HTTP_CODE_OK) { http.end(); return false; }
-  String payload = http.getString();
-  http.end();
-
   JsonDocument doc;
-  if (deserializeJson(doc, payload)) return false;
+  if (deserializeJson(doc, http.getStream())) { http.end(); return false; }
+  http.end();
   g_goveeCount = 0;
   JsonArray devs = doc["data"];   // array of devices
   for (JsonObject d : devs) {
@@ -88,11 +86,9 @@ bool fetchGoveeTemp() {
                                HTTPS_METHOD_POST, body, tempHdrs, false);
   g_goveeAuthBad = (code == HTTP_CODE_UNAUTHORIZED || code == HTTP_CODE_FORBIDDEN);
   if (code != HTTP_CODE_OK) { g_poolValid = false; http.end(); return false; }
-  String payload = http.getString();
-  http.end();
-
   JsonDocument doc;
-  if (deserializeJson(doc, payload)) { g_poolValid = false; return false; }
+  if (deserializeJson(doc, http.getStream())) { g_poolValid = false; http.end(); return false; }
+  http.end();
   bool found = false;
   JsonArray caps = doc["payload"]["capabilities"];
   for (JsonObject c : caps) {

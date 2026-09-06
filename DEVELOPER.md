@@ -42,6 +42,15 @@ Keep PRs small and focused on a single logical change so they're quick to
 review. The primary branch is `main`; everything that lands there is intended
 to be shippable.
 
+> **Keep the README and the on-device Help screen in sync.** The end-user guide
+> lives in two places: `README.md` and the Help screen (`kHelpLines[]` in
+> `cyd-dashboard/settings.ino`). Any change to the README's features, getting
+> started, settings, credentials, or troubleshooting content should be mirrored
+> in `kHelpLines[]`, and vice versa — otherwise the on-device help drifts from
+> the README. Because Help renders fixed-width, pre-wrapped lines, keep each
+> entry short (≤ ~32 chars) and update the screen only when the README's
+> user-facing guidance actually changes.
+
 ## Code comments
 
 Comments serve two purposes: they explain *why* (not *what*), and they organize

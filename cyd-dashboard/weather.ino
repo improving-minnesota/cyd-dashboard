@@ -93,11 +93,9 @@ void fetchWeather() {
   http.setTimeout(5000);
   int code = httpsRequestRetry(http, sec, url, HTTPS_METHOD_GET, "", nullptr, false);
   if (code != HTTP_CODE_OK) { http.end(); return; }
-  String payload = http.getString();
-  http.end();
-
   JsonDocument doc;
-  if (deserializeJson(doc, payload)) return;
+  if (deserializeJson(doc, http.getStream())) { http.end(); return; }
+  http.end();
 
   JsonObject cur = doc["current"];
   g_temp = cur["temperature_2m"] | 0.0f;
