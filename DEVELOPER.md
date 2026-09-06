@@ -76,6 +76,19 @@ arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
 arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 cyd-dashboard
 ```
 
+> **Keep the upload FQBN identical to the compile FQBN.** `PartitionScheme` is
+> resolved at *compile* time (it generates `partitions.bin`). If the upload FQBN
+> drops `:PartitionScheme=custom`, `arduino-cli` may fail to find the matching
+> build and silently recompile with the **default** scheme, then flash a default
+> partition table over the custom one — scrambling where the OTA slots, `spiffs`,
+> and `logos` partitions live. If you already built a custom image, flash it
+> directly with `--input-dir <dir>` instead.
+>
+> **`upload.speed=115200`.** The CYD's onboard CH340 USB-serial chip is
+> unreliable at the board's default 921600 baud (drops mid-flash); 115200 works
+> on every variant. Set it via `--upload-property` so the FQBN stays identical
+> to compile, rather than a board-menu option that would change it.
+
 > **Use `--clean` for reliable local builds.** `arduino-cli` incremental-build
 > caching can silently reuse a stale object file for a `.ino` that changed, and
 > `arduino-cli upload` will happily flash that stale binary — so what runs on
@@ -173,10 +186,11 @@ releases. All of this lives in `cyd-dashboard/ota.ino`.
 3. **Install.** `performOTA()` downloads the `.bin` in 4 KB chunks, streams them
    to the inactive OTA slot via `Update.write()` (`U_FLASH`), shows a progress
    screen, then `Update.end()` + `ESP.restart()`. On success it never returns.
-   It runs on a **dedicated 32 KB-stack task** (`otaTaskEntry`, `g_otaTask` in
-   `cyd-dashboard.ino`) because the mbedtls TLS handshake overflows the ~8 KB
-   default `loopTask`. The OTA task owns the display, so the main loop yields
-   while it runs. It is **not** subscribed to the task watchdog, so there is no
+   It runs on a **dedicated 12 KB-stack task** (`otaTaskEntry`, `g_otaTask` in
+   `cyd-dashboard.ino`), created once at boot and left idle until an OTA is
+   requested, because the mbedtls TLS handshake overflows the ~8 KB default
+   `loopTask`. The OTA task owns the display, so the main loop yields while it
+   runs. It is **not** subscribed to the task watchdog, so there is no
    `esp_task_wdt_reset()` call during the download; the HTTP timeouts bound it.
 
 ### What triggers a check
