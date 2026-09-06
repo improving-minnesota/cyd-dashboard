@@ -117,7 +117,9 @@ Defaults for a freshly reset device are shown with each setting.
   to blink the LED when a noteworthy flight is overhead. Also where you enter
   your OpenSky credentials. Defaults: **on**, imperial units, **3.5 mi** radius,
   **15,000 ft** ceiling, **60 s** poll, timer **off**, no home airport (falls
-  back to DFW), blinking **on**.
+  back to DFW), blinking **on**. If your OpenSky **radar-polling** credits run
+  out, the poll backs off to a slower 15-minute recovery check until they refill
+  (OpenSky resets daily).
 - **Sleep Mode** — enable it, set the start/end time, and the wake duration.
   Defaults: **on**, sleeps 10:00 PM – 8:00 AM, **10 min** wake.
 - **Pool Temp** — enable it, enter your Govee API key, and pick your
@@ -160,9 +162,10 @@ screen for **10 seconds** — a calibration screen appears and walks you through
 tapping the target dots. When you're done, touch accuracy is restored.
 
 **What does the colored border around the screen mean?** A **red** border flags a
-critical issue (no WiFi, bad OpenSky credentials, exhausted flight credits, or
-pool data unavailable). A **yellow** border means you're using OpenSky
-**anonymously** — not an error, flights still work, just at a lower rate limit.
+critical issue (no WiFi, bad OpenSky credentials, exhausted OpenSky
+radar-polling credits, or pool data unavailable). A **yellow** border means
+you're using OpenSky **anonymously** — not an error, flights still work, just at
+a lower rate limit.
 
 
 ## License

@@ -217,7 +217,7 @@ float g_lat = 0.0f;           // location; loaded from NVS, or guessed from IP o
 float g_lon = 0.0f;
 int   g_creditsRemaining = 0; // OpenSky X-Rate-Limit-Remaining
 bool  g_creditsKnown = false; // false until the first successful fetch
-bool  g_creditsExhausted = false;  // true when at/near the daily credit limit
+bool  g_creditsExhausted = false;  // true when at/near the daily radar-polling credit limit
 int   g_flightsCredits = -1;  // /flights/* bucket remaining (-1 = not seen yet)
 int   g_tracksCredits  = -1;  // /tracks/* bucket remaining (-1 = not seen yet)
 const int LOW_CREDIT_THRESHOLD = 0;         // "at the limit"
@@ -2868,10 +2868,10 @@ void loop() {
 
   // --- Polling runs only while WiFi is up; otherwise updates are suspended ---
   if (g_screen == SCR_DASH && wifiUp) {
-    // Periodic OpenSky flight poll (only while tracking is enabled). While
-    // credits are exhausted, back off to an infrequent recovery check
-    // instead of the normal cadence, so we notice once credits refill
-    // (OpenSky resets daily) without hammering the API.
+    // Periodic OpenSky flight poll (only while tracking is enabled). While the
+    // OpenSky radar-polling credits are exhausted, back off to an infrequent
+    // recovery check instead of the normal cadence, so we notice once credits
+    // refill (OpenSky resets daily) without hammering the API.
     unsigned long pollInterval = g_creditsExhausted
         ? CREDIT_RECOVERY_MS : (unsigned long)g_pollSec * 1000UL;
     if (g_trackEnabled && now - lastPoll >= pollInterval) {

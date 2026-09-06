@@ -572,8 +572,9 @@ either reset.
 The dashboard draws a colored screen border and tints the clock bar to flag
 state (`drawAuthBorder` / `drawStatusBorder` in `cyd-dashboard.ino`):
 
-- **Red** (critical): no WiFi, invalid OpenSky credentials, flight credits
-  exhausted, or pool data unavailable. The clock bar turns maroon to match.
+- **Red** (critical): no WiFi, invalid OpenSky credentials, the OpenSky
+  **radar-polling** credits exhausted, or pool data unavailable. The clock bar
+  turns maroon to match.
 - **Yellow** (warning): running OpenSky **anonymously** (no credentials
   configured). This is non-critical — flights still work at a lower rate limit
   — so the clock bar keeps its normal (user-selected) color. Anonymous is only
@@ -609,6 +610,13 @@ daily budget): **grey** when healthy, **yellow** below 500, **pink** below 50.
 A pending (unfetched) bucket shows "?" in yellow. Because the tiers don't assume
 a fixed limit, they stay meaningful for contributors whose credit allocation
 differs from the standard anonymous/token quotas.
+
+The periodic flight poll is gated **only** by the Radar Polling bucket: while the
+`/states/*` credits are exhausted, the normal poll cadence backs off to a
+15-minute recovery check (`CREDIT_RECOVERY_MS` in `cyd-dashboard.ino`) so the
+device notices once the credits refill (OpenSky resets daily) without hammering
+the API. The Route Lookup and Flight Tracking buckets don't affect the poll
+cadence.
 
 `fetchTrack()` (in `flight_details.ino`) also retrieves the tracked plane's
 ground-track polyline from `/tracks` and stores a bounded set of points (max 64,
