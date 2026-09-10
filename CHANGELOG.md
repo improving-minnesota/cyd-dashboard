@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.6](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.5...v1.9.6) (2026-09-10)
+
+
+### Bug Fixes
+
+* only show build number when BUILD_NUM is non-zero ([9b3b402](https://github.com/improving-minnesota/cyd-dashboard/commit/9b3b402a9cfe7c19de58a0336a0efd7f3f329e92))
+
 ## [1.9.5](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.4...v1.9.5) (2026-09-10)
 
 
