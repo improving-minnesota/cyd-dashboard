@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.11.0...v1.11.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* mark release-please PR as published after release ([3e995eb](https://github.com/improving-minnesota/cyd-dashboard/commit/3e995eb0490cbf87685e702029e487ccb8bef2a1))
+
 ## [1.10.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.7...v1.10.0) (2026-09-10)
 
 
