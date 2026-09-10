@@ -93,13 +93,13 @@ jobs:
         run: |
           arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
             --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=${{ needs.version.outputs.version }}" \
-            --output-dir build/ota cyd-dashboard
+            --output-dir build/release cyd-dashboard
 
       - name: Create draft release and attach .bin
         run: |
           VERSION="${{ needs.version.outputs.version }}"
           TAG="v${VERSION}"
-          gh release create "${TAG}" build/ota/cyd-dashboard.ino.bin \
+          gh release create "${TAG}" build/release/cyd-dashboard.ino.bin \
             --repo "${{ github.repository }}" \
             --draft \
             --title "${TAG}" \
