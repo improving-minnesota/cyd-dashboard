@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.12.0...v1.12.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* Set route/track credits to 0 on 429 and document ([#96](https://github.com/improving-minnesota/cyd-dashboard/issues/96)) ([66e3ee3](https://github.com/improving-minnesota/cyd-dashboard/commit/66e3ee310a22446d9226574bb27a92ea6c39a458))
+
 ## [1.12.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.11.1...v1.12.0) (2026-09-10)
 
 
