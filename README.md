@@ -20,7 +20,7 @@ no computer needed.
 - **Flight tracker** — live aircraft overhead (from OpenSky) with a mini radar,
   callsign, altitude/speed/distance, origin & destination, airline logo, and a
   dotted ground-track line showing where the plane actually came from. The LED
-  flashes white for every overhead flight unless the route involves a top US
+  blinks white for every overhead flight unless the route involves a top US
   airport (blue), or the flight is departing (red) or arriving (green) at your
   home airport.
 - **Govee pool temp monitor** — current pool water temperature from a Govee

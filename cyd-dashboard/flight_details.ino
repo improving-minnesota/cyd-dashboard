@@ -124,9 +124,9 @@ bool airlineInfo(const char* callsign, String& name, uint16_t& color) {
 // and is declared at the top of cyd-dashboard.ino.
 
 // Top US airports by 2023 enplanements (ICAO codes), from FAA commercial
-// service enplanement data. KDFW is included as a major hub and flashes blue
+// service enplanement data. KDFW is included as a major hub and blinks blue
 // like any other top-50 airport unless the user has also set it as their home
-// airport. Used to flash the LED (blue) when an overhead flight involves one
+// airport. Used to blink the LED (blue) when an overhead flight involves one
 // of these airports.
 static const char* const kTopAirports[] = {
   "KATL","KLAX","KDFW","KDEN","KORD","KJFK","KMCO","KLAS","KCLT","KMIA",

@@ -724,12 +724,12 @@ Settings are stored in NVS under the `"flight"` namespace (see `setup()` in
 |---|---|---|---|
 | `timer` | bool | `false` | Show the dashboard countdown/timer bar (Flight Tracker → Enable timer). |
 | `clkcol` | uint32 | `TFT_BLUE` | Dashboard clock-bar color (General → Clock Color). |
-| `homeap` | string | `""` | Home airport (ICAO). Used for the LED flash: red when origin matches, green when destination matches. Leave empty to disable. |
+| `homeap` | string | `""` | Home airport (ICAO). Used for the LED blink: red when origin matches, green when destination matches. Leave empty to disable. |
 | `ipdhcp` | bool | `true` | Network addressing mode (Network → IP setup). `true` = DHCP; `false` = static using the keys below. |
 | `ipaddr` / `ipmask` / `ipgw` / `ipdns` | string | `""` | Static IP, subnet mask, gateway, DNS. Applied via `WiFi.config()`; blank DNS falls back to the gateway, and an incomplete/invalid set falls back to DHCP. |
 | `hostname` | string | `"cyd-dashboard"` | STA hostname via `WiFi.setHostname()`; applies in both DHCP and static modes. |
 
-The onboard RGB LED flashes for every new overhead flight when **Blink for Flight**
+The onboard RGB LED blinks for every new overhead flight when **Blink for Flight**
 is on (`g_blinkForFlight`, persisted as `blinkf`). Color priority is:
 
 - **Red** — origin matches `homeap`.
@@ -737,7 +737,7 @@ is on (`g_blinkForFlight`, persisted as `blinkf`). Color priority is:
 - **Blue** — origin or destination is in the `kTopAirports` list (but not home).
 - **White** — all other overhead flights, including flights with no route data.
 
-Each color blinks 5 times at 240 ms on/off. The flash is queued in
+Each color blinks 5 times at 240 ms on/off. The blink is queued in
 `fetchFlights()` and performed in `loop()` after the flight view is drawn.
 
 `prefs.clear()` in the Reset handler removes **all** keys for both "All" and

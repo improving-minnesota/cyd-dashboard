@@ -165,7 +165,7 @@ static const char* const kHelpLines[] = {
   "Flights: live aircraft with",
   "a radar, callsign, route,",
   "and airline logo. The LED",
-  "flashes white for each",
+  "blinks white for each",
   "overhead flight, blue for",
   "a top US airport, red when",
   "departing or green when",
@@ -613,7 +613,7 @@ void drawFtracker() {
     tft.setTextFont(1);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(8, 144);
-    tft.print("Used to flash red/green for");
+    tft.print("Used to blink red/green for");
     tft.setCursor(8, 156);
     tft.print("departures/arrivals. Empty = off.");
 
