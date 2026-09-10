@@ -1,0 +1,58 @@
+name: Build firmware
+
+on:
+  workflow_call:
+    inputs:
+      app_version:
+        description: 'Version string (with or without a leading "v") to bake into APP_VERSION. Leave empty for PR/dev builds.'
+        required: false
+        type: string
+
+jobs:
+  build:
+    name: Build firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install arduino-cli
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
+            | BINDIR="$HOME/bin" sh
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Install esp32 core (3.3.11)
+        run: |
+          arduino-cli config init
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.11
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib install "TFT_eSPI@2.5.43"
+          arduino-cli lib install "ArduinoJson@7.4.3"
+
+      - name: Build firmware
+        run: |
+          set -e
+          VERSION=""
+          if [ -n "${{ inputs.app_version }}" ]; then
+            VERSION="${{ inputs.app_version }}"
+            VERSION="${VERSION#v}"
+          fi
+          if [ -n "$VERSION" ]; then
+            arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
+              --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=${VERSION}" \
+              --output-dir build/ota cyd-dashboard
+          else
+            arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
+              --output-dir build/ota cyd-dashboard
+          fi
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyd-dashboard-ota
+          path: build/ota/cyd-dashboard.ino.bin
