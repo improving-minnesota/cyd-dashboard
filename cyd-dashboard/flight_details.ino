@@ -124,9 +124,10 @@ bool airlineInfo(const char* callsign, String& name, uint16_t& color) {
 // and is declared at the top of cyd-dashboard.ino.
 
 // Top US airports by 2023 enplanements (ICAO codes), from FAA commercial
-// service enplanement data. KDFW is included (it is a major hub); flights to or
-// from it additionally get the red/green DFW flash. Used to flash the LED
-// (blue) when an overhead flight involves one of these airports.
+// service enplanement data. KDFW is included as a major hub and flashes blue
+// like any other top-50 airport unless the user has also set it as their home
+// airport. Used to flash the LED (blue) when an overhead flight involves one
+// of these airports.
 static const char* const kTopAirports[] = {
   "KATL","KLAX","KDFW","KDEN","KORD","KJFK","KMCO","KLAS","KCLT","KMIA",
   "KSEA","KEWR","KSFO","KPHX","KIAH","KBOS","KFLL","KMSP","KLGA","KDTW",
@@ -196,7 +197,8 @@ void fetchRoute(const char* icao24) {
   g_routeBusy = true;   // guard g_routeOrigin/g_routeDest while we write them
   g_routeOrigin = "";
   g_routeDest = "";
-  if (WiFi.status() != WL_CONNECTED) { g_routeFetched = true; g_routeBusy = false; return; }
+  // No WiFi is transient; leave g_routeFetched false so we retry once connected.
+  if (WiFi.status() != WL_CONNECTED) { g_routeBusy = false; return; }
   // The flights/aircraft endpoint requires begin/end (Unix seconds) to return a
   // flight. The plane is overhead right now, so search the last few hours.
   time_t now = time(nullptr);
@@ -241,7 +243,12 @@ void fetchRoute(const char* icao24) {
     }
   }
   http.end();
-  // Cache only a complete, structurally valid response.
+  // Cache a valid response. Also mark as fetched for TLS errors, 429 (out of
+  // credits), or truncated/bad framing, so we do not keep retrying and burning
+  // credits for the same overhead plane.
+  if (code < 0 || code == HTTP_CODE_TOO_MANY_REQUESTS || (code == HTTP_CODE_OK && !parsedOk)) {
+    g_routeFetched = true;
+  }
   if (code >= 0 && parsedOk) g_routeFetched = true;
   if (code == HTTP_CODE_OK) {
     if (isDevBuild()) Serial.printf("[net] route ok origin=%s dest=%s free=%u\n", g_routeOrigin.c_str(), g_routeDest.c_str(), (unsigned)ESP.getFreeHeap());
@@ -334,15 +341,20 @@ void fetchTrack(const char* icao24) {
         portEXIT_CRITICAL(&g_trackMux);
         if (isDevBuild()) Serial.printf("[net] track json short len=%u/%ld%s\n", (unsigned)body.bytesRead(), body.contentLength(), body.stalled() ? " stalled" : "");
         http.end();
+        g_trackFetched = true;  // do not retry this plane for a truncated body
         g_trackBusy = false;
-        return;  // don’t cache a truncated body as "no track" so the next poll retries
+        return;
       }
     }
     if (isDevBuild()) Serial.printf("[net] track ok free=%u pts=%d\n", (unsigned)ESP.getFreeHeap(), (int)g_trackCount);
   }
   http.end();
-  // Cache only a complete, structurally valid response. Transport, parse, and
-  // framing failures must retry on a later poll.
+  // Cache a valid response. Also mark as fetched for TLS errors, 429 (out of
+  // credits), or truncated/bad framing, so we do not keep retrying and burning
+  // credits for the same overhead plane. A pure no-WiFi exit is handled above.
+  if (code < 0 || code == HTTP_CODE_TOO_MANY_REQUESTS || (code == HTTP_CODE_OK && !parsedOk)) {
+    g_trackFetched = true;
+  }
   if (code >= 0 && parsedOk) g_trackFetched = true;
   g_trackBusy = false;
 }

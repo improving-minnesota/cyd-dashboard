@@ -475,7 +475,7 @@ bool g_flashWhite     = false;
 // (reset whenever the overhead identity changes). Defined in
 // flight_details.ino.
 String g_routeOrigin = "";      // "KDAL"
-String g_routeDest   = "";      // "KDFW"
+String g_routeDest   = "";      // e.g. "KJFK"
 bool   g_routeFetched = false;  // true once we've tried (success or not)
 volatile bool g_routeBusy = false;  // true while a route fetch is in flight (cross-task)
 
@@ -492,7 +492,7 @@ bool  g_trackFetched = false;        // tried once for the current plane
 volatile bool g_trackBusy = false;   // cross-task guard
 portMUX_TYPE g_trackMux = portMUX_INITIALIZER_UNLOCKED;
 
-String g_homeAirport = "";      // home airport: drives the incoming/outgoing LED flash ("" = fall back to KDFW)
+String g_homeAirport = "";      // home airport: drives the incoming/outgoing LED flash (empty = none)
 
 // ---- small helpers ----
 float hav(float lat1, float lon1, float lat2, float lon2) {
@@ -1281,26 +1281,25 @@ void fetchFlights() {
     // radar draws no line and dead-reckoning falls back to heading/speed.
     if (!g_routeFetched) fetchRoute(planes[0].icao24);
     if (!g_trackFetched) fetchTrack(planes[0].icao24);
-    // Queue an LED flash for this new overhead flight. Red = departing the
-    // home airport, green = incoming to the home airport, extra blue = top-50
-    // airport. A flight with NO route data (origin and destination both
-    // unknown) flashes white instead. The flash itself is deferred to loop()
-    // so the flight view draws first.
+    // Queue an LED flash for this new overhead flight. The flash is deferred
+    // to loop() so the flight view draws first. Color priority is:
+    //   red   = origin matches the home airport
+    //   green = destination matches the home airport
+    //   blue  = origin or destination is in the top-50 US airports (but not home)
+    //   white = all other overhead flights (including flights with no route data)
     if (strncmp(planes[0].icao24, ledFlashedIcao, 6) != 0) {
-      bool noData = (g_routeOrigin.length() == 0 && g_routeDest.length() == 0);
-      g_flashDeparting = g_flashIncoming = g_flashTop50 = false;
-      g_flashWhite = noData;
-      bool shouldFlash = noData;
-      if (!noData) {
-        // Incoming/outgoing is relative to the Home airport setting (fall back
-        // to the project's DFW home base when none is set).
-        const char* home = g_homeAirport.length() ? g_homeAirport.c_str() : "KDFW";
-        g_flashDeparting = (g_routeOrigin == home);
-        g_flashIncoming  = (g_routeDest   == home);
-        g_flashTop50     = isTopAirport(g_routeOrigin.c_str()) || isTopAirport(g_routeDest.c_str());
-        shouldFlash = (g_flashDeparting || g_flashIncoming || g_flashTop50);
+      // Compare against the configured home airport, if any; no default.
+      g_flashDeparting = g_flashIncoming = g_flashTop50 = g_flashWhite = false;
+      if (g_homeAirport.length() && g_routeOrigin == g_homeAirport) {
+        g_flashDeparting = true;
+      } else if (g_homeAirport.length() && g_routeDest == g_homeAirport) {
+        g_flashIncoming = true;
+      } else if (isTopAirport(g_routeOrigin.c_str()) || isTopAirport(g_routeDest.c_str())) {
+        g_flashTop50 = true;
+      } else {
+        g_flashWhite = true;
       }
-      if (shouldFlash) g_pendingFlash = true;
+      g_pendingFlash = true;
       strncpy(ledFlashedIcao, planes[0].icao24, 6);
       ledFlashedIcao[6] = 0;
     }
@@ -1711,27 +1710,30 @@ void blinkLedPin(int pin, int times, int ms) {
 }
 
 // Flash the onboard LED to signal an overhead flight:
-//   red   = departing from DFW (origin KDFW)
-//   green = incoming to DFW   (dest KDFW)
-//   blue  = extra flash after the color if the flight involves a top-50 airport
-//   white = any overhead flight that does not qualify for red/green/blue
-// We turn ALL LEDs off first so a stale LOW on a previous color does not bleed.
-void flashLed(bool departingDFW, bool incomingDFW, bool top50, bool white) {
+//   red   = origin matches the home airport
+//   green = destination matches the home airport
+//   blue  = origin or destination is in the top-50 US airports (but not home)
+//   white = all other overhead flights (including flights with no route data)
+// Each color blinks 5 times at 240 ms on/off. We turn ALL LEDs off first so a
+// stale LOW on a previous color does not bleed.
+void flashLed(bool departing, bool incoming, bool top50, bool white) {
   pinMode(CYD_LED_RED, OUTPUT);   digitalWrite(CYD_LED_RED, HIGH);
   pinMode(CYD_LED_GREEN, OUTPUT); digitalWrite(CYD_LED_GREEN, HIGH);
   pinMode(CYD_LED_BLUE, OUTPUT);  digitalWrite(CYD_LED_BLUE, HIGH);
-  if (white) {
+  if (departing) {
+    blinkLedPin(CYD_LED_RED, 5, 240);
+  } else if (incoming) {
+    blinkLedPin(CYD_LED_GREEN, 5, 240);
+  } else if (top50) {
+    blinkLedPin(CYD_LED_BLUE, 5, 240);
+  } else if (white) {
     // White = all three LEDs on together (active-low).
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 5; i++) {
       digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, LOW);
       delay(240);
       digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
       delay(240);
     }
-  } else {
-    if (departingDFW)      blinkLedPin(CYD_LED_RED,   5, 240);
-    else if (incomingDFW)  blinkLedPin(CYD_LED_GREEN, 5, 240);
-    if (top50)             blinkLedPin(CYD_LED_BLUE,  5, 240);
   }
   digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
 }
