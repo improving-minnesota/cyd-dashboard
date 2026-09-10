@@ -76,13 +76,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository for gh release
+        uses: actions/checkout@v4
+
       - name: Download firmware artifact
         uses: actions/download-artifact@v4
         with:
           name: cyd-dashboard-ota
-
-      - name: Checkout repository for gh release
-        uses: actions/checkout@v4
 
       - name: Create draft release and attach .bin
         run: |
