@@ -120,6 +120,10 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > compile without it (e.g. from the Arduino IDE), `kVersion` falls back to a
 > hardcoded literal in `cyd-dashboard.ino` that can drift out of date - prefer
 > the `arduino-cli` command above.
+>
+> **Build number:** `BUILD_NUM` is optional and can be passed the same way
+> (`-DBUILD_NUM=<n>`). The sketch defaults to `0` if it is not defined, and
+> `settings.ino` hides the build number on the About screen when it is `0`.
 
 > **Important:** the display pinout is configured in the sketch's own
 > `cyd-dashboard/tft_setup.h`. TFT_eSPI auto-detects a `tft_setup.h` in the
