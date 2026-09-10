@@ -243,6 +243,19 @@ bool performOTA(const String& url, const String& version, const String& expected
   bool dev = isDevBuild();
   if (dev) Serial.printf("[OTA] start url=%s\n", url.c_str());
 
+  // Don't start the download until the WiFi link is actually up. The OTA can be
+  // triggered over serial while the device is still in its boot connect, and
+  // HTTPClient without a link returns code=-1 immediately. Wait up to 20s.
+  unsigned long wifiWaitStart = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - wifiWaitStart) < 20000) {
+    delay(100);
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.printf("[OTA] update failed: No WiFi\n");
+    drawOtaError("No WiFi");
+    return false;
+  }
+
   for (int attempt = 1; attempt <= HTTPS_RETRY_ATTEMPTS; attempt++) {
     drawOtaHeader(version);          // reset screen + progress bar each attempt
     if (attempt > 1) delay(HTTPS_RETRY_DELAY_MS);

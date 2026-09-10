@@ -48,10 +48,11 @@ without modification**. Developers can find the wiring and flashing details in
    flashing instructions are in [DEVELOPER.md](DEVELOPER.md).
 2. **Power it up.** The first boot runs a short setup wizard: it calibrates the
    touchscreen (if no calibration is saved), then walks you through entering
-   your WiFi name and password. To change WiFi later, open **Settings → WiFi**.
+   your WiFi name and password. To change WiFi later, open **Settings →
+   Network**.
 3. If the wizard is skipped or you need to redo a step: calibrate via
    **Settings → General → Calibrate Touch** (or hold anywhere on the screen for
-   10 s), and connect WiFi via **Settings → WiFi**.
+   10 s), and connect WiFi via **Settings → Network**.
 4. **Weather and flights work out of the box.** Optionally add your own OpenSky
    credentials to raise the flight-API rate limit and remove the yellow warning regarding anonymous usage.
 5. **Govee pool thermometer (optional):** if you have one, add your Govee API
@@ -109,8 +110,13 @@ Defaults for a freshly reset device are shown with each setting.
   on first boot it's guessed from your IP, otherwise your saved location.
   **Search Address** keeps your last search so you can fix it, and shows a clear
   message if the address can't be found.
-- **WiFi** — your network, plus any API credentials (OpenSky, Govee). Default:
-  none — you must enter your WiFi.
+- **Network** — your WiFi network (scan or enter it manually), plus **IP
+  setup**: addressing can stay on **DHCP** (the default, works as before) or be
+  switched to **Static** with an IP address, subnet mask, gateway, and DNS
+  server, and you can set a device **hostname** (default `cyd-dashboard`) in
+  either mode. A blank DNS
+  uses the gateway; incomplete static fields fall back to DHCP. Changes apply
+  on the next connect.
 - **Flight Tracker** — on/off, units (mi or km), radar radius, altitude ceiling,
   poll interval, the countdown/timer bar on the dashboard, your home airport
   (which determines incoming/outgoing flights for the LED flash), and whether

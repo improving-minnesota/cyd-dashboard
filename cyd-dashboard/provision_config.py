@@ -29,6 +29,12 @@ except ImportError:
 CRED_KEYS = [
     "WIFI_SSID",
     "WIFI_PASSWORD",
+    "WIFI_MODE",       # "static" for static addressing; anything else = DHCP
+    "WIFI_IP",
+    "WIFI_SUBNET",
+    "WIFI_GATEWAY",
+    "WIFI_DNS",
+    "WIFI_HOSTNAME",
     "OPENSKY_CLIENT_ID",
     "OPENSKY_CLIENT_SECRET",
     "GOVEE_KEY",

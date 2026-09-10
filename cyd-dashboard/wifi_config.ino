@@ -1,9 +1,11 @@
-// wifi_config.ino - on-device WiFi provisioning via the touchscreen.
+// wifi_config.ino - on-device network provisioning via the touchscreen.
 //
-// Part of the cyd-dashboard sketch. Provides three sub-screens:
-//   0 = network list (scan results) + "enter manually"
+// Part of the cyd-dashboard sketch. Provides these sub-screens:
+//   0 = network list (scan results) + "enter manually" + "IP setup"
 //   1 = keyboard to type an SSID
 //   2 = keyboard to type a password, then save & connect
+//   20 = IP Settings page (DHCP/Static + address fields)
+//   21..25 = keyboards for IP address, subnet mask, gateway, DNS, hostname
 // Credentials are stored in NVS so the device reconnects after a reboot.
 
 int  g_wifiSub = 0;         // 0=list, 1=ssid keyboard, 2=pass keyboard
@@ -78,12 +80,19 @@ void drawWifiScreen() {
   else if (g_wifiSub == 10) drawKeyboard("Lat,Lon", g_latLonStr, false);
   else if (g_wifiSub == 11) drawKeyboard("Home airport", g_homeAirport, false);
   else if (g_wifiSub == 12) drawAddrStatus();
+  else if (g_wifiSub == 20) drawIpConfig();
+  else if (g_wifiSub == 21) drawKeyboard("Static IP address", g_staticIp, false);
+  else if (g_wifiSub == 22) drawKeyboard("Subnet mask", g_staticMask, false);
+  else if (g_wifiSub == 23) drawKeyboard("Gateway", g_staticGw, false);
+  else if (g_wifiSub == 24) drawKeyboard("DNS server", g_staticDns, false);
+  else if (g_wifiSub == 25) drawKeyboard("Hostname", g_hostname, false);
   else drawKeyboard("Govee API key", g_goveeKey, true);
 }
 
 void handleWifiTouch(uint16_t x, uint16_t y) {
   if (g_wifiSub == 0) handleWifiListTouch(x, y);
   else if (g_wifiSub == 12) handleAddrStatusTouch(x, y);
+  else if (g_wifiSub == 20) handleIpConfigTouch(x, y);
   else handleKeyboardTouch(x, y);
 }
 
@@ -94,7 +103,7 @@ void drawWifiList() {
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("WiFi setup");
+  tft.print("Network");
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
   tft.setCursor(274, 7);
   tft.setTextColor(TFT_WHITE, TFT_MAROON);
@@ -104,6 +113,8 @@ void drawWifiList() {
   tft.setTextFont(1);
   tft.setCursor(8, 32);
   tft.printf("%d networks", g_netCount);
+  tft.setCursor(200, 32);
+  tft.print(g_ipDhcp ? "IP: DHCP" : "IP: static");
 
   if (g_netCount == 0) {
     tft.setTextColor(TFT_CYAN, TFT_BLACK);
@@ -140,16 +151,16 @@ void drawWifiList() {
   tft.setCursor(308, 212);
   tft.print("v");
 
-  // bottom buttons
-  tft.fillRoundRect(10, 212, 140, 26, 6, TFT_DARKGREY);
-  tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
+  // bottom buttons: rescan | type SSID | DHCP/static addressing
   tft.setTextFont(2);
-  tft.setCursor(18, 219);
-  tft.print("Scan again");
-  tft.fillRoundRect(160, 212, 150, 26, 6, TFT_NAVY);
+  tft.fillRoundRect(10, 212, 92, 26, 6, TFT_DARKGREY);
+  tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
+  tft.drawCentreString("Scan", 56, 218, 2);
+  tft.fillRoundRect(110, 212, 100, 26, 6, TFT_NAVY);
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.setCursor(170, 219);
-  tft.print("Enter manually");
+  tft.drawCentreString("Manual", 160, 218, 2);
+  tft.fillRoundRect(218, 212, 94, 26, 6, TFT_NAVY);
+  tft.drawCentreString("IP setup", 265, 218, 2);
 }
 
 void handleWifiListTouch(uint16_t x, uint16_t y) {
@@ -168,8 +179,9 @@ void handleWifiListTouch(uint16_t x, uint16_t y) {
     if (g_netScroll < maxs) { g_netScroll++; dirty = true; }
     return;
   }
-  if (inRect(x, y, 10, 212, 150, 238)) { scanWifi(); dirty = true; return; }
-  if (inRect(x, y, 160, 212, 310, 238)) { g_ssid = ""; g_wifiSub = 1; dirty = true; return; }
+  if (inRect(x, y, 10, 212, 102, 238)) { scanWifi(); dirty = true; return; }
+  if (inRect(x, y, 110, 212, 210, 238)) { g_ssid = ""; g_wifiSub = 1; dirty = true; return; }
+  if (inRect(x, y, 218, 212, 312, 238)) { enterIpConfig(); return; }
 
   // network row
   int row = (y - 40) / 26;
@@ -180,6 +192,146 @@ void handleWifiListTouch(uint16_t x, uint16_t y) {
     g_wifiSub = 2;   // straight to password entry
     dirty = true;
   }
+}
+
+// ---- IP Settings (DHCP / static addressing + hostname) ----
+// The g_static*/g_hostname strings are the live values; edits persist via
+// saveNetCfg() on keyboard OK. Values are (re)loaded when the page opens so a
+// backed-out edit can't leave unsaved text in the globals the next connect
+// would use.
+
+void loadNetCfg() {
+  g_ipDhcp    = prefs.getBool("ipdhcp", true);
+  g_staticIp   = prefs.getString("ipaddr", "");
+  g_staticMask = prefs.getString("ipmask", "");
+  g_staticGw   = prefs.getString("ipgw", "");
+  g_staticDns  = prefs.getString("ipdns", "");
+  g_hostname   = prefs.getString("hostname", "cyd-dashboard");
+}
+
+void saveNetCfg() {
+  prefs.begin("flight", false);
+  prefs.putBool("ipdhcp", g_ipDhcp);
+  prefs.putString("ipaddr", g_staticIp);
+  prefs.putString("ipmask", g_staticMask);
+  prefs.putString("ipgw", g_staticGw);
+  prefs.putString("ipdns", g_staticDns);
+  prefs.putString("hostname", g_hostname);
+  prefs.end();
+}
+
+void enterIpConfig() {
+  prefs.begin("flight", false);
+  loadNetCfg();
+  prefs.end();
+  g_netCfgDirty = false;
+  g_wifiSub = 20;
+  dirty = true;
+}
+
+// One label + right-aligned value + Edit button row on the IP Settings page.
+void drawIpRow(int y, const char* label, const String& value) {
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextFont(2);
+  tft.setCursor(8, y + 4);
+  tft.print(label);
+  tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(value.length() ? value : "--", 262, y + 4, 2);
+  tft.setTextDatum(TL_DATUM);
+  tft.fillRoundRect(270, y, 42, 24, 5, TFT_NAVY);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.setTextFont(1);
+  tft.setCursor(280, y + 6);
+  tft.print("Edit");
+}
+
+void drawIpConfig() {
+  tft.fillScreen(TFT_BLACK);
+  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.setTextFont(2);
+  tft.setCursor(8, 6);
+  tft.print("IP Settings");
+  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
+  tft.setCursor(274, 7);
+  tft.setTextColor(TFT_WHITE, TFT_MAROON);
+  tft.print("Back");
+
+  // DHCP / Static mode toggle
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextFont(2);
+  tft.setCursor(8, 44);
+  tft.print("Addressing");
+  tft.setTextColor(g_ipDhcp ? TFT_LIGHTGREY : TFT_GREENYELLOW, TFT_BLACK);
+  tft.setCursor(150, 44);
+  tft.print(g_ipDhcp ? "DHCP" : "Static");
+  tft.fillRoundRect(230, 40, 82, 24, 5, TFT_NAVY);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.setTextFont(1);
+  tft.setCursor(250, 47);
+  tft.print("Toggle");
+
+  if (g_ipDhcp) {
+    // Hostname still applies under DHCP (it's sent in the DHCP request).
+    drawIpRow(76, "Hostname", g_hostname);
+    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    tft.setTextFont(1);
+    tft.setCursor(8, 116);
+    tft.print("DHCP assigns IP, mask, gateway, DNS.");
+    tft.setCursor(8, 130);
+    if (WiFi.status() == WL_CONNECTED) {
+      tft.print("Current IP: ");
+      tft.print(WiFi.localIP().toString());
+    } else {
+      tft.print("Not connected.");
+    }
+  } else {
+    drawIpRow(76,  "IP address", g_staticIp);
+    drawIpRow(104, "Subnet mask", g_staticMask);
+    drawIpRow(132, "Gateway",    g_staticGw);
+    drawIpRow(160, "DNS",        g_staticDns);
+    drawIpRow(188, "Hostname",   g_hostname);
+    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    tft.setTextFont(1);
+    tft.setCursor(8, 218);
+    tft.print("Blank DNS uses the gateway.");
+    tft.setCursor(8, 228);
+    tft.print("Incomplete fields fall back to DHCP.");
+  }
+}
+
+void handleIpConfigTouch(uint16_t x, uint16_t y) {
+  if (inRect(x, y, 265, 4, 315, 24)) {   // Back -> network list
+    g_wifiSub = 0;
+    // If addressing settings changed while connected, drop the link so the
+    // loop() reconnect path re-applies them via applyNetConfig().
+    if (g_netCfgDirty && WiFi.status() == WL_CONNECTED) WiFi.disconnect();
+    g_netCfgDirty = false;
+    dirty = true;
+    return;
+  }
+  if (inRect(x, y, 230, 40, 312, 64)) {  // DHCP/Static toggle
+    g_ipDhcp = !g_ipDhcp;
+    saveNetCfg();
+    g_netCfgDirty = true;
+    dirty = true;
+    return;
+  }
+  // Edit buttons (right edge of each row). DHCP shows only the hostname row;
+  // static shows all five, matching drawIpConfig()'s layout.
+  if (!g_ipDhcp) {
+    if      (inRect(x, y, 270,  76, 312, 100)) g_wifiSub = 21;
+    else if (inRect(x, y, 270, 104, 312, 128)) g_wifiSub = 22;
+    else if (inRect(x, y, 270, 132, 312, 156)) g_wifiSub = 23;
+    else if (inRect(x, y, 270, 160, 312, 184)) g_wifiSub = 24;
+    else if (inRect(x, y, 270, 188, 312, 212)) g_wifiSub = 25;
+    else return;
+  } else {
+    if (!inRect(x, y, 270, 76, 312, 100)) return;
+    g_wifiSub = 25;
+  }
+  dirty = true;
 }
 
 // ---- on-screen keyboard (QWERTY + Shift + symbols) ----
@@ -353,6 +505,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
     if (g_wifiSub == 9) { g_screen = SCR_POOL; dirty = true; return; }       // Govee key
     if (g_wifiSub == 10) { g_screen = SCR_LOCATION; dirty = true; return; }  // lat/lon
     if (g_wifiSub == 11) { g_screen = SCR_FTRACKER; dirty = true; return; }   // home airport
+    if (g_wifiSub >= 21 && g_wifiSub <= 25) { g_wifiSub = 20; dirty = true; return; }  // IP field
     g_wifiSub = 0; dirty = true; return;
   }
 
@@ -368,6 +521,11 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
     case 9: bp = &g_goveeKey; break;
     case 10: bp = &g_latLonStr; break;
     case 11: bp = &g_homeAirport; break;
+    case 21: bp = &g_staticIp; break;
+    case 22: bp = &g_staticMask; break;
+    case 23: bp = &g_staticGw; break;
+    case 24: bp = &g_staticDns; break;
+    case 25: bp = &g_hostname; break;
     default: bp = &g_addrSearch; break;
   }
   String& buf = *bp;
@@ -404,6 +562,8 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
     case 9: maxlen = 80; break;
     case 10: maxlen = 24; break;
     case 11: maxlen = 6; break;
+    case 21: case 22: case 23: case 24: maxlen = 15; break;  // IP addresses
+    case 25: maxlen = 32; break;   // hostname
     default: maxlen = 63; break;
   }
 
@@ -481,6 +641,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
         g_screen = SCR_LOCATION; dirty = true;
       }
       else if (g_wifiSub == 11) { saveHomeAirport(); g_screen = SCR_FTRACKER; dirty = true; }
+      else if (g_wifiSub >= 21 && g_wifiSub <= 25) { saveNetCfg(); g_netCfgDirty = true; g_wifiSub = 20; dirty = true; }
     }
     return;
   }
@@ -565,6 +726,12 @@ static bool scheduleOTA(const String& url) {
 bool provisionKey(const String& key, const String& val) {
   if      (key == "WIFI_SSID")       { prefs.putString("ssid",   val); g_savedSsid = val; return true; }
   else if (key == "WIFI_PASSWORD")   { prefs.putString("pass",   val); g_savedPass = val; return true; }
+  else if (key == "WIFI_MODE")       { bool d = !val.equalsIgnoreCase("static"); g_ipDhcp = d; prefs.putBool("ipdhcp", d); return true; }
+  else if (key == "WIFI_IP")         { prefs.putString("ipaddr", val);  g_staticIp = val; return true; }
+  else if (key == "WIFI_SUBNET")     { prefs.putString("ipmask", val);  g_staticMask = val; return true; }
+  else if (key == "WIFI_GATEWAY")    { prefs.putString("ipgw",   val);  g_staticGw = val; return true; }
+  else if (key == "WIFI_DNS")        { prefs.putString("ipdns",  val);  g_staticDns = val; return true; }
+  else if (key == "WIFI_HOSTNAME")   { prefs.putString("hostname", val); g_hostname = val; return true; }
   else if (key == "OPENSKY_CLIENT_ID")     { prefs.putString("oscid",  val); g_osClientId     = val; return true; }
   else if (key == "OPENSKY_CLIENT_SECRET") { prefs.putString("ocssec", val); g_osClientSecret = val; return true; }
   else if (key == "HOME_AIRPORT")          { String v = val; v.toUpperCase(); prefs.putString("homeap", v); g_homeAirport = v; return true; }

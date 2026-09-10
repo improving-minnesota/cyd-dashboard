@@ -376,6 +376,15 @@ int g_wxTF = WX_WEEK;
 
 String g_savedSsid = "";   // WiFi loaded from NVS
 String g_savedPass = "";
+// Network addressing (Settings -> Network -> IP setup). g_ipDhcp keeps today's
+// DHCP behavior; when false the g_static* strings are applied via WiFi.config().
+bool   g_ipDhcp    = true;
+String g_staticIp   = "";
+String g_staticMask = "";
+String g_staticGw   = "";
+String g_staticDns  = "";
+String g_hostname   = "";   // STA hostname (default "cyd-dashboard", see loadNetCfg)
+bool   g_netCfgDirty = false;  // set on IP-page edits; applied via reconnect on exit
 String g_osClientId = "";       // OpenSky OAuth2 client id (blank = anonymous)
 String g_osClientSecret = "";   // OpenSky OAuth2 client secret
 String g_osToken = "";          // cached OpenSky bearer token
@@ -506,8 +515,32 @@ void sortPlanes() {
 }
 
 // ---- WiFi ----
+// Set the STA hostname before the interface is created. This must be called
+// before WiFi.mode(WIFI_STA); arduino-esp32 only writes the hostname to the
+// esp_netif when it creates the STA interface, so calling it after mode has
+// no effect. The IP/static config helper follows separately, after mode.
+void setNetHostname() {
+  if (g_hostname.length() > 0) WiFi.setHostname(g_hostname.c_str());
+}
+
+// Apply saved static-IP settings to the STA interface. Call after
+// WiFi.mode(WIFI_STA), before WiFi.begin(). Invalid or incomplete static
+// settings fall back to DHCP so a half-entered form can wedge connectivity.
+void applyNetConfig() {
+  if (g_ipDhcp) return;
+  IPAddress ip, mask, gw, dns;
+  if (!ip.fromString(g_staticIp.c_str()) ||
+      !mask.fromString(g_staticMask.c_str()) ||
+      !gw.fromString(g_staticGw.c_str())) return;
+  if (g_staticDns.length() == 0 || !dns.fromString(g_staticDns.c_str()))
+    dns = gw;   // home routers normally answer DNS on the gateway address
+  WiFi.config(ip, gw, mask, dns);
+}
+
 bool tryConnect(const char* ssid, const char* pass) {
+  setNetHostname();
   WiFi.mode(WIFI_STA);
+  applyNetConfig();
   WiFi.begin(ssid, pass);
   unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
@@ -2474,7 +2507,8 @@ void handleTouch() {
       if (inRect(x, y, 172, 36, 312, 66)) { g_resetConfirm = 1; dirty = true; }          // Factory Reset
       else if (inRect(x, y, 172, 80, 312, 110)) { g_resetConfirm = 3; dirty = true; }    // Graph Data
       else if (inRect(x, y, 172, 124, 312, 154)) { g_resetConfirm = 2; dirty = true; }   // Settings
-      else if (inRect(x, y, 172, 198, 312, 230)) { g_resetConfirm = 0; g_screen = SCR_SETTINGS; dirty = true; }  // Cancel
+      else if (inRect(x, y, 10, 210, 150, 236)) { g_resetConfirm = 4; dirty = true; }    // Restart
+      else if (inRect(x, y, 172, 210, 312, 236)) { g_resetConfirm = 0; g_screen = SCR_SETTINGS; dirty = true; }  // Cancel
       return;
     }
     // Step 2: confirmation prompt.
@@ -2490,6 +2524,9 @@ void handleTouch() {
       // defaults and must be recalibrated on the next boot (hold anywhere 10s).
       // Every other key - including the clock color "clkcol" - is removed by
       // prefs.clear() above, so it reverts to its default after either reset.
+      if (g_resetConfirm == 4) {  // Restart only, no data wipe
+        ESP.restart();
+      }
       if (g_resetConfirm != 3) {
         prefs.begin("flight", false);
         prefs.clear();
@@ -2543,10 +2580,10 @@ void handleTouch() {
     if (idx == 3) { g_screen = SCR_GENERAL; dirty = true; return; }      // General
     if (idx == 4) { g_screen = SCR_HELP; g_helpScroll = 0; dirty = true; return; }  // Help
     if (idx == 5) { g_screen = SCR_LOCATION; dirty = true; return; }     // Location
-    if (idx == 6) { g_screen = SCR_POOL; dirty = true; return; }         // Pool Temp
-    if (idx == 7) { g_screen = SCR_SLEEP; dirty = true; return; }        // Sleep Mode
+    if (idx == 6) { enterWifiScreen(); return; }                         // Network
+    if (idx == 7) { g_screen = SCR_POOL; dirty = true; return; }         // Pool Temp
     if (idx == 8) { g_resetConfirm = 0; g_screen = SCR_RESET; dirty = true; return; }   // Reset
-    if (idx == 9) { enterWifiScreen(); return; }                         // WiFi
+    if (idx == 9) { g_screen = SCR_SLEEP; dirty = true; return; }        // Sleep Mode
     return;
   }
 
@@ -2667,9 +2704,11 @@ void setup() {
   g_pollSec = prefs.getInt("poll", 30);
   g_savedSsid = prefs.getString("ssid", "");
   g_savedPass = prefs.getString("pass", "");
+  loadNetCfg();   // ipdhcp/ipaddr/ipmask/ipgw/ipdns/hostname
   g_osClientId = prefs.getString("oscid", "");
   g_osClientSecret = prefs.getString("ocssec", "");
   if (isDevBuild()) {
+    Serial.printf("[boot] version=%s build=%d\n", kVersion, (int)BUILD_NUM);
     Serial.printf("[boot] OpenSky credentials clientId=%s clientSecret=%s\n",
                   g_osClientId.length() ? "set" : "blank",
                   g_osClientSecret.length() ? "set" : "blank");
@@ -2813,8 +2852,12 @@ void setup() {
   // by the 15s tryConnect timeout and fetch timeouts on a no-WiFi device.
   connected = (WiFi.status() == WL_CONNECTED);
   if (!alreadyAwake && !connected && g_savedSsid.length() > 0) {
+    setNetHostname();
     WiFi.mode(WIFI_STA);
+    applyNetConfig();
     WiFi.begin(g_savedSsid.c_str(), g_savedPass.c_str());   // non-blocking
+    wifiTrying = true;   // tell loop() a connect is already in flight so it
+    wifiTryStart = millis();  // doesn't call WiFi.begin() again mid-handshake
   }
   if (connected) {
     // Start NTP only after WiFi is up. Calling configTime() (SNTP/UDP) before
@@ -3035,7 +3078,9 @@ void loop() {
       // kick off an asynchronous connect with the saved settings
       wifiTrying = true;
       wifiTryStart = now;
+      setNetHostname();
       WiFi.mode(WIFI_STA);
+      applyNetConfig();
       WiFi.begin(g_savedSsid.c_str(), g_savedPass.c_str());
     } else if (now - wifiTryStart > 25000) {
       // give up on this attempt and try again shortly
@@ -3057,6 +3102,15 @@ void loop() {
     // link is up triggers a lwip crash).
     setupNTP();
     delay(100);
+    if (isDevBuild()) {
+      Serial.printf("[net] ip=%s mask=%s gw=%s dns=%s dhcp=%d hostname=%s\n",
+                    WiFi.localIP().toString().c_str(),
+                    WiFi.subnetMask().toString().c_str(),
+                    WiFi.gatewayIP().toString().c_str(),
+                    WiFi.dnsIP().toString().c_str(),
+                    (int)g_ipDhcp,
+                    g_hostname.c_str());
+    }
     if (g_screen == SCR_DASH) {
       // Draw the dashboard now (with whatever data we have) so the screen
       // responds immediately, then the fetches below update it - a failed/slow
