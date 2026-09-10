@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.11.1...v1.12.0) (2026-09-10)
+
+
+### Features
+
+* Route/track retry guards and updated LED blink logic ([#94](https://github.com/improving-minnesota/cyd-dashboard/issues/94)) ([0f247ef](https://github.com/improving-minnesota/cyd-dashboard/commit/0f247efa1f5ea13c50425bdd589a39365ef02164))
+
 ## [1.11.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.11.0...v1.11.1) (2026-09-10)
 
 
