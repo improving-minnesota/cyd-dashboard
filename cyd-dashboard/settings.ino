@@ -181,6 +181,7 @@ static const char* const kHelpLines[] = {
   "  CRP = radar polling,",
   "  CRL = route lookup,",
   "  CFT = flight tracking.",
+  "  429 sets that path to 0.",
   "  If radar-polling credits",
   "  run out, polling backs off",
   "  to a 15-min recovery check",

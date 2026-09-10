@@ -248,6 +248,7 @@ void fetchRoute(const char* icao24) {
   // credits for the same overhead plane.
   if (code < 0 || code == HTTP_CODE_TOO_MANY_REQUESTS || (code == HTTP_CODE_OK && !parsedOk)) {
     g_routeFetched = true;
+    if (code == HTTP_CODE_TOO_MANY_REQUESTS) g_flightsCredits = 0;
   }
   if (code >= 0 && parsedOk) g_routeFetched = true;
   if (code == HTTP_CODE_OK) {
@@ -354,6 +355,7 @@ void fetchTrack(const char* icao24) {
   // credits for the same overhead plane. A pure no-WiFi exit is handled above.
   if (code < 0 || code == HTTP_CODE_TOO_MANY_REQUESTS || (code == HTTP_CODE_OK && !parsedOk)) {
     g_trackFetched = true;
+    if (code == HTTP_CODE_TOO_MANY_REQUESTS) g_tracksCredits = 0;
   }
   if (code >= 0 && parsedOk) g_trackFetched = true;
   g_trackBusy = false;

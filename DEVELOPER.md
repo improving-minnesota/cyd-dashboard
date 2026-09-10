@@ -779,7 +779,10 @@ response header: the states bucket on every poll, the flights bucket in
 `fetchRoute()`, and the tracks bucket in `fetchTrack()`. Both the header readout
 and the Credits screen show the last-known values (they update as the device
 calls each endpoint); the header redraws on change via `updateDashboard()`, and
-until a bucket is first fetched it shows a yellow "?".
+until a bucket is first fetched it shows a yellow "?". A `429` response for any
+bucket sets that bucket's remaining credits to **0** and marks it as known, so
+the readout immediately shows 0 (pink) instead of leaving the previous stale
+value.
 
 The header value color is tiered by absolute remaining amounts (no assumed
 daily budget): **grey** when healthy, **yellow** below 500, **pink** below 50.

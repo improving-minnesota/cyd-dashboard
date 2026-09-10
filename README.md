@@ -84,8 +84,9 @@ Where to get each credential is explained below.
   credits** as three small readouts — **CRP** (radar polling), **CRL** (route
   lookup), and **CFT** (flight tracking). A value is **grey** when healthy,
   turns **yellow** below 500 (or shows a yellow **?** until that bucket's first
-  fetch), and **pink** below 50. Tap the readouts to open the **OpenSky
-  Credits** screen.
+  fetch), and **pink** below 50. A `429` rate/credit-limited response for any
+  bucket sets that path to 0. Tap the readouts to open the **OpenSky Credits**
+  screen.
 - On the idle screen, tap the **weather temperature** (top-left) to open the
   weather temperature history graph.
 - On the idle screen, tap the **Pool** reading to open its history graph.
