@@ -81,11 +81,15 @@ jobs:
         with:
           name: cyd-dashboard-ota
 
+      - name: Checkout repository for gh release
+        uses: actions/checkout@v4
+
       - name: Create draft release and attach .bin
         run: |
           VERSION="${{ needs.version.outputs.version }}"
           TAG="v${VERSION}"
           gh release create "${TAG}" cyd-dashboard.ino.bin \
+            --repo "${{ github.repository }}" \
             --draft \
             --title "${TAG}" \
             --generate-notes
@@ -100,9 +104,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository for gh release
+        uses: actions/checkout@v4
+
       - name: Publish release
         run: |
           VERSION="${{ needs.version.outputs.version }}"
-          gh release edit "v${VERSION}" --draft=false
+          gh release edit "v${VERSION}" --repo "${{ github.repository }}" --draft=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
