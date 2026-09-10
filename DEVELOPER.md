@@ -224,23 +224,74 @@ releases. All of this lives in `cyd-dashboard/ota.ino`.
 
 ### TLS
 
-All data fetches and the OTA path share one **global trust store**
-(`kRootCAs` in `cyd-dashboard.ino`): a deduplicated union of the former
-`kGithubRootCAs`, `kISRGRootCAs` and `kAmazonRootCA1`, covering USERTrust ECC
-(Sectigo/GitHub), the ISRG/Let's Encrypt roots (open-meteo, OpenSky,
-GitHub's asset host) and Amazon Root CA 1 (Govee). Every verified connection
-goes through the same `httpsBegin()`/`httpsRequestRetry()` helpers.
-`OTA_CA_EXPIRY` is the earliest root expiry; past that **only the OTA path**
-falls back to `setInsecure(true)` so a root rotation can't block updates. Data
-fetches never take that fallback. There is **no** insecure retry on a failed
-handshake — that would let a man-in-the-middle defeat certificate validation.
+Verified HTTPS connections use `httpsBegin()`/`httpsRequestRetry()`, which
+picks the smallest bundled root set that covers the target host:
+
+- `kIsrgRootCAs` — OpenSky, open-meteo, Nominatim, and GitHub release assets
+  (`*.githubusercontent.com`) (ISRG / Let's Encrypt).
+- `kAmazonRootCAs` — Govee (Amazon Root CA 1).
+- `kUserTrustRootCAs` — GitHub API hostnames (`github.com`, `api.github.com`)
+  (Sectigo / USERTrust ECC root).
+
+There is no fallback bundle; an unmapped host returns `nullptr` from
+`trustStoreForUrl()` and `httpsBegin()` fails cleanly rather than silently using
+a bundle that may not cover the host's chain.
+
+`OTA_CA_EXPIRY` is still the earliest root expiry; past that **only the OTA
+path** falls back to `setInsecure(true)` so a root rotation can't block
+updates. Data fetches never take that fallback. There is **no** insecure retry
+on a failed handshake — that would let a man-in-the-middle defeat certificate
+validation.
 Transient transport failures on these
 verified connections (e.g. a connect dropped after prolonged uptime) are retried
 a few times with clean socket teardown between attempts — always over the same
-verified TLS, never insecure. Firmware integrity is independently pinned:
+verified TLS, never insecure. GitHub release downloads are redirected from
+`github.com` to a `githubusercontent.com` asset host; `performOTA()` follows
+those redirects manually so each TLS connection receives the trust store for
+its actual host. Firmware integrity is independently pinned:
 `performOTA()` hashes the streamed image (SHA-256) and compares it to the asset's
 `digest` from the GitHub API before flashing (an empty digest skips the check).
 A mismatch aborts the update without touching the running slot.
+
+### HTTP body streaming and JSON parsing
+
+Large OpenSky responses (`/states/all`, `/tracks/all`) are no longer fully
+buffered into a single `JsonDocument`. `cyd-dashboard/http_body.h` provides a
+framing-aware `HttpBodyStream` wrapper that:
+
+- Buffers reads in 512-byte chunks (ArduinoJson otherwise asks one byte at a
+time, each triggering a full `mbedtls_ssl_read()` round trip).
+- Knows `Content-Length` and `Transfer-Encoding: chunked` boundaries.
+- Reports `stalled()` and `complete()` so a short body is detected instead of
+being treated as an empty response.
+
+`HttpBodyStream` is paired with `seekArray()` and `nextElement()` helpers so
+`fetchFlights()` in `cyd-dashboard.ino` and `fetchTrack()` in
+`flight_details.ino` parse the `states` and `path` arrays one element at a time.
+Peak parse heap for a 50 KB response drops from ~48 KB to a few kilobytes (one
+state row or one track point at a time).
+
+On dev builds, boot and each OpenSky request log the loaded NVS coordinates and
+actual bounding box. This is useful for distinguishing an NVS/location race
+from a legitimate `{"states":null}` response for a small area. The location
+shown in Settings and the location used for a request should therefore be
+compared with the `[boot] NVS location` and `[net] flights query` lines.
+
+`BoundedAllocator` in `cyd-dashboard.ino` caps the working set for each parse
+using `malloc_usable_size()`-based accounting, so the cap is a real working-set
+limit rather than a churn counter. Weather, Govee, token, IP location,
+geocoding, route, and release metadata parsing also uses bounded allocators and
+checks the framed body before accepting the result.
+
+Dev builds log the internal free heap and largest internal block around TLS
+attempts and in periodic heap diagnostics. This distinguishes total free heap
+from the contiguous internal block most relevant to mbedTLS handshakes.
+
+The `dirty` redraw flag is volatile because the network task can request a
+redraw while the loop task is rendering. The loop clears it before, rather than
+after, drawing so a concurrent network update cannot be lost. This matters for
+the bottom-left status text: a completed flight request must replace the boot
+`connecting...` text on the next redraw.
 
 ### Rollback
 
@@ -524,12 +575,16 @@ logos partition once per device.
 
 At boot, `logosInit()` (in `logos.ino`) mounts the logos partition (an
 independent `fs::LittleFSFS` instance on label `"logos"`, separate from the
-pool temp history `"spiffs"` one). `findAirlineLogo()` resolves a callsign's 3-letter
-ICAO prefix, opens `/<ICAO>.bin`, and returns the bitmap through a small
-**bounded LRU cache** (max 16 logos) that allocates buffers **PSRAM-first** when
-available, falling back to internal heap. Any failure — partition absent,
-file missing, or an allocation failure — simply means **no logo is drawn**; the
-device never crashes and OTA firmware never embeds logos.
+pool temp history `"spiffs"` one) and pre-allocates one 72×48 RGB565 buffer
+(`72 × 48 × 2 = 6,912` bytes) PSRAM-first, falling back to the internal heap.
+Only one logo is ever drawn at a time, so a single reusable buffer removes the
+previous 16-entry cache that could retain ~110 KB of mid-heap blocks on the
+PSRAM-less CYD and erode the contiguous heap needed for TLS handshakes.
+`findAirlineLogo()` resolves a callsign's 3-letter ICAO prefix, opens
+`/<ICAO>.bin`, and decodes it into the shared buffer; `logoRelease()` is a
+no-op. Any failure — partition absent, file missing, or an allocation failure —
+simply means **no logo is drawn**; the device never crashes and OTA firmware
+never embeds logos.
 
 > **Update cadence:** adding, removing, or replacing a logo is a *filesystem*
 > change on the logos partition, not a firmware change. You never touch the

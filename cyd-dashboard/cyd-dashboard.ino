@@ -17,6 +17,7 @@
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include "http_body.h"
 #include <NetworkClientSecure.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
@@ -25,9 +26,11 @@
 #include <time.h>
 #include "esp_sleep.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 #include "esp_sntp.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <malloc.h>  // malloc_usable_size
 // Airline logos are loaded at runtime from a dedicated LittleFS partition (see
 // logos.ino), never compiled into the firmware. Declare the type and symbols
 // here so every .ino file can use them regardless of Arduino's alphabetical
@@ -48,6 +51,16 @@ struct Plane;
 // #define here would otherwise silently override that command-line flag).
 #ifndef ENABLE_SERIAL_PROVISION
 #define ENABLE_SERIAL_PROVISION 0
+#endif
+
+// Local HTTP OTA is only for explicitly enabled dev builds. Release builds
+// retain the normal verified HTTPS OTA path and reject serial-triggered HTTP.
+#ifndef ENABLE_LOCAL_OTA
+#define ENABLE_LOCAL_OTA 0
+#endif
+
+#ifndef BUILD_NUM
+#define BUILD_NUM 0
 #endif
 
 // Pool temperature feature (Govee). Reads the selected thermometer's current
@@ -121,17 +134,42 @@ Preferences prefs;
 // allocator caps how much memory a single parse can use, so a large response
 // fails the parse cleanly (handled like any other JSON error) instead of
 // risking exhausting the heap.
+//
+// Accounting uses malloc_usable_size() rather than the requested size, and
+// credits frees and shrinks: ArduinoJson allocates, shrinks and frees string
+// nodes throughout a parse, so charging only allocations turns `used_` into a
+// churn counter and trips the cap far below the real working set.
 class BoundedAllocator : public ArduinoJson::Allocator {
  public:
   explicit BoundedAllocator(size_t maxBytes) : limit_(maxBytes), used_(0) {}
+
   void* allocate(size_t size) override {
     if (used_ + size > limit_) return nullptr;
     void* p = malloc(size);
-    if (p) used_ += size;
+    if (p) used_ += malloc_usable_size(p);
     return p;
   }
-  void deallocate(void* p) override { free(p); }
-  void* reallocate(void* p, size_t newSize) override { return realloc(p, newSize); }
+
+  void deallocate(void* p) override {
+    if (!p) return;
+    size_t had = malloc_usable_size(p);
+    used_ = (used_ > had) ? (used_ - had) : 0;
+    free(p);
+  }
+
+  void* reallocate(void* p, size_t newSize) override {
+    size_t had = p ? malloc_usable_size(p) : 0;
+    // Enforce the cap on growth too, or a shrink-then-grow sequence escapes it entirely.
+    if (newSize > had && (used_ - had) + newSize > limit_) return nullptr;
+    void* q = realloc(p, newSize);
+    if (!q) return nullptr;              // p is still valid and still accounted for
+    used_ = (used_ > had) ? (used_ - had) : 0;
+    used_ += malloc_usable_size(q);
+    return q;
+  }
+
+  size_t used() const { return used_; }  // for heap diagnostics
+
  private:
   size_t limit_, used_;
 };
@@ -189,7 +227,7 @@ bool g_flightBlipOn = false;
 // Settings (persisted)
 float g_radiusMi = 3.5;
 int   g_ceilingFt = 15000;
-int   g_pollSec = 60;
+int   g_pollSec = 30;
 bool  g_trackEnabled = true;   // flight tracking on/off
 bool  g_blinkForFlight = true; // flash the LED when a noteworthy flight is overhead
 bool  g_metric = false;        // false = imperial (ft/mi/mph), true = metric (m/km/kts)
@@ -204,10 +242,14 @@ String g_updateAsset;          // download URL when an update is available
 String g_updateDigest;         // "sha256:<hex>" of the available asset ("" if absent)
 bool   g_otaActive = false;    // loop() should run the pending OTA
 String g_otaVersion, g_otaUrl; // pending OTA target
+String g_otaHost;             // local OTA / replay host (serial provisioned)
 String g_otaSha256;            // digest of the pending OTA target
 bool   g_rollbackMarked = false; // OTA rollback safeguard applied once post-boot
 TaskHandle_t g_otaTask = NULL;   // dedicated task running performOTA; created once at boot (see setup())
+TaskHandle_t g_netTask = NULL;     // net task, for stack high-water logging
 volatile bool g_otaRunning = false; // OTA task owns the display; loop() yields
+
+#define NET_TASK_STACK_BYTES 12288
 // Auto-update status shown at the bottom-left of the dashboard (reuses the
 // idle screen's status line, see drawAutoUpdateStatus()).
 int    g_autoUpdStatus = 0;       // 0 none, 1 scanning, 2 no updates, 3 updating, 4 check failed
@@ -373,7 +415,7 @@ int  g_calScaleY = 12571;  // (3396-379)*1000/240
 long g_calOffY   = 379;    // rawX offset
 unsigned long g_calLongPressStart = 0;  // millis() when a press began (any screen)
 
-bool dirty = true;      // force a redraw
+volatile bool dirty = true; // force a redraw across loop/net tasks
 bool connected = false;
 char lastErr[40] = "connecting...";
 
@@ -435,10 +477,11 @@ volatile bool g_routeBusy = false;  // true while a route fetch is in flight (cr
 #define MAX_TRACK_PTS 64
 struct TrackPoint { float dxMi, dyMi; };
 TrackPoint g_trackPts[MAX_TRACK_PTS];
-int   g_trackCount = 0;              // number of valid track points
+volatile int g_trackCount = 0;       // number of valid track points
 float g_trackBearingDeg = -1.0f;     // latest track true-track bearing (-1 = none)
 bool  g_trackFetched = false;        // tried once for the current plane
 volatile bool g_trackBusy = false;   // cross-task guard
+portMUX_TYPE g_trackMux = portMUX_INITIALIZER_UNLOCKED;
 
 String g_homeAirport = "";      // home airport: drives the incoming/outgoing LED flash ("" = fall back to KDFW)
 
@@ -477,11 +520,38 @@ bool tryConnect(const char* ssid, const char* pass) {
 const char* kOsTokenUrl = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token";
 const int   kOsTokenLifetimeMs = 30 * 60 * 1000;   // OpenSky tokens expire after ~30 min
 
-// Global trust store: deduplicated union of the former kGithubRootCAs,
-// kISRGRootCAs and kAmazonRootCA1. All hosts trust the same root set;
-// the only insecure fallback is OTA's time-gated expiry path (see
-// OTA_CA_EXPIRY / httpsBegin allowInsecure).
-static const char* const kRootCAs =
+// Per-use/CA-family trust stores. Each host gets the smallest bundle that
+// covers its certificate chain, so each TLS handshake parses fewer roots.
+// There is no fallback bundle: an unmapped host fails TLS setup rather than
+// loading a bundle that may not cover its chain.
+
+// Govee: Amazon Root CA 1
+static const char* const kAmazonRootCAs =
+  // [9] Amazon Root CA 1
+  "-----BEGIN CERTIFICATE-----\n"
+  "MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF\n"
+  "ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6\n"
+  "b24gUm9vdCBDQSAxMB4XDTE1MDUyNjAwMDAwMFoXDTM4MDExNzAwMDAwMFowOTEL\n"
+  "MAkGA1UEBhMCVVMxDzANBgNVBAoTBkFtYXpvbjEZMBcGA1UEAxMQQW1hem9uIFJv\n"
+  "b3QgQ0EgMTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALJ4gHHKeNXj\n"
+  "ca9HgFB0fW7Y14h29Jlo91ghYPl0hAEvrAIthtOgQ3pOsqTQNroBvo3bSMgHFzZM\n"
+  "9O6II8c+6zf1tRn4SWiw3te5djgdYZ6k/oI2peVKVuRF4fn9tBb6dNqcmzU5L/qw\n"
+  "IFAGbHrQgLKm+a/sRxmPUDgH3KKHOVj4utWp+UhnMJbulHheb4mjUcAwhmahRWa6\n"
+  "VOujw5H5SNz/0egwLX0tdHA114gk957EWW67c4cX8jJGKLhD+rcdqsq08p8kDi1L\n"
+  "93FcXmn/6pUCyziKrlA4b9v7LWIbxcceVOF34GfID5yHI9Y/QCB/IIDEgEw+OyQm\n"
+  "jgSubJrIqg0CAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC\n"
+  "AYYwHQYDVR0OBBYEFIQYzIU07LwMlJQuCFmcx7IQTgoIMA0GCSqGSIb3DQEBCwUA\n"
+  "A4IBAQCY8jdaQZChGsV2USggNiMOruYou6r4lK5IpDB/G/wkjUu0yKGX9rbxenDI\n"
+  "U5PMCCjjmCXPI6T53iHTfIUJrU6adTrCC2qJeHZERxhlbI1Bjjt/msv0tadQ1wUs\n"
+  "N+gDS63pYaACbvXy8MWy7Vu33PqUXHeeE6V/Uq2V8viTO96LXFvKWlJbYK8U90vv\n"
+  "o/ufQJVtMVT8QtPHRh8jrdkPSHCa2XV4cdFyQzR1bldZwgJcJmApzyMZFo6IQ6XU\n"
+  "5MsI+yMRQ+hDKXJioaldXgjUkK642M4UwtBV8ob2xJNDd2ZhwLnoQdeXeGADbkpy\n"
+  "rqXRfboQnoZsG4q5WTP468SQvvG5\n"
+  "-----END CERTIFICATE-----\n";
+
+
+// GitHub API: Sectigo / USERTrust ECC root
+static const char* const kUserTrustRootCAs =
   // [1] USERTrust ECC Certification Authority
   "-----BEGIN CERTIFICATE-----\n"
   "MIICjzCCAhWgAwIBAgIQXIuZxVqUxdJxVt7NiYDMJjAKBggqhkjOPQQDAzCBiDEL\n"
@@ -498,8 +568,9 @@ static const char* const kRootCAs =
   "VR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAwNoADBlAjA2Z6EWCNzklwBBHU6+4WMB\n"
   "zzuqQhFkoJ2UOQIReVx7Hfpkue4WQrO/isIJxOzksU0CMQDpKmFHjFJKS04YcPbW\n"
   "RNZu9YO6bVi9JNlWSOrvxKJGgYhqOkbRqZtNyWHa0V1Xahg=\n"
-  "-----END CERTIFICATE-----\n"
-  //
+  "-----END CERTIFICATE-----\n";
+// OpenSky, open-meteo, Nominatim: Let's Encrypt / ISRG hierarchy
+static const char* const kIsrgRootCAs =
   // [2] ISRG Root X1
   "-----BEGIN CERTIFICATE-----\n"
   "MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw\n"
@@ -678,30 +749,8 @@ static const char* const kRootCAs =
   "5lKJStEwCUnLpntcrXk5XVDCNv/5RyWpRThkGOV7GetKkQ0qAY8hCzWK6oqnAhDZ\n"
   "cjlYVdWfqOw3DIOX6EDNBgAqHarRVxyF9QZdOaXSyPJ0ueD2BYJEBgaCGQ8rAaU/\n"
   "Qc123V5LTXDZW4CcsPBDyhy4v+c8hClAyw/IkJlfBqxB9D+/wvIMHgECZ4ptP6o=\n"
-  "-----END CERTIFICATE-----\n"
-  //
-  // [9] Amazon Root CA 1
-  "-----BEGIN CERTIFICATE-----\n"
-  "MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF\n"
-  "ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6\n"
-  "b24gUm9vdCBDQSAxMB4XDTE1MDUyNjAwMDAwMFoXDTM4MDExNzAwMDAwMFowOTEL\n"
-  "MAkGA1UEBhMCVVMxDzANBgNVBAoTBkFtYXpvbjEZMBcGA1UEAxMQQW1hem9uIFJv\n"
-  "b3QgQ0EgMTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALJ4gHHKeNXj\n"
-  "ca9HgFB0fW7Y14h29Jlo91ghYPl0hAEvrAIthtOgQ3pOsqTQNroBvo3bSMgHFzZM\n"
-  "9O6II8c+6zf1tRn4SWiw3te5djgdYZ6k/oI2peVKVuRF4fn9tBb6dNqcmzU5L/qw\n"
-  "IFAGbHrQgLKm+a/sRxmPUDgH3KKHOVj4utWp+UhnMJbulHheb4mjUcAwhmahRWa6\n"
-  "VOujw5H5SNz/0egwLX0tdHA114gk957EWW67c4cX8jJGKLhD+rcdqsq08p8kDi1L\n"
-  "93FcXmn/6pUCyziKrlA4b9v7LWIbxcceVOF34GfID5yHI9Y/QCB/IIDEgEw+OyQm\n"
-  "jgSubJrIqg0CAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC\n"
-  "AYYwHQYDVR0OBBYEFIQYzIU07LwMlJQuCFmcx7IQTgoIMA0GCSqGSIb3DQEBCwUA\n"
-  "A4IBAQCY8jdaQZChGsV2USggNiMOruYou6r4lK5IpDB/G/wkjUu0yKGX9rbxenDI\n"
-  "U5PMCCjjmCXPI6T53iHTfIUJrU6adTrCC2qJeHZERxhlbI1Bjjt/msv0tadQ1wUs\n"
-  "N+gDS63pYaACbvXy8MWy7Vu33PqUXHeeE6V/Uq2V8viTO96LXFvKWlJbYK8U90vv\n"
-  "o/ufQJVtMVT8QtPHRh8jrdkPSHCa2XV4cdFyQzR1bldZwgJcJmApzyMZFo6IQ6XU\n"
-  "5MsI+yMRQ+hDKXJioaldXgjUkK642M4UwtBV8ob2xJNDd2ZhwLnoQdeXeGADbkpy\n"
-  "rqXRfboQnoZsG4q5WTP468SQvvG5\n"
-  "-----END CERTIFICATE-----\n"
-  ;
+  "-----END CERTIFICATE-----\n";
+
 
 // Expiry of the bundled roots (earliest notAfter, ISRG Root X1 = 2035-06-04;
 // conservative 2035-01-01). Past this, the OTA path may fall back to
@@ -709,18 +758,75 @@ static const char* const kRootCAs =
 // take that fallback.
 #define OTA_CA_EXPIRY 2051222400UL
 
-// Shared helper: attach the global trust store (kRootCAs) to a
-// NetworkClientSecure and start a verified-TLS request. When allowInsecure is
-// set (OTA only) AND the bundled roots have passed OTA_CA_EXPIRY, fall back to
-// setInsecure(true) so updates keep working after the roots rotate out. There
-// is NO insecure retry after a validation failure -- that would let a MITM
+// Return the smallest trust store that covers the target host, so each TLS
+// handshake only parses the roots it needs. There is no fallback bundle;
+// unmapped hosts return nullptr so TLS setup fails cleanly. The OTA path
+// may still fall back to setInsecure() once the bundled roots have passed
+// OTA_CA_EXPIRY.
+static bool hostSuffixMatches(const char* host, size_t len, const char* suffix) {
+  size_t slen = strlen(suffix);
+  if (len < slen) return false;
+  const char* p = host + len - slen;
+  for (size_t i = 0; i < slen; ++i) {
+    char a = p[i], b = suffix[i];
+    if (a >= 'A' && a <= 'Z') a += 32;
+    if (b >= 'A' && b <= 'Z') b += 32;
+    if (a != b) return false;
+  }
+  return true;
+}
+static const char* trustStoreForUrl(const char* url) {
+  const char* p = strstr(url, "://");
+  const char* host = p ? p + 3 : url;
+  const char* end = host;
+  while (*end && *end != '/' && *end != ':' && *end != '?') ++end;
+  size_t len = end - host;
+  if (hostSuffixMatches(host, len, "opensky-network.org"))      return kIsrgRootCAs;
+  if (hostSuffixMatches(host, len, "open-meteo.com"))           return kIsrgRootCAs;
+  if (hostSuffixMatches(host, len, "openstreetmap.org"))        return kIsrgRootCAs;
+  if (hostSuffixMatches(host, len, "govee.com"))                return kAmazonRootCAs;
+  // GitHub API is Sectigo/USERTrust-signed; GitHub release assets are
+  // served from *.githubusercontent.com and use Let's Encrypt / ISRG.
+  if (hostSuffixMatches(host, len, "github.com"))               return kUserTrustRootCAs;
+  if (hostSuffixMatches(host, len, "githubusercontent.com"))    return kIsrgRootCAs;
+  return nullptr;  // unmapped host: fail TLS setup cleanly
+}
+
+// Shared helper: attach the smallest root bundle that covers the target host
+// to a NetworkClientSecure and start a verified-TLS request. When allowInsecure
+// is set (OTA only) AND the bundled roots have passed OTA_CA_EXPIRY, fall back
+// to setInsecure(true) so updates keep working after the roots rotate out.
+// There is NO insecure retry after a validation failure -- that would let a MITM
 // defeat certificate verification. Returns false when the client/URL can't be
 // set up (caller should treat as a hard error). The caller must keep `sec`
 // alive for the lifetime of the request.
 bool httpsBegin(HTTPClient& http, NetworkClientSecure& sec, const char* url, bool allowInsecure) {
+  const char* trust = trustStoreForUrl(url);
+  if (!trust) return false;  // unmapped host: no bundle to validate with
   if (allowInsecure && time(nullptr) >= (time_t)OTA_CA_EXPIRY) sec.setInsecure();
-  else sec.setCACert(kRootCAs);
+  else sec.setCACert(trust);
   return http.begin(sec, url);
+}
+
+// Dev-only heap/stack/location diagnostic. No-op when the build is not a -dev version.
+void logHeapDiag(const char* why) {
+  if (!isDevBuild()) return;
+  size_t freeHeap = ESP.getFreeHeap();
+  size_t maxAlloc = ESP.getMaxAllocHeap();
+  size_t minFree  = ESP.getMinFreeHeap();
+  size_t intFree = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  size_t intMax = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  size_t netStackUsed = 0;
+  if (g_netTask) {
+    size_t highWaterWords = (size_t)uxTaskGetStackHighWaterMark(g_netTask);
+    netStackUsed = NET_TASK_STACK_BYTES - highWaterWords * sizeof(StackType_t);
+  }
+  size_t psramTotal = ESP.getPsramSize();
+  size_t psramFree  = ESP.getFreePsram();
+  Serial.printf("[heap] %s free=%u maxalloc=%u intfree=%u intmax=%u minfree=%u netStack=%uB psram=%u/%u lat=%.4f lon=%.4f r=%.1f\n",
+                why, (unsigned)freeHeap, (unsigned)maxAlloc, (unsigned)intFree,
+                (unsigned)intMax, (unsigned)minFree, (unsigned)netStackUsed,
+                (unsigned)psramFree, (unsigned)psramTotal, g_lat, g_lon, g_radiusMi);
 }
 
 // How many connection attempts (and ms between them) a retrying HTTPS request
@@ -764,6 +870,11 @@ int httpsRequestRetry(HTTPClient& http, NetworkClientSecure& sec, const char* ur
     http.end();                // release any previous attempt's connection
     sec.stop();                // close the TLS socket cleanly
     if (attempt > 1) delay(HTTPS_RETRY_DELAY_MS);
+    if (isDevBuild()) {
+      Serial.printf("[tls] pre attempt=%d intfree=%u intmax=%u\n", attempt,
+                    (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    }
     if (!httpsBegin(http, sec, url, allowInsecure)) continue;   // connect failed -> retry
     if (headers) {
       for (int i = 0; headers[i] && headers[i + 1]; i += 2) {
@@ -772,6 +883,11 @@ int httpsRequestRetry(HTTPClient& http, NetworkClientSecure& sec, const char* ur
     }
     code = (method == HTTPS_METHOD_POST) ? http.POST(body) : http.GET();
     if (code >= 0) break;      // server responded (non-200): don't retry
+  }
+  if (code < 0 && isDevBuild()) {
+    char tlsErr[128] = {};
+    int mbedErr = sec.lastError(tlsErr, sizeof tlsErr);
+    Serial.printf("[tls] fail code=%d mbedtls=%d %s\n", code, mbedErr, tlsErr);
   }
   return code;
 }
@@ -824,12 +940,27 @@ bool openskyEnsureToken() {
                 "&client_secret=" + urlEncode(g_osClientSecret);
   const char* tokenHdrs[] = { "Content-Type", "application/x-www-form-urlencoded", nullptr };
   int code = httpsRequestRetry(http, sec, kOsTokenUrl, HTTPS_METHOD_POST, body, tokenHdrs, false);
+  if (isDevBuild()) Serial.printf("[net] OpenSky token response code=%d\n", code);
   if (code < 0) { g_osHandshakeFailed = true; return false; }  // TLS/transport failure on all attempts
   if (code == HTTP_CODE_UNAUTHORIZED || code == HTTP_CODE_BAD_REQUEST) return false;  // genuine bad creds
   if (code != HTTP_CODE_OK) { g_osHandshakeFailed = true; return false; }  // transient server error (429/5xx)
-  JsonDocument doc;
-  if (deserializeJson(doc, http.getStream())) { http.end(); g_osHandshakeFailed = true; return false; }
+  BoundedAllocator tokenAlloc(8192);
+  JsonDocument doc(&tokenAlloc);
+  HttpBodyStream tokenBody(http);
+  DeserializationError parseErr = deserializeJson(doc, tokenBody);
+  bool bodyComplete = tokenBody.complete() || tokenBody.drain();
   http.end();
+  if (parseErr) {
+    if (isDevBuild()) Serial.printf("[net] OpenSky token parse error=%s bytes=%u\n",
+                                   parseErr.c_str(), (unsigned)tokenBody.bytesRead());
+    g_osHandshakeFailed = true;
+    return false;
+  }
+  if (!bodyComplete && isDevBuild()) {
+    Serial.printf("[net] OpenSky token body framing incomplete bytes=%u len=%ld stalled=%d\n",
+                  (unsigned)tokenBody.bytesRead(), tokenBody.contentLength(),
+                  (int)tokenBody.stalled());
+  }
   const char* tok = doc["access_token"];
   if (!tok || !tok[0]) { g_osHandshakeFailed = true; return false; }
   g_osToken = tok;
@@ -866,9 +997,9 @@ void netTask(void* p) {
     // User-initiated update check gets priority so the About page responds
     // quickly even while background fetches (flights/weather/pool) are queued.
     if (netWantUpdateCheck) { netWantUpdateCheck=false; netBusy=true; checkForUpdate(); netBusy=false; netUpdated=true; }
-    else if (netWantFlights)     { netWantFlights = false;     netBusy = true; fetchFlights();      netBusy = false; netUpdated = true; g_lastData = millis(); }
-    else if (netWantLocation){ netWantLocation = false;   netBusy = true; fetchIpLocation();    netBusy = false; netUpdated = true; }
-    else if (netWantWeather) { netWantWeather = false;    netBusy = true; fetchWeather();       netBusy = false; netUpdated = true; }
+    else if (netWantLocation) { netWantLocation = false;   netBusy = true; fetchIpLocation();    netBusy = false; netUpdated = true; }
+    else if (netWantFlights)  { netWantFlights  = false;   netBusy = true; fetchFlights();       netBusy = false; netUpdated = true; g_lastData = millis(); }
+    else if (netWantWeather)  { netWantWeather  = false;   netBusy = true; fetchWeather();       netBusy = false; netUpdated = true; }
     else if (netWantPoolDevices){ netWantPoolDevices = false; netBusy = true; fetchGoveeDevices(); netBusy = false; netUpdated = true; }
     else if (netWantPool)    { netWantPool = false;       netBusy = true; fetchGoveeTemp();     netBusy = false; netUpdated = true; }
     else if (netWantAutoScan)   { netWantAutoScan=false;   netBusy=true; autoScanOnce();     netBusy=false; netUpdated=true; }
@@ -892,16 +1023,21 @@ void fetchFlights() {
   char osurl[240];
   // Bound the query to what the radar can actually draw: the ring is g_radiusMi
   // and we keep/track planes out to 2x radius (min 8 mi), so a box that large is
-  // all we need. A wider box returns far more aircraft than we keep, which blew
-  // the 48KB parse cap ("Json NoMemory") or truncated the body ("Json
-  // IncompleteInput"). Widen longitude by 1/cos(lat) so the box is a true circle
-  // on the ground and doesn't clip planes due east/west.
+  // all we need. A wider box returns far more aircraft than we keep, which
+  // overwhelmed the old whole-document parse. The states[] rows are now
+  // stream-parsed, but the box still keeps the response small. Widen longitude
+  // by 1/cos(lat) so the box is a true circle on the ground and doesn't clip
+  // planes due east/west.
   const float bboxMi = max(g_radiusMi * 2.0f, 8.0f);
   const float dLat = bboxMi / 69.0f;                        // ~1 deg lat ~ 69 mi
   const float dLon = dLat / cosf(g_lat * PI / 180.0f);
   snprintf(osurl, sizeof osurl,
     "https://opensky-network.org/api/states/all?lamin=%.4f&lomin=%.4f&lamax=%.4f&lomax=%.4f",
     g_lat - dLat, g_lon - dLon, g_lat + dLat, g_lon + dLon);
+  if (isDevBuild()) {
+    Serial.printf("[net] flights query lat=%.5f lon=%.5f bbox=%.1fmi url=%s\n",
+                  g_lat, g_lon, bboxMi, osurl);
+  }
   http.setTimeout(5000);
   // Tell HTTPClient which response headers to capture. Without this it discards
   // everything except a small built-in set, so X-Rate-Limit-Remaining (the
@@ -917,6 +1053,11 @@ void fetchFlights() {
   // the (anonymous) response, so a blip can't show a false "Invalid
   // Credentials" error or freeze the dashboard.
   bool authed = openskyEnsureToken();
+  if (isDevBuild()) {
+    Serial.printf("[net] OpenSky auth client=%s token=%s handshake=%d\n",
+                  g_osClientId.length() ? "set" : "blank",
+                  authed ? "set" : "none", (int)g_osHandshakeFailed);
+  }
   String authHdr;
   if (authed) authHdr = "Bearer " + g_osToken;
   const char* flightHdrs[] = { "Authorization", authHdr.c_str(), nullptr };
@@ -980,25 +1121,33 @@ void fetchFlights() {
     g_creditsKnown = true;
     g_creditsExhausted = (g_creditsRemaining <= LOW_CREDIT_THRESHOLD);
   }
-  // Cap parse memory at 48KB; a busy airspace can return a very large
-  // states array and we'd rather fail this fetch than risk an OOM.
-  BoundedAllocator openskyAlloc(49152);
-  JsonDocument doc(&openskyAlloc);
-  // Parse directly from the HTTP stream instead of buffering the whole body
-  // in a String. useHTTP10(true) in httpsRequestRetry disables chunked
-  // transfer encoding, so the stream is a plain JSON body.
-  DeserializationError err = deserializeJson(doc, http.getStream());
-  http.end();
-  if (err) {
-    snprintf(lastErr, sizeof lastErr, "json %s", err.c_str());
+  // Stream-parse the states[] array one row at a time. A busy airspace can return a
+  // very large states array; we only keep MAXP planes, so buffering the whole array
+  // would waste contiguous heap needed by the next TLS handshake.
+  HttpBodyStream body(http);
+  BoundedAllocator rowAlloc(4096);   // one state row; belt-and-suspenders cap
+  JsonDocument st(&rowAlloc);
+  if (!seekArray(body, "\"states\"")) {
+    if (body.peek() == 'n') {
+      // OpenSky returns "states":null when the requested box has no aircraft
+      // (e.g. first boot before g_lat/g_lon are set, or a very tight bbox).
+      // Treat this as a valid empty result, not a JSON error.
+      bool ok = body.drain();
+      http.end();
+      if (isDevBuild()) Serial.printf("[net] flights states null len=%u ok=%d\n", (unsigned)body.bytesRead(), (int)ok);
+      return;   // planeCount is already 0, no error
+    }
+    snprintf(lastErr, sizeof lastErr, "json no states");
+    Serial.printf("[net] flights json no states len=%u\n", (unsigned)body.bytesRead());
+    body.drain();
+    http.end();
     dirty = true;
     return;
   }
-
-  JsonArray states = doc["states"];
-  for (JsonVariant st : states) {
-    if (planeCount >= MAXP) break;
+  for (;;) {
+    if (!nextElement(body, st)) break;
     if (st.isNull()) continue;
+    if (planeCount >= MAXP) continue;   // keep draining the stream so complete() is meaningful
 
     JsonVariant csV = st[1];
     JsonVariant lonV = st[5];
@@ -1040,8 +1189,18 @@ void fetchFlights() {
     p.dyMi = dlat * 69.0f;
     p.dxMi = dlon * 69.0f;
   }
+  bool bodyOk = body.drain();
+  http.end();
+  if (!bodyOk) {
+    snprintf(lastErr, sizeof lastErr, "json short");
+    Serial.printf("[net] flights json short len=%u/%ld%s\n", (unsigned)body.bytesRead(),
+                  body.contentLength(), body.stalled() ? " stalled" : "");
+    dirty = true;
+    return;
+  }
   }  // end scoped fetch block (frees states sec/http + TLS context before route/track handshake)
   sortPlanes();
+  if (isDevBuild()) Serial.printf("[net] flights ok planes=%d free=%u\n", planeCount, (unsigned)ESP.getFreeHeap());
   // A freshly found overhead flight re-shows the flight view even if the user
   // had dismissed it earlier via the countdown bar. If the overhead plane's
   // identity changed, reset any route details so they are re-fetched for the
@@ -1075,8 +1234,10 @@ void fetchFlights() {
       g_routeOrigin = "";
       g_routeDest = "";
       g_trackFetched = false;
+      portENTER_CRITICAL(&g_trackMux);
       g_trackCount = 0;
       g_trackBearingDeg = -1.0f;
+      portEXIT_CRITICAL(&g_trackMux);
       ledFlashedIcao[0] = 0;
     }
     // Fetch the route and the ground track automatically the first time this
@@ -1124,11 +1285,18 @@ void fetchIpLocation() {
   http.setTimeout(5000);
   int code = http.GET();
   if (code == HTTP_CODE_OK) {
-    String payload = http.getString();
-    JsonDocument doc;
-    if (!deserializeJson(doc, payload)) {
+    BoundedAllocator locationAlloc(2048);
+    JsonDocument doc(&locationAlloc);
+    HttpBodyStream body(http);
+    DeserializationError parseErr = deserializeJson(doc, body);
+    bool bodyComplete = body.complete() || body.drain();
+    if (!parseErr && bodyComplete) {
       g_lat = doc["lat"] | g_lat;
       g_lon = doc["lon"] | g_lon;
+      if (g_lat != 0.0f || g_lon != 0.0f) {
+        saveFloat("lat", g_lat);
+        saveFloat("lon", g_lon);
+      }
       fetchWeather();   // refresh weather immediately for the new location
     }
   }
@@ -1159,11 +1327,13 @@ bool geocodeAddress() {
     snprintf(lastErr, sizeof lastErr, "geo %d", code);
     return false;
   }
-  String payload = http.getString();
+  BoundedAllocator geoAlloc(8192);
+  JsonDocument doc(&geoAlloc);
+  HttpBodyStream body(http);
+  DeserializationError parseErr = deserializeJson(doc, body);
+  bool bodyComplete = body.complete() || body.drain();
   http.end();
-
-  JsonDocument doc;
-  if (deserializeJson(doc, payload)) {
+  if (parseErr || !bodyComplete) {
     snprintf(lastErr, sizeof lastErr, "geo json");
     return false;
   }
@@ -1228,7 +1398,7 @@ void drawHeaderCredit(int x, int y, const char* label, int value, bool known,
 
 void drawHeaderBand() {
   bool err = (dashboardCriticalLabel() != nullptr);
-  uint16_t bg = err ? TFT_MAROON : g_clockCol;
+  uint16_t bg = err ? TFT_MAROON : (isDevBuild() ? TFT_DARKGREY : g_clockCol);
   tft.fillRect(0, 0, 320, HEADER_H, bg);
   // date (left) + credits (right) in FONT2
   tft.setTextColor(TFT_WHITE, bg);
@@ -1686,12 +1856,18 @@ void drawDottedLineSafe(int x0, int y0, int x1, int y1, uint16_t col, int dash, 
 // Draw the tracked flight's past ground-track polyline on a radar. Points are
 // stored as (dx,dy) miles from the observer; off-screen dashes are clipped.
 void drawTrackPolyline(int cx, int cy, float scale) {
-  if (g_trackCount < 2) return;
-  int prevX = cx + (int)(g_trackPts[0].dxMi * scale);
-  int prevY = cy - (int)(g_trackPts[0].dyMi * scale);
-  for (int i = 1; i < g_trackCount; i++) {
-    int x = cx + (int)(g_trackPts[i].dxMi * scale);
-    int y = cy - (int)(g_trackPts[i].dyMi * scale);
+  TrackPoint pts[MAX_TRACK_PTS];
+  int count;
+  portENTER_CRITICAL(&g_trackMux);
+  count = g_trackCount;
+  if (count > 0) memcpy(pts, g_trackPts, count * sizeof(TrackPoint));
+  portEXIT_CRITICAL(&g_trackMux);
+  if (count < 2) return;
+  int prevX = cx + (int)(pts[0].dxMi * scale);
+  int prevY = cy - (int)(pts[0].dyMi * scale);
+  for (int i = 1; i < count; i++) {
+    int x = cx + (int)(pts[i].dxMi * scale);
+    int y = cy - (int)(pts[i].dyMi * scale);
     drawDottedLineSafe(prevX, prevY, x, y, TFT_CYAN, 3, 3, CLIP_DYN_COG);
     prevX = x; prevY = y;
   }
@@ -1702,12 +1878,20 @@ void drawTrackPolyline(int cx, int cy, float scale) {
 // heading (so the projection always shows and the plane follows it). Static,
 // redrawn each frame so the blip doesn't leave a hole.
 void drawTrackProjection(int cx, int cy, float scale, float planeDxMi, float planeDyMi, float planeHdgDeg) {
+  TrackPoint lastPoint;
+  int count;
+  float bearing;
+  portENTER_CRITICAL(&g_trackMux);
+  count = g_trackCount;
+  bearing = g_trackBearingDeg;
+  if (count > 0) lastPoint = g_trackPts[count - 1];
+  portEXIT_CRITICAL(&g_trackMux);
   float sxMi, syMi, dirDx, dirDy;
-  if (g_trackCount >= 1 && g_trackBearingDeg >= 0.0f) {
+  if (count >= 1 && bearing >= 0.0f) {
     // Track available: start at its end and continue along its end bearing.
-    sxMi = g_trackPts[g_trackCount - 1].dxMi;
-    syMi = g_trackPts[g_trackCount - 1].dyMi;
-    float rad = g_trackBearingDeg * PI / 180.0f;
+    sxMi = lastPoint.dxMi;
+    syMi = lastPoint.dyMi;
+    float rad = bearing * PI / 180.0f;
     dirDx = sinf(rad); dirDy = cosf(rad);   // east / north
   } else if (planeHdgDeg >= 0.0f) {
     // No track: project from the plane's current position along its heading.
@@ -2469,13 +2653,21 @@ void setup() {
 #endif
   g_radiusMi = prefs.getFloat("radius", 3.5f);
   g_ceilingFt = prefs.getInt("ceiling", 15000);
-  g_pollSec = prefs.getInt("poll", 60);
+  g_pollSec = prefs.getInt("poll", 30);
   g_savedSsid = prefs.getString("ssid", "");
   g_savedPass = prefs.getString("pass", "");
   g_osClientId = prefs.getString("oscid", "");
   g_osClientSecret = prefs.getString("ocssec", "");
+  if (isDevBuild()) {
+    Serial.printf("[boot] OpenSky credentials clientId=%s clientSecret=%s\n",
+                  g_osClientId.length() ? "set" : "blank",
+                  g_osClientSecret.length() ? "set" : "blank");
+  }
   g_lat = prefs.getFloat("lat", 0.0f);
   g_lon = prefs.getFloat("lon", 0.0f);
+  if (isDevBuild()) {
+    Serial.printf("[boot] NVS location lat=%.5f lon=%.5f\n", g_lat, g_lon);
+  }
   g_sleepOn = prefs.getBool("sleepon", true);
   g_sleepStartH = prefs.getInt("sleepsH", 22);
   g_sleepStartM = prefs.getInt("sleepsM", 0);
@@ -2519,6 +2711,10 @@ void setup() {
   g_poolEnabled = prefs.getBool("poolen", false);
   // First boot = no saved location; guess from IP in setup() when connected.
   g_firstBoot = (g_lat == 0.0f && g_lon == 0.0f);
+  if (isDevBuild()) {
+    Serial.printf("[boot] location state firstBoot=%d lat=%.5f lon=%.5f\n",
+                  (int)g_firstBoot, g_lat, g_lon);
+  }
   // First-boot wizard: run touch calibration first if none was ever saved
   // (fresh device or after a full factory reset), then gather WiFi credentials
   // if none are stored. "Has it been calibrated?" is answered by whether the
@@ -2641,7 +2837,7 @@ void setup() {
   // freeze the main loop (touch + drawing).
   // Stack measured on-device (uxTaskGetStackHighWaterMark): the deep mbedTLS
   // handshake + JSON parse peaks around 6 KB, so 12 KB leaves ~2x headroom.
-  xTaskCreatePinnedToCore(netTask, "net", 12288, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(netTask, "net", NET_TASK_STACK_BYTES, NULL, 1, &g_netTask, 0);
   // OTA task created once at boot (idle until g_otaRunning), not per-OTA: a
   // fresh task's first TLS connect was observed to fail, and an on-demand stack
   // carved from the heap drops below what mbedtls needs. 12 KB matches the net
@@ -2761,6 +2957,10 @@ void loop() {
   // While an OTA runs on its dedicated task, yield so it can own the display
   // (no TFT contention from the loop).
   if (g_otaRunning) { delay(10); return; }
+
+#if ENABLE_SERIAL_PROVISION
+  handleSerialCommands();   // runtime OTA / command input (no-op if no serial)
+#endif
 
 #if TOUCH_DEBUG
   // Heartbeat: if the gap between prints grows large, loop() itself is
@@ -2928,9 +3128,11 @@ void loop() {
   }
 
   if (dirty) {
+    // Clear before drawing so a net-task or touch update that arrives during
+    // the redraw remains pending instead of being lost by a trailing clear.
+    dirty = false;
     if (g_calState != CAL_NONE) {
       // calibration draws its own screen (calDrawTarget / done message)
-      dirty = false;
     } else if (g_screen == SCR_WIFI) drawWifiScreen();
     else if (g_screen == SCR_SETTINGS) drawSettings();
     else if (g_screen == SCR_GENERAL) drawGeneral();
@@ -2946,7 +3148,6 @@ void loop() {
     else if (g_screen == SCR_FLIGHTDETAIL) drawFlightDetailPage();
     else if (g_screen == SCR_CREDITS) drawCredits();
     else drawDashboard();
-    dirty = false;
   }
 
   // Run a queued LED flash now that the flight view has been drawn, so the user
@@ -2956,6 +3157,12 @@ void loop() {
     g_pendingFlash = false;
     if (g_blinkForFlight)
       flashLed(g_flashDeparting, g_flashIncoming, g_flashTop50, g_flashWhite);
+  }
+  // Periodic heap/TLS/fetch diagnostic. No-op in release builds.
+  static unsigned long lastHeapDiag = 0;
+  if (now - lastHeapDiag >= 30000UL) {
+    lastHeapDiag = now;
+    logHeapDiag("tick");
   }
   delay(20);
 }

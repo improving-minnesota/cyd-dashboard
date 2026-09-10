@@ -4,22 +4,24 @@
 // running kVersion, and when newer downloads the raw app .bin and flashes it to
 // the inactive OTA slot with the arduino-esp32 Update library, then reboots.
 //
-// TLS: both the release-metadata API call and the firmware download are verified
-// against the global trust store (kRootCAs, see cyd-dashboard.ino). If the
-// bundled roots have passed their expiry (OTA_CA_EXPIRY) the OTA path falls back
-// to setInsecure(true); data fetches never do. There is NO insecure retry on a
-// handshake failure -- that would let a man-in-the-middle defeat certificate
-// validation. Firmware integrity is additionally pinned by comparing the
-// streamed image's SHA-256 to the asset digest returned by the GitHub API.
+// TLS: the release-metadata API call is verified against the Sectigo/USERTrust
+// root (kUserTrustRootCAs) and the firmware download is verified against the
+// ISRG / Let's Encrypt roots (kIsrgRootCAs). If the bundled roots have passed
+// their expiry (OTA_CA_EXPIRY) the OTA path falls back to setInsecure(true);
+// data fetches never do. There is NO insecure retry on a handshake failure --
+// that would let a man-in-the-middle defeat certificate validation. Firmware
+// integrity is additionally pinned by comparing the streamed image's SHA-256 to
+// the asset digest returned by the GitHub API.
 
 #include <NetworkClientSecure.h>
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include "mbedtls/sha256.h"
 
-// OTA verifies TLS against the global trust store (kRootCAs in
-// cyd-dashboard.ino), with a time-gated setInsecure() fallback once those
-// roots expire (see OTA_CA_EXPIRY) so a root rotation can't block updates.
+// OTA verifies TLS against per-host trust stores (GitHub API via
+// kUserTrustRootCAs, release assets via kIsrgRootCAs in cyd-dashboard.ino),
+// with a time-gated setInsecure() fallback once those roots expire (see
+// OTA_CA_EXPIRY) so a root rotation can't block updates.
 
 #define OTA_REPO    "improving-minnesota/cyd-dashboard"
 #define OTA_ASSET   "cyd-dashboard.ino.bin"
@@ -72,11 +74,20 @@ bool fetchLatestRelease(String& versionOut, String& assetUrlOut, String& sha256O
   const char* ghHdrs[] = { "Accept", "application/vnd.github+json", nullptr };
   int code = httpsRequestRetry(http, sec, OTA_API_URL, HTTPS_METHOD_GET, "", ghHdrs, /*allowInsecure=*/true);
   if (code != HTTP_CODE_OK) { http.end(); return false; }
-  String payload = http.getString();
-  http.end();
 
-  JsonDocument doc;
-  if (deserializeJson(doc, payload)) return false;
+  JsonDocument filter;
+  filter["tag_name"] = true;
+  JsonObject assetFilter = filter["assets"].add<JsonObject>();
+  assetFilter["name"] = true;
+  assetFilter["browser_download_url"] = true;
+  assetFilter["digest"] = true;
+  BoundedAllocator releaseAlloc(4096);
+  JsonDocument doc(&releaseAlloc);
+  HttpBodyStream body(http);
+  DeserializationError parseErr = deserializeJson(doc, body, DeserializationOption::Filter(filter));
+  bool bodyComplete = body.complete() || body.drain();
+  http.end();
+  if (parseErr || !bodyComplete) return false;
   const char* tag = doc["tag_name"] | "";
   if (!tag || !tag[0]) return false;
   String url, digest;
@@ -222,21 +233,60 @@ bool performOTA(const String& url, const String& version, const String& expected
   // a failed connect, a non-200, or a truncated body on any attempt, so every
   // stage is retried; a genuine 404 merely costs a couple of extra attempts
   // before failing.
+
+  // Plain HTTP OTA is restricted to explicitly enabled development builds.
+  bool useHttps = url.startsWith("https://");
+  if (!useHttps && (!isDevBuild() || !ENABLE_LOCAL_OTA)) return false;
   const char* failReason = "Download failed";
+
+  // Dev-build debug output for OTA diagnostics.
+  bool dev = isDevBuild();
+  if (dev) Serial.printf("[OTA] start url=%s\n", url.c_str());
+
   for (int attempt = 1; attempt <= HTTPS_RETRY_ATTEMPTS; attempt++) {
     drawOtaHeader(version);          // reset screen + progress bar each attempt
     if (attempt > 1) delay(HTTPS_RETRY_DELAY_MS);
 
-    NetworkClientSecure sec;
     HTTPClient http;
     http.setUserAgent(appUserAgent());   // persistent across begin()/end()
-    // Shared verified-TLS helper; allowInsecure falls back past OTA_CA_EXPIRY.
-    if (!httpsBegin(http, sec, url.c_str(), /*allowInsecure=*/true)) continue;   // connect failed -> retry
-    http.setConnectTimeout(5000);        // bound the TCP connect/TLS handshake, not just the read
-    http.setTimeout(20000);
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    int code = http.GET();
-    if (code != HTTP_CODE_OK) { http.end(); continue; }   // dropped connect/non-200 -> retry
+    bool connected = false;
+    WiFiClient plainClient;
+    NetworkClientSecure sec;
+    String requestUrl = url;
+    int code = -1;
+
+    // GitHub's release URL redirects from github.com to a
+    // release-assets.githubusercontent.com host. Follow redirects manually so
+    // each TLS connection gets the CA bundle selected for its actual host.
+    for (int redirect = 0; redirect < 4; redirect++) {
+      http.setConnectTimeout(5000);
+      http.setTimeout(20000);
+      http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+      if (useHttps) {
+        // Keep `sec` alive for the full request; httpsBegin selects the bundle
+        // from the current request URL, including the redirected asset host.
+        connected = httpsBegin(http, sec, requestUrl.c_str(), /*allowInsecure=*/true);
+      } else {
+        // Plain HTTP path (local dev server).
+        connected = http.begin(plainClient, requestUrl.c_str());
+      }
+      if (redirect == 0 && dev) {
+        Serial.printf("[OTA] attempt %d %s connect=%d\n", attempt,
+                      useHttps ? "https" : "http", connected);
+      }
+      if (!connected) break;
+      code = http.GET();
+      if (code >= 300 && code < 400) {
+        String nextUrl = http.getLocation();
+        http.end();
+        if (nextUrl.length() == 0) { code = -1; break; }
+        requestUrl = nextUrl;
+        continue;
+      }
+      break;
+    }
+    if (dev) Serial.printf("[OTA] attempt %d code=%d size=%d\n", attempt, code, http.getSize());
+    if (!connected || code != HTTP_CODE_OK) { http.end(); continue; }
 
     int total = http.getSize();
     bool haveTotal = (total > 0);
@@ -251,11 +301,18 @@ bool performOTA(const String& url, const String& version, const String& expected
     uint8_t buf[4096];
     int lastPct = -1;
     bool done = false;
+    unsigned long idleSince = millis();
     while (!done) {
       if (stream->available() == 0) {
+        // If we already got the full announced body, finish even if connection stays open.
+        if (haveTotal && got >= (size_t)total) { done = true; break; }
         if (!http.connected()) { done = true; break; }
+        // Timeout if no data arrives for too long (HTTP read timeout should catch this,
+        // but a watchdog-free loop needs its own guard).
+        if (millis() - idleSince > 60000UL) { failReason = "Download timeout"; break; }
         delay(1); continue;
       }
+      idleSince = millis();
       int n = stream->readBytes(buf, min(sizeof buf, (size_t)stream->available()));
       if (n <= 0) { done = true; break; }
       mbedtls_sha256_update(&sha, buf, n);
@@ -266,6 +323,7 @@ bool performOTA(const String& url, const String& version, const String& expected
       if (pct != lastPct && pct >= 0) { lastPct = pct; drawOtaProgress(total, got); }
       if (haveTotal && got >= (size_t)total) done = true;
     }
+    if (dev) Serial.printf("[OTA] attempt %d got=%d total=%d\n", attempt, (int)got, total);
     http.end();
 
     if (haveTotal && got < (size_t)total) { Update.abort(); failReason = "Download failed"; continue; }   // dropped mid-stream -> retry
@@ -274,8 +332,9 @@ bool performOTA(const String& url, const String& version, const String& expected
     mbedtls_sha256_finish(&sha, hash);
     mbedtls_sha256_free(&sha);
 
-    // Enforce the digest only when GitHub supplied one; if the response carried no
-    // digest we skip the check so a digest-less asset can't brick the update.
+    // Enforce a supplied digest for every transport. Local development images
+    // intentionally have no digest; release assets must provide one when GitHub
+    // supplies it.
     if (!expectedSha256.isEmpty() && !sha256Matches(hash, expectedSha256)) {
       Update.abort(); failReason = "Checksum mismatch"; continue;   // corrupted transfer -> retry
     }

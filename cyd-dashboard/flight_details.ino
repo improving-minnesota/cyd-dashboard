@@ -25,7 +25,7 @@ static const Airport kAirports[] = {
   {"KCLT", "Charlotte"},       {"KSTL", "St Louis"},    {"KPIT", "Pittsburgh"},
   {"KIND", "Indianapolis"},    {"KCLE", "Cleveland"},   {"KCVG", "Cincinnati"},
   {"KMEM", "Memphis"},         {"KBNA", "Nashville"},   {"KJAX", "Jacksonville"},
-  {"KCLE", "Cleveland"},       {"KRDU", "Raleigh"},     {"KABQ", "Albuquerque"},
+  {"KRDU", "Raleigh"},          {"KABQ", "Albuquerque"},
   {"KSLC", "Salt Lake City"},  {"KPDX", "Portland"},    {"KSAN", "San Diego"},
   {"KDCA", "Washington"},      {"KIAD", "Washington"},  {"KBWI", "Baltimore"},
 };
@@ -102,26 +102,26 @@ static const Airline kAirlines[] = {
 };
 static const int kNumAirlines = sizeof(kAirlines) / sizeof(kAirlines[0]);
 
-// Extract the 3-letter ICAO airline code from a callsign (e.g. "AAL1234" -> "AAL").
-String airlineCode(const char* callsign) {
-  if (!callsign || callsign[0] == 0) return "";
-  String c = callsign;
-  c.toUpperCase();
-  return c.substring(0, 3);
-}
-
 // Returns true if the airline is known, filling `name` and `color`.
 bool airlineInfo(const char* callsign, String& name, uint16_t& color) {
-  String code = airlineCode(callsign);
+  if (!callsign || callsign[0] == 0) return false;
+  char code[4] = {};
+  for (int i = 0; i < 3 && callsign[i]; i++) {
+    code[i] = (char)toupper((unsigned char)callsign[i]);
+  }
   for (int i = 0; i < kNumAirlines; i++) {
-    if (code == kAirlines[i].code) { name = kAirlines[i].name; color = kAirlines[i].color; return true; }
+    if (strncmp(code, kAirlines[i].code, sizeof code - 1) == 0) {
+      name = kAirlines[i].name;
+      color = kAirlines[i].color;
+      return true;
+    }
   }
   return false;
 }
 
 // findAirlineLogo() is defined in logos.ino: it loads logos from the dedicated
-// LittleFS "logos" partition at runtime (bounded LRU cache, PSRAM-first), and
-// is declared at the top of cyd-dashboard.ino.
+// LittleFS "logos" partition at runtime (single reusable buffer, PSRAM-first),
+// and is declared at the top of cyd-dashboard.ino.
 
 // Top US airports by 2023 enplanements (ICAO codes), from FAA commercial
 // service enplanement data. KDFW is included (it is a major hub); flights to or
@@ -217,21 +217,35 @@ void fetchRoute(const char* icao24) {
   int code = httpsRequestRetry(http, sec, url.c_str(), HTTPS_METHOD_GET, "", routeHdrs, false);
   String rem = http.header("X-Rate-Limit-Remaining");
   if (rem.length()) g_flightsCredits = rem.toInt();
+  bool parsedOk = false;
   if (code == HTTP_CODE_OK) {
-    JsonDocument doc;
-    if (!deserializeJson(doc, http.getStream())) {
-      JsonArray arr = doc.as<JsonArray>();
-      if (arr.size() > 0) {
-        const char* dep = arr[0]["estDepartureAirport"] | "";
-        const char* dst = arr[0]["estArrivalAirport"]   | "";
-        g_routeOrigin = dep;
-        g_routeDest   = dst;
+    HttpBodyStream body(http);
+    BoundedAllocator routeAlloc(2048);
+    JsonDocument doc(&routeAlloc);
+    int first = body.read();
+    while (first == ' ' || first == '\r' || first == '\n' || first == '\t') first = body.read();
+    if (first == '[') {
+      // The route endpoint returns an array; only its first object is needed.
+      if (nextElement(body, doc)) {
+        JsonObject flight = doc.as<JsonObject>();
+        if (!flight.isNull()) {
+          const char* dep = flight["estDepartureAirport"] | "";
+          const char* dst = flight["estArrivalAirport"]   | "";
+          g_routeOrigin = dep;
+          g_routeDest   = dst;
+        }
       }
+      parsedOk = body.drain();
+    } else if (first == 'n') {
+      parsedOk = body.drain();  // valid empty/null response
     }
   }
   http.end();
-  // Don't cache a transport failure as "done", so it retries next poll.
-  if (code >= 0) g_routeFetched = true;
+  // Cache only a complete, structurally valid response.
+  if (code >= 0 && parsedOk) g_routeFetched = true;
+  if (code == HTTP_CODE_OK) {
+    if (isDevBuild()) Serial.printf("[net] route ok origin=%s dest=%s free=%u\n", g_routeOrigin.c_str(), g_routeDest.c_str(), (unsigned)ESP.getFreeHeap());
+  }
   g_routeBusy = false;
 }
 
@@ -244,9 +258,11 @@ void fetchRoute(const char* icao24) {
 // = 0, so no track is drawn and dead-reckoning falls back to heading/speed.
 void fetchTrack(const char* icao24) {
   g_trackBusy = true;
+  portENTER_CRITICAL(&g_trackMux);
   g_trackCount = 0;
   g_trackBearingDeg = -1.0f;
-  if (WiFi.status() != WL_CONNECTED) { g_trackFetched = true; g_trackBusy = false; return; }
+  portEXIT_CRITICAL(&g_trackMux);
+  if (WiFi.status() != WL_CONNECTED) { g_trackFetched = false; g_trackBusy = false; return; }
   time_t now = time(nullptr);
   String url = String("https://opensky-network.org/api/tracks/all?icao24=") + icao24
                + "&time=" + String((long)now);
@@ -261,43 +277,73 @@ void fetchTrack(const char* icao24) {
   int code = httpsRequestRetry(http, sec, url.c_str(), HTTPS_METHOD_GET, "", trackHdrs, false);
   String rem = http.header("X-Rate-Limit-Remaining");
   if (rem.length()) g_tracksCredits = rem.toInt();
+  bool parsedOk = false;
   if (code == HTTP_CODE_OK) {
-    BoundedAllocator trackAlloc(32768);
-    JsonDocument doc(&trackAlloc);
-    if (!deserializeJson(doc, http.getStream())) {
-      JsonArray path = doc["path"].as<JsonArray>();
-      if (!path.isNull()) {
-        float maxRange = max(g_radiusMi * 2.0f, 8.0f);
-        float cosLat = cosf(g_lat * PI / 180.0f);
-        bool haveBearing = false;
-        float bearing = -1.0f;
-        for (JsonVariant v : path) {
-          if (!v.is<JsonArray>()) continue;
-          JsonArray pt = v.as<JsonArray>();
-          if (pt.size() < 5) continue;
-          float lat = pt[1].as<float>();
-          float lon = pt[2].as<float>();
-          float dlat = lat - g_lat;
-          float dlon = (lon - g_lon) * cosLat;
-          float dxMi = dlon * 69.0f;
-          float dyMi = dlat * 69.0f;
-          if (sqrtf(dxMi * dxMi + dyMi * dyMi) <= maxRange) {
-            if (g_trackCount < MAX_TRACK_PTS) {
-              g_trackPts[g_trackCount].dxMi = dxMi;
-              g_trackPts[g_trackCount].dyMi = dyMi;
-              g_trackCount++;
-            }
-            // Keep the newest near point's true-track as the follow bearing.
-            if (!pt[4].isNull()) { bearing = pt[4].as<float>(); haveBearing = true; }
-          }
+    HttpBodyStream body(http);
+    BoundedAllocator ptAlloc(1024);
+    JsonDocument pt(&ptAlloc);
+    if (!seekArray(body, "\"path\"")) {
+      if (body.peek() == 'n' && body.drain()) {
+        parsedOk = true;  // OpenSky uses path:null for a valid empty track.
+        if (isDevBuild()) Serial.printf("[net] track path null len=%u\n", (unsigned)body.bytesRead());
+      } else {
+        if (isDevBuild()) Serial.printf("[net] track json no path len=%u\n", (unsigned)body.bytesRead());
+      }
+      portENTER_CRITICAL(&g_trackMux);
+      g_trackCount = 0;
+      portEXIT_CRITICAL(&g_trackMux);
+    } else {
+      const float maxRange = max(g_radiusMi * 2.0f, 8.0f);
+      const float cosLat = cosf(g_lat * PI / 180.0f);
+      TrackPoint ring[MAX_TRACK_PTS];
+      int written = 0;
+      int kept = 0;
+      float bearing = -1.0f;
+      bool haveBearing = false;
+      for (;;) {
+        if (!nextElement(body, pt)) break;
+        if (!pt.is<JsonArray>() || pt.size() < 5) continue;
+        float lat = pt[1].as<float>();
+        float lon = pt[2].as<float>();
+        float dlat = lat - g_lat;
+        float dlon = (lon - g_lon) * cosLat;
+        float dxMi = dlon * 69.0f;
+        float dyMi = dlat * 69.0f;
+        if (sqrtf(dxMi * dxMi + dyMi * dyMi) > maxRange) continue;
+        ring[written].dxMi = dxMi;
+        ring[written].dyMi = dyMi;
+        written = (written + 1) % MAX_TRACK_PTS;
+        if (kept < MAX_TRACK_PTS) kept++;
+        // Keep the newest near point's true-track as the follow bearing.
+        if (!pt[4].isNull()) { bearing = pt[4].as<float>(); haveBearing = true; }
+      }
+      bool bodyComplete = body.drain();
+      if (bodyComplete) {
+        int start = (written - kept + MAX_TRACK_PTS) % MAX_TRACK_PTS;
+        portENTER_CRITICAL(&g_trackMux);
+        for (int i = 0; i < kept; i++) {
+          g_trackPts[i] = ring[(start + i) % MAX_TRACK_PTS];
         }
         if (haveBearing) g_trackBearingDeg = bearing;
+        g_trackCount = kept;
+        portEXIT_CRITICAL(&g_trackMux);
+        parsedOk = true;
+      } else {
+        portENTER_CRITICAL(&g_trackMux);
+        g_trackCount = 0;
+        portEXIT_CRITICAL(&g_trackMux);
+        if (isDevBuild()) Serial.printf("[net] track json short len=%u/%ld%s\n", (unsigned)body.bytesRead(), body.contentLength(), body.stalled() ? " stalled" : "");
+        http.end();
+        g_trackBusy = false;
+        return;  // don’t cache a truncated body as "no track" so the next poll retries
       }
     }
+    if (isDevBuild()) Serial.printf("[net] track ok free=%u pts=%d\n", (unsigned)ESP.getFreeHeap(), (int)g_trackCount);
   }
   http.end();
-  // Don't cache a transport failure as "done", so it retries next poll.
-  if (code >= 0) g_trackFetched = true;
+  // Cache only a complete, structurally valid response. Transport, parse, and
+  // framing failures must retry on a later poll.
+  if (code >= 0 && parsedOk) g_trackFetched = true;
   g_trackBusy = false;
 }
 

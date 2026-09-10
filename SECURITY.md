@@ -36,10 +36,12 @@ stored credentials.
 Firmware is delivered over HTTPS from this repository's GitHub releases and is
 authenticated at two independent layers:
 
-- **Transport (TLS certificate verification).** Both the release-metadata
-  request and the firmware download are verified against a pinned root-CA
-  bundle embedded in the firmware (`kGithubRootCAs` in `ota.ino`), covering
-  github.com/api.github.com and objects.githubusercontent.com. The device never
+- **Transport (TLS certificate verification).** The release-metadata
+  request (`api.github.com`) is verified against the `kUserTrustRootCAs`
+  bundle (Sectigo / USERTrust ECC), and the firmware download
+  (`objects.githubusercontent.com`) is verified against the `kIsrgRootCAs`
+  bundle (ISRG / Let's Encrypt). Both bundles are embedded in
+  `cyd-dashboard.ino` and selected by `trustStoreForUrl()`. The device never
   retries an unverified connection after a certificate-validation failure, so a
   man-in-the-middle cannot force it to skip verification.
 - **Content integrity (SHA-256).** The streamed firmware image is hashed and
@@ -67,8 +69,10 @@ The non-OTA HTTPS calls — OpenSky (token exchange, flight data, and flight
 history), the weather provider (open-meteo), the address geocoder (Nominatim),
 and the Govee pool-temp API — are all TLS-verified against root-CA bundles
 embedded in the firmware. OpenSky, open-meteo, and Nominatim are Let's Encrypt
-signed and use the shared `kISRGRootCAs` bundle (ISRG Root X1 + X2); Govee is
-Amazon-signed and uses `kAmazonRootCA1`. Unlike
+signed and use the shared `kIsrgRootCAs` bundle (ISRG Root X1 + X2 and the
+Let's Encrypt intermediate chain); Govee is Amazon-signed and uses
+`kAmazonRootCAs`. There is no fallback bundle; an unmapped host fails TLS
+setup rather than loading a bundle that may not cover its chain. Unlike
 the OTA path there is **no** `setInsecure()` fallback, so a certificate
 validation failure is never downgraded to an insecure connection. Transient
 transport/TLS failures are retried a few times (`httpsRequestRetry`) before
