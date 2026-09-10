@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.7](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.6...v1.9.7) (2026-09-10)
+
+
+### Bug Fixes
+
+* show 0 aircraft status after successful OpenSky states:null response ([8ea7665](https://github.com/improving-minnesota/cyd-dashboard/commit/8ea7665b29aee11b891dc61c64fef0e7f69d8ab1))
+* show 0 aircraft status after successful OpenSky states:null response ([725fdb4](https://github.com/improving-minnesota/cyd-dashboard/commit/725fdb419896b8ca6bc797d17099eeca6ad094f1))
+
 ## [1.9.6](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.5...v1.9.6) (2026-09-10)
 
 
