@@ -172,11 +172,23 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > OTA_FILE=cyd-dashboard.ino.bin
 > OTA_GO
 > ```
+>
+> **Avoid a reset before sending the command.** Many serial terminals and
+> programming tools pulse DTR/RTS on open, which resets the ESP32 into a fresh
+> boot. When the OTA command is captured in the boot provisioning window, the
+> OTA task can start before the WiFi link is ready and `HTTPClient` returns
+> `code=-1` (connection failed). Use a terminal that does **not** reset on open
+> — on macOS `screen /dev/cu.usbserial-XXXX 115200` worked without resetting
+> the board, while `pyserial` and `arduino-cli` did. Sending the command once
+> the device has already connected to WiFi is the most reliable approach.
+>
 > Commands are sent over the USB serial console at **115200 baud**. `OTA_IP`
 > persists to NVS (`prefs.putString("otahost", ...)`), so on later reboots only
 > `OTA_GO` is needed. Successful scheduling logs `CMD: OTA scheduled from <url>`;
 > the download runs on a dedicated OTA task (`otaTaskEntry`) and the device
-> reboots when done (`[OTA] attempt 1 got=...` then `SW_CPU_RESET`).
+> reboots when done (`[OTA] attempt 1 got=...` then `SW_CPU_RESET`). Newer
+> builds also wait up to 20 s for `WL_CONNECTED` inside `performOTA()` so an
+> at-boot trigger is less likely to race the link.
 >
 > **Monitoring the serial console:** the board logs at 115200 baud. Use the
 > actual USB-serial port the board is on; on macOS this is typically
@@ -605,7 +617,10 @@ pool already needs.
 WiFi/OpenSky/Govee credentials are **not compiled into the firmware**. Put them
 in the git-ignored `cyd-dashboard/.env` file (`WIFI_SSID`, `WIFI_PASSWORD`,
 `OPENSKY_CLIENT_ID`, `OPENSKY_CLIENT_SECRET`, `GOVEE_KEY`), then stream them
-into the device's NVS over USB serial:
+into the device's NVS over USB serial. Network addressing can also be
+provisioned this way (`WIFI_MODE=static`, `WIFI_IP`, `WIFI_SUBNET`,
+`WIFI_GATEWAY`, `WIFI_DNS`, `WIFI_HOSTNAME`) — the same values as **Settings →
+Network → IP setup** on the device:
 
 ```bash
 cyd-dashboard/.venv/bin/python cyd-dashboard/provision_config.py --port /dev/cu.usbserial-XXXX
@@ -704,6 +719,9 @@ Settings are stored in NVS under the `"flight"` namespace (see `setup()` in
 | `timer` | bool | `false` | Show the dashboard countdown/timer bar (Flight Tracker → Enable timer). |
 | `clkcol` | uint32 | `TFT_BLUE` | Dashboard clock-bar color (General → Clock Color). |
 | `homeap` | string | `""` | Home airport (ICAO). Determines incoming/outgoing for the LED flash (red = departing, green = arriving); falls back to `KDFW` when empty. |
+| `ipdhcp` | bool | `true` | Network addressing mode (Network → IP setup). `true` = DHCP; `false` = static using the keys below. |
+| `ipaddr` / `ipmask` / `ipgw` / `ipdns` | string | `""` | Static IP, subnet mask, gateway, DNS. Applied via `WiFi.config()`; blank DNS falls back to the gateway, and an incomplete/invalid set falls back to DHCP. |
+| `hostname` | string | `"cyd-dashboard"` | STA hostname via `WiFi.setHostname()`; applies in both DHCP and static modes. |
 
 `prefs.clear()` in the Reset handler removes **all** keys for both "All" and
 "Settings" resets (the "Settings" reset only re-writes the four touch-

@@ -22,12 +22,12 @@ void drawSettings() {
   tft.print("Back");
 
   // 2-column grid, alphabetical: About, Calibrate Touch, Flight Tracker,
-  // General, Help, Location, Pool Temp, Sleep Mode, Reset, WiFi. Reset is kept
-  // at the bottom-left cell and drawn red (it is destructive). Touch handling
-  // in handleTouch() (cyd-dashboard.ino) mirrors this layout.
+  // General, Help, Location, Network, Pool Temp, Reset, Sleep Mode. Reset is
+  // kept at the bottom-left cell and drawn red (it is destructive). Touch
+  // handling in handleTouch() (cyd-dashboard.ino) mirrors this layout.
   const char* items[] = { "About", "Calibrate Touch", "Flight Tracker", "General",
-                          "Help", "Location", "Pool Temp", "Sleep Mode",
-                          "Reset", "WiFi" };
+                          "Help", "Location", "Network", "Pool Temp",
+                          "Reset", "Sleep Mode" };
   const int n = 10, rowH = 34, step = 38;
   const int colX[2] = { 10, 164 };   // left / right column x
   const int colW = 146;              // button width
@@ -219,7 +219,8 @@ static const char* const kHelpLines[] = {
   "    General -> Calibrate",
   "    Touch, or hold the",
   "    screen 10 sec.",
-  "  WiFi: Settings -> WiFi.",
+  "  Network: Settings ->",
+  "    Network.",
   "Weather and flights work",
   "out of the box. Adding your",
   "OpenSky credentials raises",
@@ -258,7 +259,10 @@ static const char* const kHelpLines[] = {
   "   IP guess on first boot.",
   "   Search Address keeps your",
   "   last search so you can fix it.",
-  "WiFi: your network + API keys.",
+  "Network: WiFi network plus",
+  "   IP setup - DHCP or a",
+  "   static IP, mask, gateway,",
+  "   DNS and hostname.",
   "Flight Tracker: on/off, units",
   "   (imperial), radius 3.5 mi,",
   "   ceiling 15000 ft, poll 60s,",
@@ -726,11 +730,14 @@ void drawReset() {
       tft.setCursor(10, ty); tft.print("Settings: settings and"); ty += 12;
       tft.setCursor(10, ty); tft.print("credentials will be cleared."); ty += 12;
       tft.setCursor(10, ty); tft.print("The device will reboot."); ty += 12;
-    } else {                            // Graph Data: history only
+    } else if (g_resetConfirm == 3) {   // Graph Data: history only
       tft.setCursor(10, ty); tft.print("Graph Data: pool &"); ty += 12;
       tft.setCursor(10, ty); tft.print("weather temperature history"); ty += 12;
       tft.setCursor(10, ty); tft.print("will be deleted."); ty += 12;
       tft.setCursor(10, ty); tft.print("The device will reboot."); ty += 12;
+    } else {                            // Restart: no data change
+      tft.setCursor(10, ty); tft.print("Restart the device?"); ty += 12;
+      tft.setCursor(10, ty); tft.print("No settings will be cleared."); ty += 12;
     }
     tft.setCursor(10, ty);
     tft.setTextColor(TFT_RED, TFT_BLACK);
@@ -766,12 +773,11 @@ void drawReset() {
   tft.setCursor(10, ly); tft.print("  credentials."); ly += 14;
   tft.setCursor(10, ly); tft.print("Cancel: back without"); ly += 10;
   tft.setCursor(10, ly); tft.print("  changing anything."); ly += 14;
-  tft.setTextColor(TFT_RED, TFT_BLACK);
-  tft.setCursor(10, ly); tft.print("Selected option"); ly += 10;
-  tft.setCursor(10, ly); tft.print("reboots the device.");
+  tft.setCursor(10, ly); tft.print("Restart: reboots the"); ly += 10;
+  tft.setCursor(10, ly); tft.print("  device cleanly."); ly += 14;
 
   // Right column: Factory Reset / Graph Data / Settings stacked top-right and
-  // spaced apart; Cancel alone at bottom-right.
+  // spaced apart.  Bottom row has Restart (left) and Cancel (right).
   tft.setTextFont(2);
   tft.fillRoundRect(172, 36, 140, 30, 6, TFT_MAROON);
   tft.setTextColor(TFT_WHITE, TFT_MAROON);
@@ -785,9 +791,13 @@ void drawReset() {
   tft.setTextColor(TFT_WHITE, TFT_ORANGE);
   tft.drawCentreString("Settings", 242, 131, 2);
 
-  tft.fillRoundRect(172, 198, 140, 32, 6, TFT_NAVY);
+  tft.fillRoundRect(10, 210, 140, 26, 6, TFT_DARKGREEN);
+  tft.setTextColor(TFT_WHITE, TFT_DARKGREEN);
+  tft.drawCentreString("Restart", 80, 216, 2);
+
+  tft.fillRoundRect(172, 210, 140, 26, 6, TFT_NAVY);
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.drawCentreString("Cancel", 242, 206, 2);
+  tft.drawCentreString("Cancel", 242, 216, 2);
 }
 
 // Sleep Mode settings screen
