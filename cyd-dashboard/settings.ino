@@ -145,16 +145,17 @@ void handleAboutTouch(uint16_t x, uint16_t y) {
 static const char* const kHelpLines[] = {
   "CYD Dashboard",
   "---------------",
-  "Built for the Cheap Yellow",
-  "Display (CYD): the",
-  "ESP32-2432S028R board with a",
-  "built-in 2.8\" 320x240 color",
-  "touchscreen. It shows the",
-  "time, weather, nearby flights,",
-  "and Govee pool temp over",
-  "WiFi. Made for this board",
-  "only (TFT/touch wiring is",
-  "CYD-specific).",
+  "ESP32 touchscreen dashboard",
+  "for the Cheap Yellow Display",
+  "(CYD): the ESP32-2432S028R",
+  "board with a built-in 2.8\"",
+  "320x240 color touchscreen.",
+  "Live weather, flight tracker,",
+  "and Govee pool temp monitor.",
+  "Once set up, it runs on its",
+  "own over WiFi - no computer",
+  "needed. Made for this board",
+  "only (wiring is CYD-specific)."
   "",
   "FEATURES",
   "Clock: big time and date.",
@@ -271,36 +272,34 @@ static const char* const kHelpLines[] = {
   "Calibrate Touch: if taps land",
   "   in the wrong spot, rerun it.",
   "About: version, author, update.",
-  "Reset: All (settings, files,",
-  "   pool data, calibration) or",
-  "   Settings (settings only).",
-  "   Both reboot; Cancel keeps",
-  "   everything. All re-calibrates",
-  "   on the next boot.",
+  "Reset: Factory Reset clears",
+  "   settings, files, airline",
+  "   logos & touch calibration.",
+  "   Settings clears settings &",
+  "   credentials. Graph Data",
+  "   clears pool & weather temp",
+  "   history. All three reboot;",
+  "   Cancel keeps everything.",
   "",
   "TROUBLESHOOTING",
-  "Screen taps in the wrong spot?",
-  "Press and hold anywhere on the",
-  "screen for 10 seconds to",
+  "Screen not accurate? Press and",
+  "hold anywhere 10 sec to",
   "recalibrate touch.",
   "",
   "Border colors: red = critical",
-  "issue; yellow = running",
-  "OpenSky anonymously (not an",
-  "error - flights still work).",
+  "(no WiFi, bad OpenSky creds,",
+  "radar credits exhausted, pool",
+  "unavailable); yellow = OpenSky",
+  "anonymous (flights still work).",
   "",
   "UPDATES",
-  "The device can update itself",
-  "over WiFi from GitHub.",
-  "General -> Auto-Update: on by",
-  "default for release builds;",
-  "checks once per day and",
-  "installs new firmware.",
-  "About -> shows if a newer",
-  "version is available; tap",
-  "Install to update now.",
+  "Auto-Update (General) checks",
+  "once per day for release",
+  "builds. About shows a newer",
+  "version and Install updates now.",
   "Do not power off during an",
-  "update.",
+  "update. A failed update rolls",
+  "back to the previous version.",
 };
 static const int kNumHelpLines = sizeof(kHelpLines) / sizeof(kHelpLines[0]);
 
@@ -716,24 +715,21 @@ void drawReset() {
     tft.setTextFont(1);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     int ty = 96;
-    if (g_resetConfirm == 1) {          // All: full factory reset incl. calibration
-      tft.setCursor(10, ty); tft.print("All: settings, files, and"); ty += 12;
-      tft.setCursor(10, ty); tft.print("credentials will be cleared."); ty += 12;
-      tft.setCursor(10, ty); tft.print("Touch calibration will be cleared."); ty += 12;
-      tft.setCursor(10, ty); tft.print("Pool & weather history deleted."); ty += 12;
+    if (g_resetConfirm == 1) {          // Factory Reset: full wipe incl. calibration
+      tft.setCursor(10, ty); tft.print("Factory Reset: settings,"); ty += 12;
+      tft.setCursor(10, ty); tft.print("files, credentials,"); ty += 12;
+      tft.setCursor(10, ty); tft.print("logos, calibration, and"); ty += 12;
+      tft.setCursor(10, ty); tft.print("pool/weather history"); ty += 12;
+      tft.setCursor(10, ty); tft.print("will be cleared."); ty += 12;
       tft.setCursor(10, ty); tft.print("The device will reboot."); ty += 12;
-    } else if (g_resetConfirm == 2) {   // Settings: keeps calibration so it stays usable
+    } else if (g_resetConfirm == 2) {   // Settings: settings & credentials only
       tft.setCursor(10, ty); tft.print("Settings: settings and"); ty += 12;
       tft.setCursor(10, ty); tft.print("credentials will be cleared."); ty += 12;
-      tft.setCursor(10, ty); tft.print("Pool & weather history is kept."); ty += 12;
-      tft.setCursor(10, ty); tft.print("Touch calibration is kept."); ty += 12;
       tft.setCursor(10, ty); tft.print("The device will reboot."); ty += 12;
-    } else {                            // Data: graph history only
-      tft.setCursor(10, ty); tft.print("Data: pool & weather"); ty += 12;
-      tft.setCursor(10, ty); tft.print("temperature history"); ty += 12;
+    } else {                            // Graph Data: history only
+      tft.setCursor(10, ty); tft.print("Graph Data: pool &"); ty += 12;
+      tft.setCursor(10, ty); tft.print("weather temperature history"); ty += 12;
       tft.setCursor(10, ty); tft.print("will be deleted."); ty += 12;
-      tft.setCursor(10, ty); tft.print("Settings, credentials, and"); ty += 12;
-      tft.setCursor(10, ty); tft.print("touch calibration are kept."); ty += 12;
       tft.setCursor(10, ty); tft.print("The device will reboot."); ty += 12;
     }
     tft.setCursor(10, ty);
@@ -752,49 +748,46 @@ void drawReset() {
     return;
   }
 
-  // Choose what to reset.
+  // Choose what to reset: descriptions on the left, action buttons stacked on
+  // the right so the destructive options can't be confused with Cancel.
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextFont(2);
-  tft.setCursor(10, 52);
+  tft.setCursor(10, 40);
   tft.print("Choose what to reset:");
   tft.setTextFont(1);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  int ly = 70;
-  tft.setCursor(10, ly); tft.print("All: settings + files"); ly += 10;
-  tft.setCursor(10, ly); tft.print("     (incl. pool & weather history)."); ly += 16;
+  int ly = 64;
+  tft.setCursor(10, ly); tft.print("Factory Reset: all"); ly += 10;
+  tft.setCursor(10, ly); tft.print("  settings, files,"); ly += 10;
+  tft.setCursor(10, ly); tft.print("  logos & touch cal."); ly += 14;
+  tft.setCursor(10, ly); tft.print("Graph Data: pool &"); ly += 10;
+  tft.setCursor(10, ly); tft.print("  weather history."); ly += 14;
   tft.setCursor(10, ly); tft.print("Settings: settings &"); ly += 10;
-  tft.setCursor(10, ly); tft.print("     credentials only."); ly += 16;
-  tft.setCursor(10, ly); tft.print("Data: pool & weather temp"); ly += 10;
-  tft.setCursor(10, ly); tft.print("     history only."); ly += 16;
-  tft.setCursor(10, ly); tft.print("Cancel: go back without"); ly += 10;
-  tft.setCursor(10, ly); tft.print("     changing anything."); ly += 16;
-  tft.setCursor(10, ly);
+  tft.setCursor(10, ly); tft.print("  credentials."); ly += 14;
+  tft.setCursor(10, ly); tft.print("Cancel: back without"); ly += 10;
+  tft.setCursor(10, ly); tft.print("  changing anything."); ly += 14;
   tft.setTextColor(TFT_RED, TFT_BLACK);
-  tft.print("Selected option reboots the device.");
+  tft.setCursor(10, ly); tft.print("Selected option"); ly += 10;
+  tft.setCursor(10, ly); tft.print("reboots the device.");
 
-  // 2x2 grid: All / Settings on top, Data / Cancel on bottom.
-  // Top row: All, Settings.
-  tft.fillRoundRect(8, 184, 148, 28, 6, TFT_MAROON);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
+  // Right column: Factory Reset / Graph Data / Settings stacked top-right and
+  // spaced apart; Cancel alone at bottom-right.
   tft.setTextFont(2);
-  tft.setCursor(66, 191);
-  tft.print("All");
+  tft.fillRoundRect(172, 36, 140, 30, 6, TFT_MAROON);
+  tft.setTextColor(TFT_WHITE, TFT_MAROON);
+  tft.drawCentreString("Factory Reset", 242, 43, 2);
 
-  tft.fillRoundRect(164, 184, 148, 28, 6, TFT_ORANGE);
-  tft.setTextColor(TFT_WHITE, TFT_ORANGE);
-  tft.setCursor(196, 191);
-  tft.print("Settings");
-
-  // Bottom row: Data, Cancel.
-  tft.fillRoundRect(8, 214, 148, 28, 6, TFT_OLIVE);
+  tft.fillRoundRect(172, 80, 140, 30, 6, TFT_OLIVE);
   tft.setTextColor(TFT_WHITE, TFT_OLIVE);
-  tft.setCursor(62, 221);
-  tft.print("Data");
+  tft.drawCentreString("Graph Data", 242, 87, 2);
 
-  tft.fillRoundRect(164, 214, 148, 28, 6, TFT_NAVY);
+  tft.fillRoundRect(172, 124, 140, 30, 6, TFT_ORANGE);
+  tft.setTextColor(TFT_WHITE, TFT_ORANGE);
+  tft.drawCentreString("Settings", 242, 131, 2);
+
+  tft.fillRoundRect(172, 198, 140, 32, 6, TFT_NAVY);
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.setCursor(202, 221);
-  tft.print("Cancel");
+  tft.drawCentreString("Cancel", 242, 206, 2);
 }
 
 // Sleep Mode settings screen

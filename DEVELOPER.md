@@ -139,13 +139,20 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 >   it the commands are ignored (it also enables the ~4s `KEY=VALUE`
 >   provisioning window at boot, `PROV: listen 4s for KEY=VALUE`).
 >
-> A typical dev build and flash (`build/ota` is git-ignored):
+> A typical dev build and first flash (`build/ota` is git-ignored):
 > ```bash
 > arduino-cli compile --clean --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
 >   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(cat version.txt)-dev -DBUILD_NUM=1 -DENABLE_LOCAL_OTA=1 -DENABLE_SERIAL_PROVISION=1" \
 >   --output-dir build/ota cyd-dashboard
 > arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 --input-dir build/ota cyd-dashboard
 > ```
+>
+> **Iteration: after the first USB flash, use triggered local OTA for every
+> later dev update.** The USB flash above is only needed to get a dev build
+> with these flags onto the device. Once it's running, rebuild into the same
+> `build/ota` and trigger a local OTA (below) — it's much faster than serial
+> flashing and keeps the USB port free for a monitor. Keep the three flags on
+> every iteration so each new image can still accept the next OTA trigger.
 >
 > Then serve the `.bin` over HTTP from a machine the board can reach. The
 > simplest option is a static server at the build directory's root, then pass
@@ -170,6 +177,26 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > `OTA_GO` is needed. Successful scheduling logs `CMD: OTA scheduled from <url>`;
 > the download runs on a dedicated OTA task (`otaTaskEntry`) and the device
 > reboots when done (`[OTA] attempt 1 got=...` then `SW_CPU_RESET`).
+>
+> **Monitoring the serial console:** the board logs at 115200 baud. Use the
+> actual USB-serial port the board is on; on macOS this is typically
+> `/dev/cu.usbserial-XXXX`, on Linux `/dev/ttyUSB0` or `/dev/ttyACM0`:
+> ```bash
+> arduino-cli monitor -p /dev/cu.usbserial-XXXX --config baudrate=115200
+> ```
+> Or use any 115200 terminal such as `screen /dev/cu.usbserial-XXXX 115200`,
+> `picocom -b 115200 /dev/cu.usbserial-XXXX`, or `minicom -D /dev/cu.usbserial-XXXX -b 115200`.
+> Only one process can hold the port at a time, so close the monitor before
+> `arduino-cli upload` or sending an `OTA_*` command.
+>
+> **Once a dev build with `ENABLE_LOCAL_OTA` + `ENABLE_SERIAL_PROVISION` is
+> already on the device, use local OTA instead of `arduino-cli upload`.** It is
+> much faster (the image downloads over Wi-Fi in seconds instead of ~80 s of
+> serial flashing at 115200 baud), it does not need the USB port free (so a
+> serial monitor can keep logging), and the serial commands above stay usable —
+> only the *first* dev flash after changing these flags needs to go over USB.
+> Keep the three flags on every iteration so each new image can still accept the
+> next OTA trigger.
 
 > **Important:** the display pinout is configured in the sketch's own
 > `cyd-dashboard/tft_setup.h`. TFT_eSPI auto-detects a `tft_setup.h` in the
