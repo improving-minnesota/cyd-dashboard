@@ -139,18 +139,18 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 >   it the commands are ignored (it also enables the ~4s `KEY=VALUE`
 >   provisioning window at boot, `PROV: listen 4s for KEY=VALUE`).
 >
-> A typical dev build and first flash (`build/ota` is git-ignored):
+> A typical dev build and first flash (`build/release` is git-ignored):
 > ```bash
 > arduino-cli compile --clean --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
 >   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(cat version.txt)-dev -DBUILD_NUM=1 -DENABLE_LOCAL_OTA=1 -DENABLE_SERIAL_PROVISION=1" \
->   --output-dir build/ota cyd-dashboard
-> arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 --input-dir build/ota cyd-dashboard
+>   --output-dir build/release cyd-dashboard
+> arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 --input-dir build/release cyd-dashboard
 > ```
 >
 > **Iteration: after the first USB flash, use triggered local OTA for every
 > later dev update.** The USB flash above is only needed to get a dev build
 > with these flags onto the device. Once it's running, rebuild into the same
-> `build/ota` and trigger a local OTA (below) — it's much faster than serial
+> `build/release` and trigger a local OTA (below) — it's much faster than serial
 > flashing and keeps the USB port free for a monitor. Keep the three flags on
 > every iteration so each new image can still accept the next OTA trigger.
 >
@@ -158,12 +158,12 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > simplest option is a static server at the build directory's root, then pass
 > the full URL to the device:
 > ```bash
-> python3 -m http.server 8080 --directory build/ota
+> python3 -m http.server 8080 --directory build/release
 > ```
 > ```text
 > OTA_URL=http://<host-ip>:8080/cyd-dashboard.ino.bin
 > ```
-> Alternatively, a server that maps `GET /firmware?file=<name>` to `build/ota/<name>`
+> Alternatively, a server that maps `GET /firmware?file=<name>` to `build/release/<name>`
 > on port 8080 supports the `OTA_IP`/`OTA_FILE`/`OTA_GO` form (see
 > `buildOtaUrl` in `wifi_config.ino`), which is convenient when the host IP
 > rarely changes:
