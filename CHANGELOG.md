@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.10.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.7...v1.10.0) (2026-09-10)
+
+
+### Features
+
+* add Data reset option for pool and weather temperature history ([d10451b](https://github.com/improving-minnesota/cyd-dashboard/commit/d10451b22b7011534cf2ce0ff4f57dc2b3cf21f1))
+* add Data reset option for pool and weather temperature history ([1aa30c8](https://github.com/improving-minnesota/cyd-dashboard/commit/1aa30c871b035c9549148da9eee4a49ee817322f))
+* rename reset options, add Graph Data, wipe logos, sync docs ([6d15be5](https://github.com/improving-minnesota/cyd-dashboard/commit/6d15be565f3e726a5286832395113a045872862c))
+
+
+### Bug Fixes
+
+* detect version.txt bumps via release existence, not head_commit.modified ([16662ff](https://github.com/improving-minnesota/cyd-dashboard/commit/16662ff58aef33c7ab306072e679a118e10fd838))
+* detect version.txt bumps via release existence, not head_commit.modified ([c963201](https://github.com/improving-minnesota/cyd-dashboard/commit/c9632018990ef2355a48786e6a6130d65d236464))
+
 ## [1.9.7](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.6...v1.9.7) (2026-09-10)
 
 
