@@ -427,11 +427,17 @@ Behavior notes:
 
 - When a batch of merged PRs contains multiple bump types, the **largest
   applicable bump wins** (breaking > feat > fix).
-- A release is only created **after the "release-please" version-bump PR is
-  merged** — that automated PR previews exactly which commits are included and
-  what the new version will be. Merging it creates the `vMAJOR.MINOR.PATCH` git
-  tag + GitHub release, and the build job bakes that version into
+- A **release-please version-bump PR** is opened automatically after a
+  conventional-commit PR merges. Merging that PR updates `version.txt` (and
+  `CHANGELOG.md`). Pushing that merge to `main` triggers the `release.yml`
+  workflow, which builds the firmware, creates and publishes the
+  `vMAJOR.MINOR.PATCH` GitHub release, attaches `cyd-dashboard.ino.bin`, and
+  then marks the release-please PR as `autorelease: published` so the next
+  release cycle is not blocked. The build job bakes the new version into
   **Settings → About**.
+- Do not hand-edit `version.txt`. If a release-please PR ever gets stuck with an
+  `autorelease: pending` label after the release is live, the workflow now
+  corrects it automatically.
 - Non-functional changes (`docs`, `chore`, `refactor`, `build`, `ci`) update the
   changelog but, on their own, do not trigger a release.
 
@@ -718,10 +724,21 @@ Settings are stored in NVS under the `"flight"` namespace (see `setup()` in
 |---|---|---|---|
 | `timer` | bool | `false` | Show the dashboard countdown/timer bar (Flight Tracker → Enable timer). |
 | `clkcol` | uint32 | `TFT_BLUE` | Dashboard clock-bar color (General → Clock Color). |
-| `homeap` | string | `""` | Home airport (ICAO). Determines incoming/outgoing for the LED flash (red = departing, green = arriving); falls back to `KDFW` when empty. |
+| `homeap` | string | `""` | Home airport (ICAO). Used for the LED blink: red when origin matches, green when destination matches. Leave empty to disable. |
 | `ipdhcp` | bool | `true` | Network addressing mode (Network → IP setup). `true` = DHCP; `false` = static using the keys below. |
 | `ipaddr` / `ipmask` / `ipgw` / `ipdns` | string | `""` | Static IP, subnet mask, gateway, DNS. Applied via `WiFi.config()`; blank DNS falls back to the gateway, and an incomplete/invalid set falls back to DHCP. |
 | `hostname` | string | `"cyd-dashboard"` | STA hostname via `WiFi.setHostname()`; applies in both DHCP and static modes. |
+
+The onboard RGB LED blinks for every new overhead flight when **Blink for Flight**
+is on (`g_blinkForFlight`, persisted as `blinkf`). Color priority is:
+
+- **Red** — origin matches `homeap`.
+- **Green** — destination matches `homeap`.
+- **Blue** — origin or destination is in the `kTopAirports` list (but not home).
+- **White** — all other overhead flights, including flights with no route data.
+
+Each color blinks 5 times at 240 ms on/off. The blink is queued in
+`fetchFlights()` and performed in `loop()` after the flight view is drawn.
 
 `prefs.clear()` in the Reset handler removes **all** keys for both "All" and
 "Settings" resets (the "Settings" reset only re-writes the four touch-
@@ -776,6 +793,18 @@ The periodic flight poll is gated **only** by the Radar Polling bucket: while th
 device notices once the credits refill (OpenSky resets daily) without hammering
 the API. The Route Lookup and Flight Tracking buckets don't affect the poll
 cadence.
+
+`fetchRoute()` and `fetchTrack()` (both in `flight_details.ino`) are only called
+for the closest overhead plane (`planes[0]` when `distMi <= g_radiusMi`), and
+each is fetched once per overhead identity. The results (`g_routeOrigin` /
+`g_routeDest` and `g_trackPts` / `g_trackBearingDeg`) are cached while that plane
+remains the closest overhead, so the same flight does not trigger repeated
+route/track calls on every poll. If a fetch fails with a TLS error, a `429`
+(credits exhausted), or a truncated/bad-framing response, the failure is treated
+as "fetched" for that plane and is not retried, preventing burned credits on
+errors that won't resolve before the plane passes. A pure no-WiFi exit is
+transient, so `fetchRoute()` leaves the fetched flag false and will retry once
+the link returns.
 
 `fetchTrack()` (in `flight_details.ino`) also retrieves the tracked plane's
 ground-track polyline from `/tracks` and stores a bounded set of points (max 64,

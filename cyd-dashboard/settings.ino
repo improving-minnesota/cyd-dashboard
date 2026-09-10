@@ -165,10 +165,11 @@ static const char* const kHelpLines[] = {
   "Flights: live aircraft with",
   "a radar, callsign, route,",
   "and airline logo. The LED",
-  "flashes red/green for",
-  "arrivals/departures at your",
-  "home airport (DFW default)",
-  "and blue for a top US",
+  "blinks white for each",
+  "overhead flight, blue for",
+  "a top US airport, red when",
+  "departing or green when",
+  "arriving at your home",
   "airport.",
   "  Tap the aircraft count",
   "  (e.g. '6 aircraft') on the",
@@ -267,8 +268,8 @@ static const char* const kHelpLines[] = {
   "   (imperial), radius 3.5 mi,",
   "   ceiling 15000 ft, poll 60s,",
   "   timer bar on/off (off),",
-  "   home airport, blink LED on",
-  "   noteworthy flight (on).",
+  "   home airport, blink LED for",
+  "   each overhead flight (on).",
   "Sleep Mode: on; 10 PM - 8 AM,",
   "   wake 10 min.",
   "Pool Temp: off; add Govee key,",
@@ -612,9 +613,9 @@ void drawFtracker() {
     tft.setTextFont(1);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(8, 144);
-    tft.print("Airport not shown in route data.");
+    tft.print("Used to blink red/green for");
     tft.setCursor(8, 156);
-    tft.print("Empty = show all (default).");
+    tft.print("departures/arrivals. Empty = off.");
 
     tft.fillRoundRect(10, 188, 300, 24, 6, TFT_NAVY);
     tft.setTextColor(TFT_WHITE, TFT_NAVY);

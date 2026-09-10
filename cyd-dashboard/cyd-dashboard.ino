@@ -229,7 +229,7 @@ float g_radiusMi = 3.5;
 int   g_ceilingFt = 15000;
 int   g_pollSec = 30;
 bool  g_trackEnabled = true;   // flight tracking on/off
-bool  g_blinkForFlight = true; // flash the LED when a noteworthy flight is overhead
+bool  g_blinkForFlight = true; // blink the LED when an overhead flight is found
 bool  g_metric = false;        // false = imperial (ft/mi/mph), true = metric (m/km/kts)
 bool  g_showTimer = false;     // show/update the dashboard countdown bar (Flight Tracker)
 bool  g_autoUpdate = true;     // auto-check/install firmware updates once/day (General)
@@ -461,21 +461,21 @@ unsigned long wifiTryStart = 0;
 // overhead flight is found.
 bool g_suppressFlight = false;
 
-// One-shot LED flash queued when an overhead flight is found. Performed in
+// One-shot LED blink queued when an overhead flight is found. Performed in
 // loop() AFTER the flight view is drawn, so the user sees the data first and
-// then the flash notification (not the other way around).
-bool g_pendingFlash = false;
-bool g_flashDeparting = false;
-bool g_flashIncoming  = false;
-bool g_flashTop50     = false;
-bool g_flashWhite     = false;
+// then the blink notification (not the other way around).
+bool g_pendingBlink = false;
+bool g_blinkDeparting = false;
+bool g_blinkIncoming  = false;
+bool g_blinkTop50     = false;
+bool g_blinkWhite     = false;
 
 // Route details for the overhead flight (origin/destination), fetched
 // automatically the first time a new plane is overhead and cached per plane
 // (reset whenever the overhead identity changes). Defined in
 // flight_details.ino.
 String g_routeOrigin = "";      // "KDAL"
-String g_routeDest   = "";      // "KDFW"
+String g_routeDest   = "";      // e.g. "KJFK"
 bool   g_routeFetched = false;  // true once we've tried (success or not)
 volatile bool g_routeBusy = false;  // true while a route fetch is in flight (cross-task)
 
@@ -492,7 +492,7 @@ bool  g_trackFetched = false;        // tried once for the current plane
 volatile bool g_trackBusy = false;   // cross-task guard
 portMUX_TYPE g_trackMux = portMUX_INITIALIZER_UNLOCKED;
 
-String g_homeAirport = "";      // home airport: drives the incoming/outgoing LED flash ("" = fall back to KDFW)
+String g_homeAirport = "";      // home airport: drives the incoming/outgoing LED blink (empty = none)
 
 // ---- small helpers ----
 float hav(float lat1, float lon1, float lat2, float lon2) {
@@ -1241,7 +1241,7 @@ void fetchFlights() {
   // identity changed, reset any route details so they are re-fetched for the
   // new plane (the route cache belongs to the previous plane).
   static char lastOverheadIcao[7] = "";
-  static char ledFlashedIcao[7] = "";   // so we flash only once per new plane
+  static char ledBlinkedIcao[7] = "";   // so we blink only once per new plane
   if (planeCount > 0 && planes[0].distMi <= g_radiusMi) {
     g_suppressFlight = false;
     // Snapshot the overhead flight so the "N aircraft" tap can recall the same
@@ -1273,7 +1273,7 @@ void fetchFlights() {
       g_trackCount = 0;
       g_trackBearingDeg = -1.0f;
       portEXIT_CRITICAL(&g_trackMux);
-      ledFlashedIcao[0] = 0;
+      ledBlinkedIcao[0] = 0;
     }
     // Fetch the route and the ground track automatically the first time this
     // plane is overhead, caching each once per plane (g_routeFetched /
@@ -1281,28 +1281,27 @@ void fetchFlights() {
     // radar draws no line and dead-reckoning falls back to heading/speed.
     if (!g_routeFetched) fetchRoute(planes[0].icao24);
     if (!g_trackFetched) fetchTrack(planes[0].icao24);
-    // Queue an LED flash for this new overhead flight. Red = departing the
-    // home airport, green = incoming to the home airport, extra blue = top-50
-    // airport. A flight with NO route data (origin and destination both
-    // unknown) flashes white instead. The flash itself is deferred to loop()
-    // so the flight view draws first.
-    if (strncmp(planes[0].icao24, ledFlashedIcao, 6) != 0) {
-      bool noData = (g_routeOrigin.length() == 0 && g_routeDest.length() == 0);
-      g_flashDeparting = g_flashIncoming = g_flashTop50 = false;
-      g_flashWhite = noData;
-      bool shouldFlash = noData;
-      if (!noData) {
-        // Incoming/outgoing is relative to the Home airport setting (fall back
-        // to the project's DFW home base when none is set).
-        const char* home = g_homeAirport.length() ? g_homeAirport.c_str() : "KDFW";
-        g_flashDeparting = (g_routeOrigin == home);
-        g_flashIncoming  = (g_routeDest   == home);
-        g_flashTop50     = isTopAirport(g_routeOrigin.c_str()) || isTopAirport(g_routeDest.c_str());
-        shouldFlash = (g_flashDeparting || g_flashIncoming || g_flashTop50);
+    // Queue an LED blink for this new overhead flight. The blink is deferred
+    // to loop() so the flight view draws first. Color priority is:
+    //   red   = origin matches the home airport
+    //   green = destination matches the home airport
+    //   blue  = origin or destination is in the top-50 US airports (but not home)
+    //   white = all other overhead flights (including flights with no route data)
+    if (strncmp(planes[0].icao24, ledBlinkedIcao, 6) != 0) {
+      // Compare against the configured home airport, if any; no default.
+      g_blinkDeparting = g_blinkIncoming = g_blinkTop50 = g_blinkWhite = false;
+      if (g_homeAirport.length() && g_routeOrigin == g_homeAirport) {
+        g_blinkDeparting = true;
+      } else if (g_homeAirport.length() && g_routeDest == g_homeAirport) {
+        g_blinkIncoming = true;
+      } else if (isTopAirport(g_routeOrigin.c_str()) || isTopAirport(g_routeDest.c_str())) {
+        g_blinkTop50 = true;
+      } else {
+        g_blinkWhite = true;
       }
-      if (shouldFlash) g_pendingFlash = true;
-      strncpy(ledFlashedIcao, planes[0].icao24, 6);
-      ledFlashedIcao[6] = 0;
+      g_pendingBlink = true;
+      strncpy(ledBlinkedIcao, planes[0].icao24, 6);
+      ledBlinkedIcao[6] = 0;
     }
   } else {
     lastOverheadIcao[0] = 0;
@@ -1693,8 +1692,8 @@ void drawCog() {
   tft.fillCircle(cx, cy, 4, TFT_BLACK);
 }
 
-// ---- LED flash notifications ----
-// CYD RGB LED pins (active-low). Used to flash when a noteworthy flight is overhead.
+// ---- LED blink notifications ----
+// CYD RGB LED pins (active-low). Used to blink when an overhead flight is found.
 #define CYD_LED_RED   4
 #define CYD_LED_GREEN 16
 #define CYD_LED_BLUE  17
@@ -1710,28 +1709,31 @@ void blinkLedPin(int pin, int times, int ms) {
   }
 }
 
-// Flash the onboard LED to signal an overhead flight:
-//   red   = departing from DFW (origin KDFW)
-//   green = incoming to DFW   (dest KDFW)
-//   blue  = extra flash after the color if the flight involves a top-50 airport
-//   white = any overhead flight that does not qualify for red/green/blue
-// We turn ALL LEDs off first so a stale LOW on a previous color does not bleed.
-void flashLed(bool departingDFW, bool incomingDFW, bool top50, bool white) {
+// Blink the onboard LED to signal an overhead flight:
+//   red   = origin matches the home airport
+//   green = destination matches the home airport
+//   blue  = origin or destination is in the top-50 US airports (but not home)
+//   white = all other overhead flights (including flights with no route data)
+// Each color blinks 5 times at 240 ms on/off. We turn ALL LEDs off first so a
+// stale LOW on a previous color does not bleed.
+void blinkLed(bool departing, bool incoming, bool top50, bool white) {
   pinMode(CYD_LED_RED, OUTPUT);   digitalWrite(CYD_LED_RED, HIGH);
   pinMode(CYD_LED_GREEN, OUTPUT); digitalWrite(CYD_LED_GREEN, HIGH);
   pinMode(CYD_LED_BLUE, OUTPUT);  digitalWrite(CYD_LED_BLUE, HIGH);
-  if (white) {
+  if (departing) {
+    blinkLedPin(CYD_LED_RED, 5, 240);
+  } else if (incoming) {
+    blinkLedPin(CYD_LED_GREEN, 5, 240);
+  } else if (top50) {
+    blinkLedPin(CYD_LED_BLUE, 5, 240);
+  } else if (white) {
     // White = all three LEDs on together (active-low).
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 5; i++) {
       digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, LOW);
       delay(240);
       digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
       delay(240);
     }
-  } else {
-    if (departingDFW)      blinkLedPin(CYD_LED_RED,   5, 240);
-    else if (incomingDFW)  blinkLedPin(CYD_LED_GREEN, 5, 240);
-    if (top50)             blinkLedPin(CYD_LED_BLUE,  5, 240);
   }
   digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
 }
@@ -3215,13 +3217,13 @@ void loop() {
     else drawDashboard();
   }
 
-  // Run a queued LED flash now that the flight view has been drawn, so the user
-  // sees the data first and then the flash notification. Skipped entirely when
+  // Run a queued LED blink now that the flight view has been drawn, so the user
+  // sees the data first and then the blink notification. Skipped entirely when
   // the "Blink for Flight" setting is off.
-  if (g_pendingFlash) {
-    g_pendingFlash = false;
+  if (g_pendingBlink) {
+    g_pendingBlink = false;
     if (g_blinkForFlight)
-      flashLed(g_flashDeparting, g_flashIncoming, g_flashTop50, g_flashWhite);
+      blinkLed(g_blinkDeparting, g_blinkIncoming, g_blinkTop50, g_blinkWhite);
   }
   // Periodic heap/TLS/fetch diagnostic. No-op in release builds.
   static unsigned long lastHeapDiag = 0;
