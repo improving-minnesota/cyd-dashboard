@@ -613,9 +613,9 @@ void drawFtracker() {
     tft.setTextFont(1);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(8, 144);
-    tft.print("Airport not shown in route data.");
+    tft.print("Used to flash red/green for");
     tft.setCursor(8, 156);
-    tft.print("Empty = show all (default).");
+    tft.print("departures/arrivals. Empty = off.");
 
     tft.fillRoundRect(10, 188, 300, 24, 6, TFT_NAVY);
     tft.setTextColor(TFT_WHITE, TFT_NAVY);
