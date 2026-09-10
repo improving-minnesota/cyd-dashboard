@@ -45,8 +45,8 @@ jobs:
           if [ -n "$VERSION" ]; then
             arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
               --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=${VERSION}" \
-              --output-dir build/ota cyd-dashboard
+              --output-dir build/release cyd-dashboard
           else
             arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
-              --output-dir build/ota cyd-dashboard
+              --output-dir build/release cyd-dashboard
           fi
