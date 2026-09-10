@@ -60,35 +60,46 @@ jobs:
             echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           fi
 
-  build:
-    name: Build OTA firmware
+  build-and-release:
+    name: Build firmware and create draft release
     needs: version
-    if: needs.version.outputs.version != ''
-    uses: ./.github/workflows/build-firmware.yml
-    with:
-      app_version: ${{ needs.version.outputs.version }}
-
-  release:
-    name: Create draft release with firmware
-    needs: [version, build]
     if: needs.version.outputs.version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download firmware artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: cyd-dashboard-ota
-
-      - name: Checkout repository for gh release
+      - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install arduino-cli
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
+            | BINDIR="$HOME/bin" sh
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Install esp32 core (3.3.11)
+        run: |
+          arduino-cli config init
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.11
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib install "TFT_eSPI@2.5.43"
+          arduino-cli lib install "ArduinoJson@7.4.3"
+
+      - name: Build firmware
+        run: |
+          arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
+            --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=${{ needs.version.outputs.version }}" \
+            --output-dir build/ota cyd-dashboard
 
       - name: Create draft release and attach .bin
         run: |
           VERSION="${{ needs.version.outputs.version }}"
           TAG="v${VERSION}"
-          gh release create "${TAG}" cyd-dashboard.ino.bin \
+          gh release create "${TAG}" build/ota/cyd-dashboard.ino.bin \
             --repo "${{ github.repository }}" \
             --draft \
             --title "${TAG}" \
@@ -98,15 +109,12 @@ jobs:
 
   publish:
     name: Publish release
-    needs: [version, release]
+    needs: [version, build-and-release]
     if: needs.version.outputs.version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout repository for gh release
-        uses: actions/checkout@v4
-
       - name: Publish release
         run: |
           VERSION="${{ needs.version.outputs.version }}"
