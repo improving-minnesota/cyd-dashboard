@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.5](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.4...v1.9.5) (2026-09-10)
+
+
+### Bug Fixes
+
+* harden TLS and reduce long-run heap pressure ([15119fb](https://github.com/improving-minnesota/cyd-dashboard/commit/15119fb83ecc44817a85f402d498769d1993c4d0))
+
 ## [1.9.4](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.9.3...v1.9.4) (2026-09-06)
 
 
