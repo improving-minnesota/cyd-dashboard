@@ -114,10 +114,24 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - name: Publish release
         run: |
           VERSION="${{ needs.version.outputs.version }}"
           gh release edit "v${VERSION}" --repo "${{ github.repository }}" --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Mark release-please PR as published
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          pr_number=$(gh pr list --repo "${{ github.repository }}" --state merged \
+            --label "autorelease: pending" --json number,title \
+            --jq ".[] | select(.title == \"chore(main): release ${VERSION}\") | .number")
+          if [ -n "$pr_number" ]; then
+            gh pr edit "$pr_number" --repo "${{ github.repository }}" \
+              --remove-label "autorelease: pending" \
+              --add-label "autorelease: published"
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
