@@ -697,8 +697,8 @@ void handleFtrackerTouch(uint16_t x, uint16_t y) {
   }
 }
 
-// Reset screen. Two steps: choose what to reset (All / Settings / Cancel), then
-// a confirmation prompt before anything is wiped and the device reboots.
+// Reset screen. Two steps: choose what to reset (All / Settings / Data / Cancel),
+// then a confirmation prompt before anything is wiped and the device reboots.
 void drawReset() {
   tft.fillScreen(TFT_BLACK);
   tft.fillRect(0, 0, 320, 28, TFT_MAROON);
@@ -722,11 +722,18 @@ void drawReset() {
       tft.setCursor(10, ty); tft.print("Touch calibration will be cleared."); ty += 12;
       tft.setCursor(10, ty); tft.print("Pool & weather history deleted."); ty += 12;
       tft.setCursor(10, ty); tft.print("The device will reboot."); ty += 12;
-    } else {                            // Settings: keeps calibration so it stays usable
+    } else if (g_resetConfirm == 2) {   // Settings: keeps calibration so it stays usable
       tft.setCursor(10, ty); tft.print("Settings: settings and"); ty += 12;
       tft.setCursor(10, ty); tft.print("credentials will be cleared."); ty += 12;
-      tft.setCursor(10, ty); tft.print("Pool temp history is kept."); ty += 12;
+      tft.setCursor(10, ty); tft.print("Pool & weather history is kept."); ty += 12;
       tft.setCursor(10, ty); tft.print("Touch calibration is kept."); ty += 12;
+      tft.setCursor(10, ty); tft.print("The device will reboot."); ty += 12;
+    } else {                            // Data: graph history only
+      tft.setCursor(10, ty); tft.print("Data: pool & weather"); ty += 12;
+      tft.setCursor(10, ty); tft.print("temperature history"); ty += 12;
+      tft.setCursor(10, ty); tft.print("will be deleted."); ty += 12;
+      tft.setCursor(10, ty); tft.print("Settings, credentials, and"); ty += 12;
+      tft.setCursor(10, ty); tft.print("touch calibration are kept."); ty += 12;
       tft.setCursor(10, ty); tft.print("The device will reboot."); ty += 12;
     }
     tft.setCursor(10, ty);
@@ -752,37 +759,41 @@ void drawReset() {
   tft.print("Choose what to reset:");
   tft.setTextFont(1);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.setCursor(10, 76);
-  tft.print("All: settings + files");
-  tft.setCursor(10, 86);
-  tft.print("     (incl. pool temp history).");
-  tft.setCursor(10, 102);
-  tft.print("Settings: settings &");
-  tft.setCursor(10, 112);
-  tft.print("     credentials only.");
-  tft.setCursor(10, 128);
-  tft.print("Cancel: go back without");
-  tft.setCursor(10, 138);
-  tft.print("     changing anything.");
-  tft.setCursor(10, 154);
+  int ly = 70;
+  tft.setCursor(10, ly); tft.print("All: settings + files"); ly += 10;
+  tft.setCursor(10, ly); tft.print("     (incl. pool & weather history)."); ly += 16;
+  tft.setCursor(10, ly); tft.print("Settings: settings &"); ly += 10;
+  tft.setCursor(10, ly); tft.print("     credentials only."); ly += 16;
+  tft.setCursor(10, ly); tft.print("Data: pool & weather temp"); ly += 10;
+  tft.setCursor(10, ly); tft.print("     history only."); ly += 16;
+  tft.setCursor(10, ly); tft.print("Cancel: go back without"); ly += 10;
+  tft.setCursor(10, ly); tft.print("     changing anything."); ly += 16;
+  tft.setCursor(10, ly);
   tft.setTextColor(TFT_RED, TFT_BLACK);
   tft.print("Selected option reboots the device.");
 
-  // All / Settings / Cancel
-  tft.fillRoundRect(8, 180, 96, 34, 6, TFT_MAROON);
+  // 2x2 grid: All / Settings on top, Data / Cancel on bottom.
+  // Top row: All, Settings.
+  tft.fillRoundRect(8, 184, 148, 28, 6, TFT_MAROON);
   tft.setTextColor(TFT_WHITE, TFT_MAROON);
   tft.setTextFont(2);
-  tft.setCursor(34, 189);
+  tft.setCursor(66, 191);
   tft.print("All");
 
-  tft.fillRoundRect(112, 180, 96, 34, 6, TFT_ORANGE);
+  tft.fillRoundRect(164, 184, 148, 28, 6, TFT_ORANGE);
   tft.setTextColor(TFT_WHITE, TFT_ORANGE);
-  tft.setCursor(126, 189);
+  tft.setCursor(196, 191);
   tft.print("Settings");
 
-  tft.fillRoundRect(216, 180, 96, 34, 6, TFT_NAVY);
+  // Bottom row: Data, Cancel.
+  tft.fillRoundRect(8, 214, 148, 28, 6, TFT_OLIVE);
+  tft.setTextColor(TFT_WHITE, TFT_OLIVE);
+  tft.setCursor(62, 221);
+  tft.print("Data");
+
+  tft.fillRoundRect(164, 214, 148, 28, 6, TFT_NAVY);
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.setCursor(240, 189);
+  tft.setCursor(202, 221);
   tft.print("Cancel");
 }
 

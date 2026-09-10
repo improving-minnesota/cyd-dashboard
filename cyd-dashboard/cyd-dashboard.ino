@@ -395,7 +395,7 @@ enum Screen { SCR_DASH, SCR_SETTINGS, SCR_GENERAL, SCR_ABOUT, SCR_HELP, SCR_WIFI
 Screen g_screen = SCR_DASH;
 Screen g_creditsReturn = SCR_DASH;   // screen to return to from the OpenSky Credits page
 int g_helpScroll = 0;   // Help page vertical scroll offset (px)
-int g_resetConfirm = 0;  // Reset screen sub-state: 0=choose, 1=confirm All, 2=confirm Settings
+int g_resetConfirm = 0;  // Reset screen sub-state: 0=choose, 1=confirm All, 2=confirm Settings, 3=confirm Data
 
 extern int g_wifiSub;   // defined in wifi_config.ino
 
@@ -2469,16 +2469,16 @@ void handleTouch() {
 
   if (g_screen == SCR_RESET) {
     if (g_resetConfirm == 0) {
-      // Step 1: choose what to reset.
-      if (inRect(x, y, 8, 180, 104, 214)) { g_resetConfirm = 1; dirty = true; }          // All
-      else if (inRect(x, y, 112, 180, 208, 214)) { g_resetConfirm = 2; dirty = true; }   // Settings
-      else if (inRect(x, y, 216, 180, 312, 214)) { g_resetConfirm = 0; g_screen = SCR_SETTINGS; dirty = true; }  // Cancel
+      // Step 1: choose what to reset. 2x2 grid: All/Settings, Data/Cancel.
+      if (inRect(x, y, 8, 184, 156, 212)) { g_resetConfirm = 1; dirty = true; }          // All
+      else if (inRect(x, y, 164, 184, 312, 212)) { g_resetConfirm = 2; dirty = true; }   // Settings
+      else if (inRect(x, y, 8, 214, 156, 242)) { g_resetConfirm = 3; dirty = true; }     // Data
+      else if (inRect(x, y, 164, 214, 312, 242)) { g_resetConfirm = 0; g_screen = SCR_SETTINGS; dirty = true; }  // Cancel
       return;
     }
     // Step 2: confirmation prompt.
     if (inRect(x, y, 30, 180, 140, 214)) {  // Yes -> wipe + reboot
-      prefs.begin("flight", false);
-      prefs.clear();
+      // "Data" (g_resetConfirm == 3) touches only the graph files, no NVS.
       // "Settings" (g_resetConfirm == 2) clears settings & credentials only, so
       // it keeps the touch calibration - it's hardware-specific and lives in
       // the same NVS namespace we're clearing; without it the panel reverts to
@@ -2488,12 +2488,16 @@ void handleTouch() {
       // must be recalibrated on the next boot (hold anywhere 10s). Every other
       // key - including the clock color "clkcol" - is removed by prefs.clear()
       // above, so it reverts to its default after either reset.
-      if (g_resetConfirm == 2) {
-        prefs.putInt("calsx", g_calScaleX); prefs.putLong("calox", g_calOffX);
-        prefs.putInt("calsy", g_calScaleY); prefs.putLong("caloy", g_calOffY);
+      if (g_resetConfirm != 3) {
+        prefs.begin("flight", false);
+        prefs.clear();
+        if (g_resetConfirm == 2) {
+          prefs.putInt("calsx", g_calScaleX); prefs.putLong("calox", g_calOffX);
+          prefs.putInt("calsy", g_calScaleY); prefs.putLong("caloy", g_calOffY);
+        }
+        prefs.end();
       }
-      prefs.end();
-      if (g_resetConfirm == 1) { poolfsWipe(); weatherfsWipe(); }   // All also deletes pool + weather history files
+      if (g_resetConfirm == 1 || g_resetConfirm == 3) { poolfsWipe(); weatherfsWipe(); }   // All/Data delete pool + weather history files
       // Brief on-screen feedback so the tap visibly registers, and a short
       // pause so NVS/LittleFS finish flushing before the reboot. Say exactly
       // what is being wiped.
@@ -2502,9 +2506,12 @@ void handleTouch() {
       tft.setTextFont(2);
       if (g_resetConfirm == 1) {                      // All
         tft.drawCentreString("Resetting All Data...", 160, 108, 2);
-      } else {                                        // Settings
+      } else if (g_resetConfirm == 2) {               // Settings
         tft.drawCentreString("Resetting Stored", 160, 100, 2);
         tft.drawCentreString("Settings...", 160, 118, 2);
+      } else {                                        // Data
+        tft.drawCentreString("Resetting Pool &", 160, 100, 2);
+        tft.drawCentreString("Weather History...", 160, 118, 2);
       }
       delay(1500);
       ESP.restart();
