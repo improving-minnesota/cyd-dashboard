@@ -1,16 +1,11 @@
-# Release: run on every push/merge to main. Uses release-please to determine the
-# next semver version from conventional-commit PRs and, when a release is
-# created, builds the OTA firmware with that version baked into the About screen
-# and attaches the .bin to the release.
+# Release: run on every push/merge to main. release-please opens/updates the
+# release PR (bumping version.txt and CHANGELOG.md). When that release PR is
+# merged, this workflow reads version.txt, builds the OTA firmware, creates a
+# draft GitHub release, attaches the .bin, and then publishes the release.
 #
-# Flow:
-#   1. A feature PR is merged to main.
-#   2. release-please opens a "release-please" PR bumping the version.
-#   3. Once that PR is merged, release-please creates a git tag + GitHub release.
-#   4. The build job compiles with -DAPP_VERSION=<tag> and uploads the .bin.
-#
-# The .bin is the raw app image written to the inactive OTA slot; OTA delivery
-# to the device is implemented separately (not part of this workflow yet).
+# Drafting first means the release is never visible to on-device OTA checks
+# until the firmware asset is already attached. version.txt remains the single
+# source of truth for the version.
 name: Release
 
 on:
@@ -24,9 +19,6 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - name: Mint release-please app token
         id: app-token
@@ -36,58 +28,71 @@ jobs:
           private-key: ${{ secrets.RELEASE_PLEASE_PRIVATE_KEY }}
 
       - uses: googleapis/release-please-action@v4
-        id: release
         with:
-          release-type: simple
-          # release-please opens/updates the release PR and creates the GitHub
-          # release using a GitHub App installation token, which is exempt from
-          # the org setting that blocks the default GITHUB_TOKEN from creating
-          # pull requests. The app needs "contents: write" + "pull-requests:
-          # write" on this repo.
           token: ${{ steps.app-token.outputs.token }}
+          release-type: simple
+          # release-please manages the release PR and version files; we create
+          # and publish the actual GitHub release ourselves after the .bin is built.
+          skip-github-release: true
+
+  version:
+    name: Read version
+    needs: release-please
+    if: contains(github.event.head_commit.modified, 'version.txt')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version from version.txt
+        id: read
+        run: |
+          VERSION=$(cat version.txt)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
   build:
-    name: Build & attach firmware
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    name: Build OTA firmware
+    needs: version
+    if: needs.version.outputs.version != ''
+    uses: ./.github/workflows/build-firmware.yml
+    with:
+      app_version: ${{ needs.version.outputs.version }}
+
+  release:
+    name: Create draft release with firmware
+    needs: [version, build]
+    if: needs.version.outputs.version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install arduino-cli
-        run: |
-          mkdir -p "$HOME/bin"
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
-            | BINDIR="$HOME/bin" sh
-          echo "$HOME/bin" >> "$GITHUB_PATH"
-
-      - name: Install esp32 core (3.3.11)
-        run: |
-          arduino-cli config init
-          arduino-cli core update-index
-          arduino-cli core install esp32:esp32@3.3.11
-
-      - name: Install libraries
-        run: |
-          arduino-cli lib install "TFT_eSPI@2.5.43"
-          arduino-cli lib install "ArduinoJson@7.4.3"
-
-      # TFT_eSPI picks up the CYD (ESP32-2432S028R) pin setup from the
-      # sketch's own tft_setup.h, so no library patching is required here.
-      - name: Build OTA firmware
-        run: |
-          VERSION="${{ needs.release-please.outputs.tag_name }}"
-          VERSION="${VERSION#v}"          # strip leading "v" so About shows "1.2.3"
-          echo "Building version ${VERSION}"
-          arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
-            --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=${VERSION}" \
-            --output-dir build/ota cyd-dashboard
-
-      - name: Upload firmware to release
-        uses: softprops/action-gh-release@v2
+      - name: Download firmware artifact
+        uses: actions/download-artifact@v4
         with:
-          tag_name: ${{ needs.release-please.outputs.tag_name }}
-          files: build/ota/cyd-dashboard.ino.bin
+          name: cyd-dashboard-ota
+
+      - name: Create draft release and attach .bin
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          TAG="v${VERSION}"
+          gh release create "${TAG}" cyd-dashboard.ino.bin \
+            --draft \
+            --title "${TAG}" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Publish release
+    needs: [version, release]
+    if: needs.version.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish release
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          gh release edit "v${VERSION}" --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
