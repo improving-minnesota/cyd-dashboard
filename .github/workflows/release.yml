@@ -1,22 +1,11 @@
-# Release: run on every push/merge to main. Uses release-please to determine the
-# next semver version from conventional-commit PRs and, when a release is
-# needed, drafts a GitHub release, builds the OTA firmware with that version
-# baked into the About screen, attaches the .bin, and then publishes the draft.
-#
-# Flow:
-#   1. A feature PR is merged to main.
-#   2. release-please opens a "release-please" PR bumping the version.
-#   3. Once that PR is merged, release-please creates a *draft* GitHub release.
-#   4. The build job compiles with -DAPP_VERSION=<tag> and uploads the .bin as
-#      a workflow artifact.
-#   5. The attach job uploads the artifact to the existing draft release.
-#   6. The publish job marks the draft release as published.
+# Release: run on every push/merge to main. release-please opens/updates the
+# release PR (bumping version.txt and CHANGELOG.md). When that release PR is
+# merged, this workflow reads version.txt, builds the OTA firmware, creates a
+# draft GitHub release, attaches the .bin, and then publishes the release.
 #
 # Drafting first means the release is never visible to on-device OTA checks
-# until the firmware asset is already attached.
-#
-# The .bin is the raw app image written to the inactive OTA slot; OTA delivery
-# to the device is implemented separately (not part of this workflow yet).
+# until the firmware asset is already attached. version.txt remains the single
+# source of truth for the version.
 name: Release
 
 on:
@@ -30,9 +19,6 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - name: Mint release-please app token
         id: app-token
@@ -42,24 +28,40 @@ jobs:
           private-key: ${{ secrets.RELEASE_PLEASE_PRIVATE_KEY }}
 
       - uses: googleapis/release-please-action@v4
-        id: release
         with:
           token: ${{ steps.app-token.outputs.token }}
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
+          release-type: simple
+          # release-please manages the release PR and version files; we create
+          # and publish the actual GitHub release ourselves after the .bin is built.
+          skip-github-release: true
+
+  version:
+    name: Read version
+    needs: release-please
+    if: contains(github.event.head_commit.modified, 'version.txt')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version from version.txt
+        id: read
+        run: |
+          VERSION=$(cat version.txt)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build OTA firmware
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: version
+    if: needs.version.outputs.version != ''
     uses: ./.github/workflows/build-firmware.yml
     with:
-      app_version: ${{ needs.release-please.outputs.tag_name }}
+      app_version: ${{ needs.version.outputs.version }}
 
-  attach:
-    name: Attach firmware to draft release
-    needs: [release-please, build]
-    if: needs.release-please.outputs.release_created == 'true'
+  release:
+    name: Create draft release with firmware
+    needs: [version, build]
+    if: needs.version.outputs.version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -69,21 +71,28 @@ jobs:
         with:
           name: cyd-dashboard-ota
 
-      - name: Upload firmware to draft release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.release-please.outputs.tag_name }}
-          files: cyd-dashboard.ino.bin
+      - name: Create draft release and attach .bin
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          TAG="v${VERSION}"
+          gh release create "${TAG}" cyd-dashboard.ino.bin \
+            --draft \
+            --title "${TAG}" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish:
     name: Publish release
-    needs: [release-please, attach]
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: [version, release]
+    if: needs.version.outputs.version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Publish release
-        run: gh release edit ${{ needs.release-please.outputs.tag_name }} --draft=false
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          gh release edit "v${VERSION}" --draft=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
