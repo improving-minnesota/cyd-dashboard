@@ -124,3 +124,21 @@ const RuntimeLogo* findAirlineLogo(const char* callsign) {
 void logoRelease(const RuntimeLogo* logo) {
   (void)logo;
 }
+
+// Wipe all files from the logos partition. Called by Settings -> Reset ->
+// Factory Reset so a full factory reset removes provisioned airline logos.
+void logosWipe() {
+  if (!s_logosOk) return;
+  File root = LogosFS.open("/");
+  if (!root || !root.isDirectory()) return;
+  File f = root.openNextFile();
+  while (f) {
+    const char* name = f.name();
+    if (name && name[0] != '\0') {
+      String path = String("/") + name;
+      LogosFS.remove(path.c_str());
+    }
+    f = root.openNextFile();
+  }
+  s_logoValid = false;
+}

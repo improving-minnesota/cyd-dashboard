@@ -395,7 +395,7 @@ enum Screen { SCR_DASH, SCR_SETTINGS, SCR_GENERAL, SCR_ABOUT, SCR_HELP, SCR_WIFI
 Screen g_screen = SCR_DASH;
 Screen g_creditsReturn = SCR_DASH;   // screen to return to from the OpenSky Credits page
 int g_helpScroll = 0;   // Help page vertical scroll offset (px)
-int g_resetConfirm = 0;  // Reset screen sub-state: 0=choose, 1=confirm All, 2=confirm Settings
+int g_resetConfirm = 0;  // Reset screen sub-state: 0=choose, 1=confirm All, 2=confirm Settings, 3=confirm Data
 
 extern int g_wifiSub;   // defined in wifi_config.ino
 
@@ -2469,42 +2469,51 @@ void handleTouch() {
 
   if (g_screen == SCR_RESET) {
     if (g_resetConfirm == 0) {
-      // Step 1: choose what to reset.
-      if (inRect(x, y, 8, 180, 104, 214)) { g_resetConfirm = 1; dirty = true; }          // All
-      else if (inRect(x, y, 112, 180, 208, 214)) { g_resetConfirm = 2; dirty = true; }   // Settings
-      else if (inRect(x, y, 216, 180, 312, 214)) { g_resetConfirm = 0; g_screen = SCR_SETTINGS; dirty = true; }  // Cancel
+      // Step 1: choose what to reset. Buttons stacked top-right: Factory Reset,
+      // Graph Data, Settings; Cancel alone at bottom-right.
+      if (inRect(x, y, 172, 36, 312, 66)) { g_resetConfirm = 1; dirty = true; }          // Factory Reset
+      else if (inRect(x, y, 172, 80, 312, 110)) { g_resetConfirm = 3; dirty = true; }    // Graph Data
+      else if (inRect(x, y, 172, 124, 312, 154)) { g_resetConfirm = 2; dirty = true; }   // Settings
+      else if (inRect(x, y, 172, 198, 312, 230)) { g_resetConfirm = 0; g_screen = SCR_SETTINGS; dirty = true; }  // Cancel
       return;
     }
     // Step 2: confirmation prompt.
     if (inRect(x, y, 30, 180, 140, 214)) {  // Yes -> wipe + reboot
-      prefs.begin("flight", false);
-      prefs.clear();
+      // "Graph Data" (g_resetConfirm == 3) touches only the graph files, no NVS.
       // "Settings" (g_resetConfirm == 2) clears settings & credentials only, so
       // it keeps the touch calibration - it's hardware-specific and lives in
       // the same NVS namespace we're clearing; without it the panel reverts to
       // factory defaults that don't match this unit and the dashboard looks
-      // unresponsive. "All" (g_resetConfirm == 1) is a full factory reset, so
-      // it clears calibration too; the touchscreen falls back to defaults and
-      // must be recalibrated on the next boot (hold anywhere 10s). Every other
-      // key - including the clock color "clkcol" - is removed by prefs.clear()
-      // above, so it reverts to its default after either reset.
-      if (g_resetConfirm == 2) {
-        prefs.putInt("calsx", g_calScaleX); prefs.putLong("calox", g_calOffX);
-        prefs.putInt("calsy", g_calScaleY); prefs.putLong("caloy", g_calOffY);
+      // unresponsive. "Factory Reset" (g_resetConfirm == 1) is a full factory
+      // reset, so it also clears airline logos on the separate "logos"
+      // partition and the touch calibration; the touchscreen falls back to
+      // defaults and must be recalibrated on the next boot (hold anywhere 10s).
+      // Every other key - including the clock color "clkcol" - is removed by
+      // prefs.clear() above, so it reverts to its default after either reset.
+      if (g_resetConfirm != 3) {
+        prefs.begin("flight", false);
+        prefs.clear();
+        if (g_resetConfirm == 2) {
+          prefs.putInt("calsx", g_calScaleX); prefs.putLong("calox", g_calOffX);
+          prefs.putInt("calsy", g_calScaleY); prefs.putLong("caloy", g_calOffY);
+        }
+        prefs.end();
       }
-      prefs.end();
-      if (g_resetConfirm == 1) { poolfsWipe(); weatherfsWipe(); }   // All also deletes pool + weather history files
+      if (g_resetConfirm == 1 || g_resetConfirm == 3) { poolfsWipe(); weatherfsWipe(); }   // Factory/Graph Data delete pool + weather history files
+      if (g_resetConfirm == 1) { logosWipe(); }   // Factory Reset also removes airline logos
       // Brief on-screen feedback so the tap visibly registers, and a short
       // pause so NVS/LittleFS finish flushing before the reboot. Say exactly
       // what is being wiped.
       tft.fillScreen(TFT_BLACK);
       tft.setTextColor(TFT_WHITE, TFT_BLACK);
       tft.setTextFont(2);
-      if (g_resetConfirm == 1) {                      // All
-        tft.drawCentreString("Resetting All Data...", 160, 108, 2);
-      } else {                                        // Settings
+      if (g_resetConfirm == 1) {                      // Factory Reset
+        tft.drawCentreString("Performing Factory Reset...", 160, 108, 2);
+      } else if (g_resetConfirm == 2) {               // Settings
         tft.drawCentreString("Resetting Stored", 160, 100, 2);
         tft.drawCentreString("Settings...", 160, 118, 2);
+      } else {                                        // Graph Data
+        tft.drawCentreString("Resetting Graph Data...", 160, 108, 2);
       }
       delay(1500);
       ESP.restart();

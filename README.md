@@ -130,10 +130,11 @@ Defaults for a freshly reset device are shown with each setting.
   is available it shows **Upgrade Available** with an **Install** button.
 - **Help** — this guide, on the device.
 - **Reset** — confirms before wiping and shows a message saying exactly what's
-  being reset. **All** clears settings *and* all files (including pool and
-  weather temperature history) and touch calibration, so the next boot asks you to
-  recalibrate; **Settings** clears settings and credentials only but keeps
-  calibration. Both reboot the device. **Cancel** changes nothing.
+  being reset. **Factory Reset** clears settings *and* all files (including
+  pool and weather temperature history and airline logos) and touch calibration,
+  so the next boot asks you to recalibrate; **Settings** clears settings and
+  credentials; **Graph Data** clears pool and weather temperature history. All
+  three reboot the device. **Cancel** changes nothing.
 
 ## Updates (OTA)
 
