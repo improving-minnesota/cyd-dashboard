@@ -41,9 +41,13 @@ bool fetchGoveeDevices() {
                                HTTPS_METHOD_GET, "", devHdrs, false);
   g_goveeAuthBad = (code == HTTP_CODE_UNAUTHORIZED || code == HTTP_CODE_FORBIDDEN);
   if (code != HTTP_CODE_OK) { http.end(); return false; }
-  JsonDocument doc;
-  if (deserializeJson(doc, http.getStream())) { http.end(); return false; }
+  BoundedAllocator devicesAlloc(16384);
+  JsonDocument doc(&devicesAlloc);
+  HttpBodyStream body(http);
+  DeserializationError parseErr = deserializeJson(doc, body);
+  bool bodyComplete = body.complete() || body.drain();
   http.end();
+  if (parseErr || !bodyComplete) return false;
   g_goveeCount = 0;
   JsonArray devs = doc["data"];   // array of devices
   for (JsonObject d : devs) {
@@ -75,20 +79,24 @@ bool fetchGoveeTemp() {
     g_goveeAuthBad = false;
     return false;
   }
-  String body = "{\"requestId\":\"pool-1\",\"payload\":{\"sku\":\"" + g_poolModel
-                + "\",\"device\":\"" + g_poolDeviceId + "\"}}";
+  String requestBody = "{\"requestId\":\"pool-1\",\"payload\":{\"sku\":\"" + g_poolModel
+                       + "\",\"device\":\"" + g_poolDeviceId + "\"}}";
   // Verified TLS via the global trust store (Amazon Root CA 1).
   NetworkClientSecure sec;
   HTTPClient http;
   http.setTimeout(5000);
   const char* tempHdrs[] = { "Govee-API-Key", g_goveeKey.c_str(), "Content-Type", "application/json", nullptr };
   int code = httpsRequestRetry(http, sec, "https://openapi.api.govee.com/router/api/v1/device/state",
-                               HTTPS_METHOD_POST, body, tempHdrs, false);
+                               HTTPS_METHOD_POST, requestBody, tempHdrs, false);
   g_goveeAuthBad = (code == HTTP_CODE_UNAUTHORIZED || code == HTTP_CODE_FORBIDDEN);
   if (code != HTTP_CODE_OK) { g_poolValid = false; http.end(); return false; }
-  JsonDocument doc;
-  if (deserializeJson(doc, http.getStream())) { g_poolValid = false; http.end(); return false; }
+  BoundedAllocator tempAlloc(4096);
+  JsonDocument doc(&tempAlloc);
+  HttpBodyStream body(http);
+  DeserializationError parseErr = deserializeJson(doc, body);
+  bool bodyComplete = body.complete() || body.drain();
   http.end();
+  if (parseErr || !bodyComplete) { g_poolValid = false; return false; }
   bool found = false;
   JsonArray caps = doc["payload"]["capabilities"];
   for (JsonObject c : caps) {

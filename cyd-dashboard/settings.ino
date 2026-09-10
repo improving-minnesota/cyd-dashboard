@@ -80,6 +80,8 @@ void drawAbout() {
   tft.setCursor(8, 112);
   tft.print("Version: v");
   tft.print(kVersion);
+  tft.print("  Build: ");
+  tft.print(BUILD_NUM);
 
   // Divider above the upgrade section
   tft.drawFastHLine(8, 130, 304, TFT_DARKGREY);

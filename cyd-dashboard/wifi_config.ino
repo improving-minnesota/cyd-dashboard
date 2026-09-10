@@ -530,6 +530,38 @@ void commitSleepTime(int which) {
 #if ENABLE_SERIAL_PROVISION
 #define PROVISION_WINDOW_MS 4000UL
 
+// OTA command state for building a URL from IP + filename (or direct URL)
+static String s_otaIp = "";
+static String s_otaFile = "";
+
+static String buildOtaUrl(const String& ipOrUrl, const String& file) {
+  // If a full URL was given (starts with http:// or https://), use it directly.
+  if (ipOrUrl.startsWith("http://") || ipOrUrl.startsWith("https://")) return ipOrUrl;
+  // Otherwise treat ipOrUrl as just an IP/host and build the local replay server URL.
+  // OTA firmware is served over plain HTTP on port 8080; all other replay data is HTTPS on 8081.
+  String url = "http://" + ipOrUrl + ":8080/firmware";
+  if (file.length()) url += "?file=" + file;
+  return url;
+}
+
+static bool scheduleOTA(const String& url) {
+#if !ENABLE_LOCAL_OTA
+  (void)url;
+  return false;
+#else
+  if (!isDevBuild()) return false;
+  extern String g_otaUrl;
+  extern String g_otaVersion;
+  extern String g_otaSha256;
+  extern bool g_otaActive;
+  g_otaUrl = url;
+  g_otaVersion = "dev";
+  g_otaSha256 = ""; // Local dev images have no release digest.
+  g_otaActive = true;
+  return true;
+#endif
+}
+
 bool provisionKey(const String& key, const String& val) {
   if      (key == "WIFI_SSID")       { prefs.putString("ssid",   val); g_savedSsid = val; return true; }
   else if (key == "WIFI_PASSWORD")   { prefs.putString("pass",   val); g_savedPass = val; return true; }
@@ -537,6 +569,31 @@ bool provisionKey(const String& key, const String& val) {
   else if (key == "OPENSKY_CLIENT_SECRET") { prefs.putString("ocssec", val); g_osClientSecret = val; return true; }
   else if (key == "HOME_AIRPORT")          { String v = val; v.toUpperCase(); prefs.putString("homeap", v); g_homeAirport = v; return true; }
   else if (key == "GOVEE_KEY")       { prefs.putString("govee",  val); g_goveeKey  = val; return true; }
+  else if (key == "OTA_URL")         {
+    String url = buildOtaUrl(val, s_otaFile);
+    if (scheduleOTA(url)) {
+      Serial.println("PROV: OTA_URL=" + url + " scheduled");
+      return true;
+    }
+  }
+  else if (key == "OTA_IP")          {
+    s_otaIp = val;
+    g_otaHost = val;
+    prefs.begin("flight", false);
+    prefs.putString("otahost", val);
+    prefs.end();
+    Serial.println("PROV: OTA_IP=" + val + " saved");
+    return true;
+  }
+  else if (key == "OTA_FILE")        { s_otaFile = val; Serial.println("PROV: OTA_FILE=" + val); return true; }
+  else if (key == "OTA_GO")          {
+    String url = buildOtaUrl(s_otaIp, s_otaFile);
+    if (url.length() < 10) { Serial.println("PROV: OTA_GO missing OTA_IP/OTA_FILE"); return false; }
+    if (scheduleOTA(url)) {
+      Serial.println("PROV: OTA_GO=" + url + " scheduled");
+      return true;
+    }
+  }
   return false;
 }
 
@@ -570,6 +627,67 @@ void serialProvision() {
   }
 done:
   if (changed) Serial.println("PROV: done");
+}
+
+// Runtime serial command handler for OTA (can be called anytime from loop)
+// Supports:
+//   OTA_URL=http://server:port/firmware.bin   (full URL, legacy)
+//   OTA_IP=192.168.x.x                        (server IP)
+//   OTA_FILE=cyd-dashboard.ino.bin            (firmware filename)
+//   OTA_GO                                      (trigger with OTA_IP + OTA_FILE)
+void handleSerialCommands() {
+  static String line;
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c != '\n' && c != '\r') {
+      if (line.length() < 128) line += c;
+      continue;
+    }
+    if (line.length() == 0) continue;
+    String buf = line;
+    line = "";
+    buf.trim();
+    if (buf.length() == 0) continue;
+
+    int eq = buf.indexOf('=');
+    String key, val;
+    if (eq > 0) {
+      key = buf.substring(0, eq); key.trim();
+      val = buf.substring(eq + 1); val.trim();
+    } else if (buf == "OTA_GO") {
+      key = buf;
+      val = "";
+    } else {
+      Serial.println("CMD: unknown command " + buf);
+      continue;
+    }
+
+    if (key == "OTA_URL") {
+      String url = buildOtaUrl(val, s_otaFile);
+      if (scheduleOTA(url)) {
+        Serial.println("CMD: OTA scheduled from " + url);
+      }
+    } else if (key == "OTA_IP") {
+      s_otaIp = val;
+      g_otaHost = val;
+      prefs.begin("flight", false);
+      prefs.putString("otahost", val);
+      prefs.end();
+      Serial.println("CMD: OTA_IP=" + val + " saved");
+    } else if (key == "OTA_FILE") {
+      s_otaFile = val;
+      Serial.println("CMD: OTA_FILE=" + val);
+    } else if (key == "OTA_GO") {
+      String url = buildOtaUrl(s_otaIp, s_otaFile);
+      if (url.length() < 10) {
+        Serial.println("CMD: OTA_GO missing OTA_IP/OTA_FILE");
+      } else if (scheduleOTA(url)) {
+        Serial.println("CMD: OTA scheduled from " + url);
+      }
+    } else {
+      Serial.println("CMD: unknown command " + key);
+    }
+  }
 }
 #endif  // ENABLE_SERIAL_PROVISION
 
