@@ -124,6 +124,20 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > **Build number:** `BUILD_NUM` is optional and can be passed the same way
 > (`-DBUILD_NUM=<n>`). The sketch defaults to `0` if it is not defined, and
 > `settings.ino` hides the build number on the About screen when it is `0`.
+>
+> **Dev build with local OTA + build number:** `ENABLE_LOCAL_OTA=1` enables the
+> serial `OTA_IP`/`OTA_FILE`/`OTA_GO` (or `OTA_URL`) commands that fetch an
+> image over plain HTTP from the local replay server on port 8080. A typical
+> dev build and flash:
+> ```bash
+> arduino-cli compile --clean --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
+>   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(cat version.txt)-dev -DBUILD_NUM=1 -DENABLE_LOCAL_OTA=1" \
+>   --output-dir /tmp/cyd_ota_out cyd-dashboard
+> arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 --input-dir /tmp/cyd_ota_out cyd-dashboard
+> ```
+> Then provision OTA from the serial console (baud 115200) while a local OTA
+> server is running, e.g. `OTA_IP=<host-ip>` + `OTA_FILE=cyd-dashboard.ino.bin`
+> + `OTA_GO`, or `OTA_URL=http://<host-ip>:8080/firmware?file=cyd-dashboard.ino.bin`
 
 > **Important:** the display pinout is configured in the sketch's own
 > `cyd-dashboard/tft_setup.h`. TFT_eSPI auto-detects a `tft_setup.h` in the
