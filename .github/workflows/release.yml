@@ -114,7 +114,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
     steps:
       - name: Publish release
         run: |
@@ -122,11 +121,21 @@ jobs:
           gh release edit "v${VERSION}" --repo "${{ github.repository }}" --draft=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  mark-published:
+    name: Mark release-please PR as published
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
       - name: Mark release-please PR as published
         run: |
-          VERSION="${{ needs.version.outputs.version }}"
+          VERSION=$(cat version.txt)
           pr_number=$(gh pr list --repo "${{ github.repository }}" --state merged \
-            --label "autorelease: pending" --json number,title \
+            --label "autorelease: pending" --limit 100 \
+            --json number,title \
             --jq ".[] | select(.title == \"chore(main): release ${VERSION}\") | .number")
           if [ -n "$pr_number" ]; then
             gh pr edit "$pr_number" --repo "${{ github.repository }}" \
