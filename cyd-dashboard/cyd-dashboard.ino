@@ -1135,6 +1135,8 @@ void fetchFlights() {
       bool ok = body.drain();
       http.end();
       if (isDevBuild()) Serial.printf("[net] flights states null len=%u ok=%d\n", (unsigned)body.bytesRead(), (int)ok);
+      snprintf(lastErr, sizeof lastErr, "%d aircraft", planeCount);
+      dirty = true;
       return;   // planeCount is already 0, no error
     }
     snprintf(lastErr, sizeof lastErr, "json no states");
