@@ -81,7 +81,7 @@ The `cyd-dashboard/` sketch targets the **ESP32-2432S028R "CYD"**
 
 ```bash
 arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
-  --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(cat version.txt)-dev" cyd-dashboard
+  --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(cat version.txt)" cyd-dashboard
 arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 cyd-dashboard
 ```
 
@@ -115,8 +115,10 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > good habit before flashing when you're iterating on the device.
 
 > **Version flag:** the `-DAPP_VERSION` flag above derives the local build's
-> version from `version.txt` at compile time (e.g. `1.2.4-dev`), so About
-> always shows an accurate dev version without needing manual updates. If you
+> version from `version.txt` at compile time (e.g. `1.2.4`), so About always
+> shows an accurate version without needing manual updates. Add the `-dev`
+> suffix (as in the blocks below) for a development build — `isDevBuild()`
+> keys off it to enable serial diagnostics and dev-only features. If you
 > compile without it (e.g. from the Arduino IDE), `kVersion` falls back to a
 > hardcoded literal in `cyd-dashboard.ino` that can drift out of date - prefer
 > the `arduino-cli` command above.
@@ -125,19 +127,49 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > (`-DBUILD_NUM=<n>`). The sketch defaults to `0` if it is not defined, and
 > `settings.ino` hides the build number on the About screen when it is `0`.
 >
-> **Dev build with local OTA + build number:** `ENABLE_LOCAL_OTA=1` enables the
-> serial `OTA_IP`/`OTA_FILE`/`OTA_GO` (or `OTA_URL`) commands that fetch an
-> image over plain HTTP from the local replay server on port 8080. A typical
-> dev build and flash:
+> **Dev build with local OTA + build number:** a dev build that can pull a
+> firmware image over plain HTTP needs **three** flags together — all are
+> required, and each is a silent no-op without the others:
+> - `-DAPP_VERSION=...-dev` — `isDevBuild()` gates the HTTP OTA path
+>   (`scheduleOTA` in `wifi_config.ino`).
+> - `-DENABLE_LOCAL_OTA=1` — allows `performOTA()` to fetch over `http://`
+>   (production builds reject non-HTTPS URLs).
+> - `-DENABLE_SERIAL_PROVISION=1` — compiles in `handleSerialCommands()`, the
+>   runtime serial listener in `loop()` that parses `OTA_*` commands; without
+>   it the commands are ignored (it also enables the ~4s `KEY=VALUE`
+>   provisioning window at boot, `PROV: listen 4s for KEY=VALUE`).
+>
+> A typical dev build and flash (`build/ota` is git-ignored):
 > ```bash
 > arduino-cli compile --clean --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
->   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(cat version.txt)-dev -DBUILD_NUM=1 -DENABLE_LOCAL_OTA=1" \
->   --output-dir /tmp/cyd_ota_out cyd-dashboard
-> arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 --input-dir /tmp/cyd_ota_out cyd-dashboard
+>   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(cat version.txt)-dev -DBUILD_NUM=1 -DENABLE_LOCAL_OTA=1 -DENABLE_SERIAL_PROVISION=1" \
+>   --output-dir build/ota cyd-dashboard
+> arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 --input-dir build/ota cyd-dashboard
 > ```
-> Then provision OTA from the serial console (baud 115200) while a local OTA
-> server is running, e.g. `OTA_IP=<host-ip>` + `OTA_FILE=cyd-dashboard.ino.bin`
-> + `OTA_GO`, or `OTA_URL=http://<host-ip>:8080/firmware?file=cyd-dashboard.ino.bin`
+>
+> Then serve the `.bin` over HTTP from a machine the board can reach. The
+> simplest option is a static server at the build directory's root, then pass
+> the full URL to the device:
+> ```bash
+> python3 -m http.server 8080 --directory build/ota
+> ```
+> ```text
+> OTA_URL=http://<host-ip>:8080/cyd-dashboard.ino.bin
+> ```
+> Alternatively, a server that maps `GET /firmware?file=<name>` to `build/ota/<name>`
+> on port 8080 supports the `OTA_IP`/`OTA_FILE`/`OTA_GO` form (see
+> `buildOtaUrl` in `wifi_config.ino`), which is convenient when the host IP
+> rarely changes:
+> ```text
+> OTA_IP=192.168.4.137
+> OTA_FILE=cyd-dashboard.ino.bin
+> OTA_GO
+> ```
+> Commands are sent over the USB serial console at **115200 baud**. `OTA_IP`
+> persists to NVS (`prefs.putString("otahost", ...)`), so on later reboots only
+> `OTA_GO` is needed. Successful scheduling logs `CMD: OTA scheduled from <url>`;
+> the download runs on a dedicated OTA task (`otaTaskEntry`) and the device
+> reboots when done (`[OTA] attempt 1 got=...` then `SW_CPU_RESET`).
 
 > **Important:** the display pinout is configured in the sketch's own
 > `cyd-dashboard/tft_setup.h`. TFT_eSPI auto-detects a `tft_setup.h` in the
