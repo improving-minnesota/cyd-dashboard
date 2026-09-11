@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.13.0...v1.13.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* hold LED 5 s and auto-return non-dashboard screens after 2 minutes ([#102](https://github.com/improving-minnesota/cyd-dashboard/issues/102)) ([dc88bed](https://github.com/improving-minnesota/cyd-dashboard/commit/dc88bed25a0c5405fa3d7ac4dad7bc2439616fe7))
+
 ## [1.13.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.12.1...v1.13.0) (2026-09-11)
 
 
