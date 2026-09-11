@@ -5,7 +5,7 @@
 // the inactive OTA slot with the arduino-esp32 Update library, then reboots.
 //
 // TLS: the release-metadata API call is verified against the Sectigo/USERTrust
-// root (kUserTrustRootCAs) and the firmware download is verified against the
+// root (kSectigoUSERTrustEccRootCAs) and the firmware download is verified against the
 // ISRG / Let's Encrypt roots (kIsrgRootCAs). If the bundled roots have passed
 // their expiry (OTA_CA_EXPIRY) the OTA path falls back to setInsecure(true);
 // data fetches never do. There is NO insecure retry on a handshake failure --
@@ -19,7 +19,7 @@
 #include "mbedtls/sha256.h"
 
 // OTA verifies TLS against per-host trust stores (GitHub API via
-// kUserTrustRootCAs, release assets via kIsrgRootCAs in cyd-dashboard.ino),
+// kSectigoUSERTrustEccRootCAs, release assets via kIsrgRootCAs in cyd-dashboard.ino),
 // with a time-gated setInsecure() fallback once those roots expire (see
 // OTA_CA_EXPIRY) so a root rotation can't block updates.
 

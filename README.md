@@ -18,11 +18,12 @@ no computer needed.
   logged to flash (always on) and graphed over Day / Week / Month / Year with the
   low, average, and high.
 - **Flight tracker** — live aircraft overhead (from OpenSky) with a mini radar,
-  callsign, altitude/speed/distance, origin & destination, airline logo, and a
-  dotted ground-track line showing where the plane actually came from. The LED
-  blinks white for every overhead flight unless the route involves a top US
-  airport (blue), or the flight is departing (red) or arriving (green) at your
-  home airport.
+  callsign, altitude/speed/distance, planned route from ADSB.lol (with OpenSky
+  actual-route fallback), airline logo, and a dotted ground-track line showing
+  where the plane actually came from. The LED blinks blue for every overhead
+  flight, red when departing your home airport (ICAO), green when arriving at
+  your home airport (ICAO), or yellow when both origin and destination are your
+  home airport. Red, green, and yellow then stay lit for 2 s.
 - **Govee pool temp monitor** — current pool water temperature from a Govee
   thermometer, with a history graph (Day / Week / Month / Year) showing the
   low, average, and high.
@@ -120,11 +121,11 @@ Defaults for a freshly reset device are shown with each setting.
   uses the gateway; incomplete static fields fall back to DHCP. Changes apply
   on the next connect.
 - **Flight Tracker** — on/off, units (mi or km), radar radius, altitude ceiling,
-  poll interval, the countdown/timer bar on the dashboard, your home airport,
+  poll interval, the countdown/timer bar on the dashboard, your home airport (ICAO),
   and whether to blink the LED for an overhead flight. Also where you enter your
-  OpenSky credentials. The LED blinks white for every overhead flight, blue when
-  the route involves a top US airport, red when departing your home airport, or
-  green when arriving at your home airport. Defaults: **on**, imperial units,
+  OpenSky credentials. The LED blinks blue for every overhead flight, red when
+  departing, green when arriving, or yellow when both origin and destination are
+  your home airport (ICAO), and then stays lit for 2 s. Defaults: **on**, imperial units,
   **3.5 mi** radius, **15,000 ft** ceiling, **60 s** poll, timer **off**, no home
   airport set, blinking **on**. If your OpenSky **radar-polling** credits run
   out, the poll backs off to a slower 15-minute recovery check until they refill

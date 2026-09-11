@@ -43,6 +43,9 @@ void logoRelease(const RuntimeLogo* logo);
 // are inserted before the sketch body) can reference drawFlightInfo(Plane& p).
 struct Plane;
 
+// LED blink colors for overhead-flight notifications.
+enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW };
+
 // Serial NVS provisioning (see wifi_config.ino). Defined HERE (not in
 // wifi_config.ino) because Arduino concatenates .ino files alphabetically, and
 // this file uses the macro before wifi_config.ino is reached. Set to 0 to
@@ -207,8 +210,19 @@ struct FlightSnap {
   float distMi;
   float dxMi;             // east offset (for the radar blip)
   float dyMi;             // north offset (for the radar blip)
+  // Raw route sources, remembered so the recall detail screen can recompute the
+  // chosen route even after the live globals have moved on to a new aircraft.
+  char  adsbOrigin[6];
+  char  adsbDest[6];
+  char  adsbOriginCity[24];
+  char  adsbDestCity[24];
+  char  openOrigin[6];
+  char  openDest[6];
+  // Chosen route for the live view and the recall screen.
   char  origin[6];        // route ICAO codes ("" = unknown)
   char  dest[6];
+  char  originCity[24];   // city for the chosen route source
+  char  destCity[24];
   bool  routeFetched;
   unsigned long tickMs;   // millis() of the last known position / dead-reckon step
 };
@@ -262,8 +276,12 @@ bool  g_creditsKnown = false; // false until the first successful fetch
 bool  g_creditsExhausted = false;  // true when at/near the daily radar-polling credit limit
 int   g_flightsCredits = -1;  // /flights/* bucket remaining (-1 = not seen yet)
 int   g_tracksCredits  = -1;  // /tracks/* bucket remaining (-1 = not seen yet)
+unsigned long g_nextRadarMs = 0;  // earliest millis() to retry the /states/* bucket after a 429
+unsigned long g_nextRouteMs = 0;  // earliest millis() to retry the /flights/* bucket after a 429
+unsigned long g_nextTrackMs = 0;  // earliest millis() to retry the /tracks/* bucket after a 429
 const int LOW_CREDIT_THRESHOLD = 0;         // "at the limit"
-const unsigned long CREDIT_RECOVERY_MS = 15UL * 60UL * 1000UL;  // retry cadence while exhausted
+const unsigned long CREDIT_RECOVERY_MS = 15UL * 60UL * 1000UL;  // fallback retry cadence while exhausted
+const unsigned long ADSB_RETRY_MS = 60UL * 1000UL;  // vrs-standing-data 429/transport retry
 
 // OpenSky auth state for the red border indicator
 enum AuthState { AUTH_OK = 0, AUTH_ANON, AUTH_BAD };
@@ -461,14 +479,10 @@ unsigned long wifiTryStart = 0;
 // overhead flight is found.
 bool g_suppressFlight = false;
 
-// One-shot LED blink queued when an overhead flight is found. Performed in
-// loop() AFTER the flight view is drawn, so the user sees the data first and
-// then the blink notification (not the other way around).
+// Queued LED blink. Performed in loop() AFTER the flight view is drawn, so the
+// user sees the data first and then the blink notification.
 bool g_pendingBlink = false;
-bool g_blinkDeparting = false;
-bool g_blinkIncoming  = false;
-bool g_blinkTop50     = false;
-bool g_blinkWhite     = false;
+BlinkColor g_blinkColor = BLINK_BLUE;
 
 // Route details for the overhead flight (origin/destination), fetched
 // automatically the first time a new plane is overhead and cached per plane
@@ -478,6 +492,16 @@ String g_routeOrigin = "";      // "KDAL"
 String g_routeDest   = "";      // e.g. "KJFK"
 bool   g_routeFetched = false;  // true once we've tried (success or not)
 volatile bool g_routeBusy = false;  // true while a route fetch is in flight (cross-task)
+
+// adsb.lol vrs-standing-data callsign route (planned route). Used as the primary
+// display; OpenSky is shown only when its actual route differs.
+String g_adsbRouteOrigin = "";
+String g_adsbRouteDest   = "";
+String g_adsbOriginCity  = "";
+String g_adsbDestCity    = "";
+bool   g_adsbRouteFetched = false;
+volatile bool g_adsbRouteBusy = false;
+unsigned long g_nextAdsbMs = 0; // back-off after a 429 or transport failure
 
 // Ground track for the tracked overhead plane, fetched once per new plane from
 // the OpenSky /tracks endpoint and used to draw the past flight path and to
@@ -584,7 +608,7 @@ static const char* const kAmazonRootCAs =
 
 
 // GitHub API: Sectigo / USERTrust ECC root
-static const char* const kUserTrustRootCAs =
+static const char* const kSectigoUSERTrustEccRootCAs =
   // [1] USERTrust ECC Certification Authority
   "-----BEGIN CERTIFICATE-----\n"
   "MIICjzCCAhWgAwIBAgIQXIuZxVqUxdJxVt7NiYDMJjAKBggqhkjOPQQDAzCBiDEL\n"
@@ -796,6 +820,39 @@ static const char* const kIsrgRootCAs =
 // unmapped hosts return nullptr so TLS setup fails cleanly. The OTA path
 // may still fall back to setInsecure() once the bundled roots have passed
 // OTA_CA_EXPIRY.
+// adsb.lol / vrs-standing-data trust bundle
+// GlobalSign ECC Root CA - R4 (root) + WE1 (intermediate).
+static const char* const kGlobalSignEccRootCAs =
+  "-----BEGIN CERTIFICATE-----\n"
+  "MIIB4TCCAYegAwIBAgIRKjikHJYKBN5CsiilC+g0mAIwCgYIKoZIzj0EAwIwUDEk\n"
+  "MCIGA1UECxMbR2xvYmFsU2lnbiBFQ0MgUm9vdCBDQSAtIFI0MRMwEQYDVQQKEwpH\n"
+  "bG9iYWxTaWduMRMwEQYDVQQDEwpHbG9iYWxTaWduMB4XDTEyMTExMzAwMDAwMFoX\n"
+  "DTM4MDExOTAzMTQwN1owUDEkMCIGA1UECxMbR2xvYmFsU2lnbiBFQ0MgUm9vdCBD\n"
+  "QSAtIFI0MRMwEQYDVQQKEwpHbG9iYWxTaWduMRMwEQYDVQQDEwpHbG9iYWxTaWdu\n"
+  "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuMZ5049sJQ6fLjkZHAOkrprlOQcJ\n"
+  "FspjsbmG+IpXwVfOQvpzofdlQv8ewQCybnMO/8ch5RikqtlxP6jUuc6MHaNCMEAw\n"
+  "DgYDVR0PAQH/BAQDAgEGMA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFFSwe61F\n"
+  "uOJAf/sKbvu+M8k8o4TVMAoGCCqGSM49BAMCA0gAMEUCIQDckqGgE6bPA7DmxCGX\n"
+  "kPoUVy0D7O48027KqGx2vKLeuwIgJ6iFJzWbVsaj8kfSt24bAgAXqmemFZHe+pTs\n"
+  "ewv4n4Q=\n"
+  "-----END CERTIFICATE-----\n" \
+  "-----BEGIN CERTIFICATE-----\n"
+  "MIICjjCCAjOgAwIBAgIQf/NXaJvCTjAtkOGKQb0OHzAKBggqhkjOPQQDAjBQMSQw\n"
+  "IgYDVQQLExtHbG9iYWxTaWduIEVDQyBSb290IENBIC0gUjQxEzARBgNVBAoTCkds\n"
+  "b2JhbFNpZ24xEzARBgNVBAMTCkdsb2JhbFNpZ24wHhcNMjMxMjEzMDkwMDAwWhcN\n"
+  "MjkwMjIwMTQwMDAwWjA7MQswCQYDVQQGEwJVUzEeMBwGA1UEChMVR29vZ2xlIFRy\n"
+  "dXN0IFNlcnZpY2VzMQwwCgYDVQQDEwNXRTEwWTATBgcqhkjOPQIBBggqhkjOPQMB\n"
+  "BwNCAARvzTr+Z1dHTCEDhUDCR127WEcPQMFcF4XGGTfn1XzthkubgdnXGhOlCgP4\n"
+  "mMTG6J7/EFmPLCaY9eYmJbsPAvpWo4IBAjCB/zAOBgNVHQ8BAf8EBAMCAYYwHQYD\n"
+  "VR0lBBYwFAYIKwYBBQUHAwEGCCsGAQUFBwMCMBIGA1UdEwEB/wQIMAYBAf8CAQAw\n"
+  "HQYDVR0OBBYEFJB3kjVnxP+ozKnme9mAeXvMk/k4MB8GA1UdIwQYMBaAFFSwe61F\n"
+  "uOJAf/sKbvu+M8k8o4TVMDYGCCsGAQUFBwEBBCowKDAmBggrBgEFBQcwAoYaaHR0\n"
+  "cDovL2kucGtpLmdvb2cvZ3NyNC5jcnQwLQYDVR0fBCYwJDAioCCgHoYcaHR0cDov\n"
+  "L2MucGtpLmdvb2cvci9nc3I0LmNybDATBgNVHSAEDDAKMAgGBmeBDAECATAKBggq\n"
+  "hkjOPQQDAgNJADBGAiEAokJL0LgR6SOLR02WWxccAq3ndXp4EMRveXMUVUxMWSMC\n"
+  "IQDspFWa3fj7nLgouSdkcPy1SdOR2AGm9OQWs7veyXsBwA==\n"
+  "-----END CERTIFICATE-----\n";
+
 static bool hostSuffixMatches(const char* host, size_t len, const char* suffix) {
   size_t slen = strlen(suffix);
   if (len < slen) return false;
@@ -820,8 +877,9 @@ static const char* trustStoreForUrl(const char* url) {
   if (hostSuffixMatches(host, len, "govee.com"))                return kAmazonRootCAs;
   // GitHub API is Sectigo/USERTrust-signed; GitHub release assets are
   // served from *.githubusercontent.com and use Let's Encrypt / ISRG.
-  if (hostSuffixMatches(host, len, "github.com"))               return kUserTrustRootCAs;
+  if (hostSuffixMatches(host, len, "github.com"))               return kSectigoUSERTrustEccRootCAs;
   if (hostSuffixMatches(host, len, "githubusercontent.com"))    return kIsrgRootCAs;
+  if (hostSuffixMatches(host, len, "vrs-standing-data.adsb.lol")) return kGlobalSignEccRootCAs;
   return nullptr;  // unmapped host: fail TLS setup cleanly
 }
 
@@ -940,6 +998,34 @@ String urlEncode(const String& s) {
     }
   }
   return out;
+}
+
+// Pick the route data to show: adsb.lol by default; OpenSky only when its
+// actual airports differ from adsb.lol's planned route. Returns the ICAO codes
+// and the matching city names to draw.
+void getRouteDisplay(String& origin, String& originCity, String& dest, String& destCity, bool& hasData) {
+  origin = ""; originCity = ""; dest = ""; destCity = ""; hasData = false;
+  String adsbO = (g_adsbRouteBusy || g_adsbRouteOrigin.length() == 0) ? "" : g_adsbRouteOrigin;
+  String adsbD = (g_adsbRouteBusy || g_adsbRouteDest.length() == 0) ? "" : g_adsbRouteDest;
+  String adsbOC = (g_adsbRouteBusy || g_adsbOriginCity.length() == 0) ? "" : g_adsbOriginCity;
+  String adsbDC = (g_adsbRouteBusy || g_adsbDestCity.length() == 0) ? "" : g_adsbDestCity;
+  String openO = (g_routeBusy || g_routeOrigin.length() == 0) ? "" : g_routeOrigin;
+  String openD = (g_routeBusy || g_routeDest.length() == 0) ? "" : g_routeDest;
+  bool openDiffers = (openO.length() && openO != adsbO) || (openD.length() && openD != adsbD);
+  if (openDiffers) {
+    origin = openO; dest = openD;
+    originCity = airportCity(openO.c_str());
+    destCity = airportCity(openD.c_str());
+  } else if (adsbO.length() || adsbD.length()) {
+    origin = adsbO; dest = adsbD;
+    originCity = adsbOC.length() ? adsbOC : airportCity(origin.c_str());
+    destCity = adsbDC.length() ? adsbDC : airportCity(dest.c_str());
+  } else if (openO.length() || openD.length()) {
+    origin = openO; dest = openD;
+    originCity = airportCity(openO.c_str());
+    destCity = airportCity(openD.c_str());
+  }
+  hasData = (origin.length() || dest.length() || g_adsbRouteFetched || g_routeFetched);
 }
 
 // Ensure g_osToken holds a valid bearer token, fetching one from the OpenSky
@@ -1075,8 +1161,8 @@ void fetchFlights() {
   // Tell HTTPClient which response headers to capture. Without this it discards
   // everything except a small built-in set, so X-Rate-Limit-Remaining (the
   // OpenSky credit balance) would never be available.
-  const char* hdrKeys[] = { "X-Rate-Limit-Remaining" };
-  http.collectHeaders(hdrKeys, 1);
+  const char* hdrKeys[] = { "X-Rate-Limit-Remaining", "X-Rate-Limit-Retry-After-Seconds" };
+  http.collectHeaders(hdrKeys, 2);
   // Authenticate via OAuth2 client-credentials for the higher 4000-credit/day
   // rate. If no client is configured, openskyEnsureToken() returns false and we
   // fall back to anonymous (400 credits/day). A TLS/handshake failure on the
@@ -1119,10 +1205,15 @@ void fetchFlights() {
   }
   if (code == HTTP_CODE_TOO_MANY_REQUESTS) {
     // Rate/credit limited - treat as exhausted regardless of the last known
-    // header value, and back off to the recovery cadence.
+    // header value, and back off until the bucket resets. OpenSky returns the
+    // seconds until the rate limit clears in X-Rate-Limit-Retry-After-Seconds.
     g_creditsKnown = true;
     g_creditsRemaining = 0;
     g_creditsExhausted = true;
+    String retry = http.header("X-Rate-Limit-Retry-After-Seconds");
+    unsigned long waitMs = retry.length() ? (unsigned long)retry.toInt() * 1000UL : CREDIT_RECOVERY_MS;
+    g_nextRadarMs = millis() + waitMs;
+    if (isDevBuild() && retry.length()) Serial.printf("[net] 429 radar retry after %lus\n", (unsigned long)retry.toInt());
     snprintf(lastErr, sizeof lastErr, "429 no credits");
     http.end();
     dirty = true;
@@ -1241,7 +1332,8 @@ void fetchFlights() {
   // identity changed, reset any route details so they are re-fetched for the
   // new plane (the route cache belongs to the previous plane).
   static char lastOverheadIcao[7] = "";
-  static char ledBlinkedIcao[7] = "";   // so we blink only once per new plane
+  static char lastBlinkIcao[7] = "";    // so we re-blink when the color changes
+  static BlinkColor lastBlinkColor = BLINK_NONE;
   if (planeCount > 0 && planes[0].distMi <= g_radiusMi) {
     g_suppressFlight = false;
     // Snapshot the overhead flight so the "N aircraft" tap can recall the same
@@ -1257,10 +1349,23 @@ void fetchFlights() {
     g_lastFlight.dxMi   = planes[0].dxMi;
     g_lastFlight.dyMi   = planes[0].dyMi;
     g_lastFlight.tickMs = planes[0].lastStepMs;
-    if (!g_routeBusy) {
-      g_lastFlight.origin[0] = 0; strncpy(g_lastFlight.origin, g_routeOrigin.c_str(), 5); g_lastFlight.origin[5] = 0;
-      g_lastFlight.dest[0]   = 0; strncpy(g_lastFlight.dest,   g_routeDest.c_str(),   5); g_lastFlight.dest[5]   = 0;
-      g_lastFlight.routeFetched = g_routeFetched;
+    if (!g_adsbRouteBusy && !g_routeBusy) {
+      String o, oc, d, dc;
+      bool hasData;
+      getRouteDisplay(o, oc, d, dc, hasData);
+      g_lastFlight.origin[0] = 0; strncpy(g_lastFlight.origin, o.c_str(), 5); g_lastFlight.origin[5] = 0;
+      g_lastFlight.dest[0]   = 0; strncpy(g_lastFlight.dest,   d.c_str(), 5); g_lastFlight.dest[5]   = 0;
+      g_lastFlight.originCity[0] = 0; strncpy(g_lastFlight.originCity, oc.c_str(), sizeof(g_lastFlight.originCity) - 1); g_lastFlight.originCity[sizeof(g_lastFlight.originCity) - 1] = 0;
+      g_lastFlight.destCity[0]   = 0; strncpy(g_lastFlight.destCity,   dc.c_str(), sizeof(g_lastFlight.destCity)   - 1); g_lastFlight.destCity[sizeof(g_lastFlight.destCity)   - 1] = 0;
+      g_lastFlight.routeFetched = hasData;
+      // Remember the raw sources so the recall screen can recompute the same
+      // choice later, even after the live globals are reset for a new aircraft.
+      g_lastFlight.adsbOrigin[0] = 0; strncpy(g_lastFlight.adsbOrigin, g_adsbRouteOrigin.c_str(), 5); g_lastFlight.adsbOrigin[5] = 0;
+      g_lastFlight.adsbDest[0]   = 0; strncpy(g_lastFlight.adsbDest,   g_adsbRouteDest.c_str(),   5); g_lastFlight.adsbDest[5]   = 0;
+      g_lastFlight.adsbOriginCity[0] = 0; strncpy(g_lastFlight.adsbOriginCity, g_adsbOriginCity.c_str(), sizeof(g_lastFlight.adsbOriginCity) - 1); g_lastFlight.adsbOriginCity[sizeof(g_lastFlight.adsbOriginCity) - 1] = 0;
+      g_lastFlight.adsbDestCity[0]   = 0; strncpy(g_lastFlight.adsbDestCity,   g_adsbDestCity.c_str(),   sizeof(g_lastFlight.adsbDestCity)   - 1); g_lastFlight.adsbDestCity[sizeof(g_lastFlight.adsbDestCity)   - 1]   = 0;
+      g_lastFlight.openOrigin[0] = 0; strncpy(g_lastFlight.openOrigin, g_routeOrigin.c_str(), 5); g_lastFlight.openOrigin[5] = 0;
+      g_lastFlight.openDest[0]   = 0; strncpy(g_lastFlight.openDest,   g_routeDest.c_str(),   5); g_lastFlight.openDest[5]   = 0;
     }
     if (strncmp(planes[0].icao24, lastOverheadIcao, 6) != 0) {
       strncpy(lastOverheadIcao, planes[0].icao24, 6);
@@ -1268,43 +1373,48 @@ void fetchFlights() {
       g_routeFetched = false;
       g_routeOrigin = "";
       g_routeDest = "";
+      g_adsbRouteFetched = false;
+      g_adsbRouteOrigin = "";
+      g_adsbRouteDest = "";
+      g_adsbOriginCity = "";
+      g_adsbDestCity = "";
       g_trackFetched = false;
       portENTER_CRITICAL(&g_trackMux);
       g_trackCount = 0;
       g_trackBearingDeg = -1.0f;
       portEXIT_CRITICAL(&g_trackMux);
-      ledBlinkedIcao[0] = 0;
+      lastBlinkIcao[0] = 0;
+      lastBlinkColor = BLINK_NONE;
     }
     // Fetch the route and the ground track automatically the first time this
     // plane is overhead, caching each once per plane (g_routeFetched /
     // g_trackFetched). A failed/empty track just leaves g_trackCount=0 so the
     // radar draws no line and dead-reckoning falls back to heading/speed.
-    if (!g_routeFetched) fetchRoute(planes[0].icao24);
-    if (!g_trackFetched) fetchTrack(planes[0].icao24);
-    // Queue an LED blink for this new overhead flight. The blink is deferred
-    // to loop() so the flight view draws first. Color priority is:
-    //   red   = origin matches the home airport
-    //   green = destination matches the home airport
-    //   blue  = origin or destination is in the top-50 US airports (but not home)
-    //   white = all other overhead flights (including flights with no route data)
-    if (strncmp(planes[0].icao24, ledBlinkedIcao, 6) != 0) {
-      // Compare against the configured home airport, if any; no default.
-      g_blinkDeparting = g_blinkIncoming = g_blinkTop50 = g_blinkWhite = false;
-      if (g_homeAirport.length() && g_routeOrigin == g_homeAirport) {
-        g_blinkDeparting = true;
-      } else if (g_homeAirport.length() && g_routeDest == g_homeAirport) {
-        g_blinkIncoming = true;
-      } else if (isTopAirport(g_routeOrigin.c_str()) || isTopAirport(g_routeDest.c_str())) {
-        g_blinkTop50 = true;
-      } else {
-        g_blinkWhite = true;
-      }
+    unsigned long nowMs = millis();
+    if (!g_routeFetched && (long)(nowMs - g_nextRouteMs) >= 0) fetchRoute(planes[0].icao24);
+    if (!g_trackFetched && (long)(nowMs - g_nextTrackMs) >= 0) fetchTrack(planes[0].icao24);
+    if (!g_adsbRouteFetched && (long)(nowMs - g_nextAdsbMs) >= 0) fetchAdsbRoute(planes[0].callsign);
+    // Decide the LED color from the best available route source. Re-check on
+    // every poll and re-blink whenever the color changes (e.g. when route data
+    // arrives after the first sighting). OpenSky is preferred per field when
+    // non-empty; ADSB.lol fills the gaps. Yellow = origin and destination are
+    // the same home airport.
+    BlinkColor color = computeBlinkColor();
+    if (strncmp(planes[0].icao24, lastBlinkIcao, 6) != 0) {
+      strncpy(lastBlinkIcao, planes[0].icao24, 6);
+      lastBlinkIcao[6] = 0;
+      lastBlinkColor = color;
+      g_blinkColor = color;
       g_pendingBlink = true;
-      strncpy(ledBlinkedIcao, planes[0].icao24, 6);
-      ledBlinkedIcao[6] = 0;
+    } else if (color != lastBlinkColor) {
+      lastBlinkColor = color;
+      g_blinkColor = color;
+      g_pendingBlink = true;
     }
   } else {
     lastOverheadIcao[0] = 0;
+    lastBlinkIcao[0] = 0;
+    lastBlinkColor = BLINK_NONE;
   }
   snprintf(lastErr, sizeof lastErr, "%d aircraft", planeCount);
   dirty = true;
@@ -1698,6 +1808,25 @@ void drawCog() {
 #define CYD_LED_GREEN 16
 #define CYD_LED_BLUE  17
 
+// Pick the best route field for the LED. OpenSky is live data, so it wins if
+// it has a non-empty value; otherwise fall back to the ADSB.lol planned route.
+static String ledRouteField(const String& openVal, const String& adsbVal) {
+  return openVal.length() ? openVal : adsbVal;
+}
+
+// Decide the LED color for the currently overhead flight.
+// OpenSky route data is preferred per field when non-empty; ADSB.lol fills in
+// the gaps. Yellow = both origin and destination are the same home airport.
+static BlinkColor computeBlinkColor() {
+  if (g_homeAirport.length() == 0) return BLINK_BLUE;
+  String o = ledRouteField(g_routeOrigin, g_adsbRouteOrigin);
+  String d = ledRouteField(g_routeDest,   g_adsbRouteDest);
+  if (o.length() && d.length() && o == d && o == g_homeAirport) return BLINK_YELLOW;
+  if (o == g_homeAirport) return BLINK_RED;
+  if (d == g_homeAirport) return BLINK_GREEN;
+  return BLINK_BLUE;
+}
+
 // Blink `pin` (active-low) `times` times, `ms` per phase.
 void blinkLedPin(int pin, int times, int ms) {
   pinMode(pin, OUTPUT);
@@ -1710,30 +1839,39 @@ void blinkLedPin(int pin, int times, int ms) {
 }
 
 // Blink the onboard LED to signal an overhead flight:
-//   red   = origin matches the home airport
-//   green = destination matches the home airport
-//   blue  = origin or destination is in the top-50 US airports (but not home)
-//   white = all other overhead flights (including flights with no route data)
+//   red    = origin matches the home airport
+//   green  = destination matches the home airport
+//   yellow = both origin and destination are the same home airport
+//   blue   = all other overhead flights (default)
 // Each color blinks 5 times at 240 ms on/off. We turn ALL LEDs off first so a
-// stale LOW on a previous color does not bleed.
-void blinkLed(bool departing, bool incoming, bool top50, bool white) {
+// stale LOW on a previous color does not bleed. Red, green, and yellow then stay
+// lit for 2 seconds after the blink, while blue just blinks.
+void blinkLed(BlinkColor color) {
   pinMode(CYD_LED_RED, OUTPUT);   digitalWrite(CYD_LED_RED, HIGH);
   pinMode(CYD_LED_GREEN, OUTPUT); digitalWrite(CYD_LED_GREEN, HIGH);
   pinMode(CYD_LED_BLUE, OUTPUT);  digitalWrite(CYD_LED_BLUE, HIGH);
-  if (departing) {
+  if (color == BLINK_RED) {
     blinkLedPin(CYD_LED_RED, 5, 240);
-  } else if (incoming) {
+    digitalWrite(CYD_LED_RED, LOW);   // hold lit for 2 s after blink
+    delay(2000);
+    digitalWrite(CYD_LED_RED, HIGH);
+  } else if (color == BLINK_GREEN) {
     blinkLedPin(CYD_LED_GREEN, 5, 240);
-  } else if (top50) {
-    blinkLedPin(CYD_LED_BLUE, 5, 240);
-  } else if (white) {
-    // White = all three LEDs on together (active-low).
+    digitalWrite(CYD_LED_GREEN, LOW); // hold lit for 2 s after blink
+    delay(2000);
+    digitalWrite(CYD_LED_GREEN, HIGH);
+  } else if (color == BLINK_YELLOW) {
     for (int i = 0; i < 5; i++) {
-      digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, LOW);
+      digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, HIGH);
       delay(240);
       digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
       delay(240);
     }
+    digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, HIGH);
+    delay(2000);
+    digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
+  } else {
+    blinkLedPin(CYD_LED_BLUE, 5, 240);
   }
   digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
 }
@@ -1792,18 +1930,15 @@ void drawFlightInfo(Plane& p) {
     tft.printf("%dft  %dmph  %.1fmi", p.altFt, (int)round(p.spdKt * 1.15078f), p.distMi);
   }
 
-  // Origin/destination (route fetched automatically once per plane and cached).
-  // Each endpoint shows the airport code and the city on separate lines, in
-  // FONT2 (same as alt/speed/distance). The city line shows "--" for airports
-  // not in the lookup table rather than echoing the code. The route is fetched
-  // on the network task; while it's being written, don't read
-  // g_routeOrigin/g_routeDest (String isn't thread-safe) - just show no route
-  // for that frame.
-  const char* origin = g_routeBusy ? "" : g_routeOrigin.c_str();
-  const char* dest   = g_routeBusy ? "" : g_routeDest.c_str();
-  bool origKnown = (origin[0] != 0);
-  bool destKnown = (dest[0] != 0);
-  bool destEmpty = (dest[0] == 0);
+  // Origin/destination. adsb.lol is the planned route; OpenSky is shown only
+  // when its actual airports differ. The route is fetched on the network task;
+  // getRouteDisplay guards the shared String globals, so the values are safe to
+  // read for this frame even if a fetch is in flight.
+  String origin, originCity, dest, destCity;
+  bool hasData;
+  getRouteDisplay(origin, originCity, dest, destCity, hasData);
+  bool origKnown = (origin.length() > 0);
+  bool destKnown = (dest.length() > 0);
   int y = 114;
   tft.setTextFont(2);
   if (origKnown) {
@@ -1811,7 +1946,7 @@ void drawFlightInfo(Plane& p) {
     tft.setCursor(8, y); tft.print("Origin");
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setCursor(8, y + 16); tft.print(origin);        // airport code
-    tft.setCursor(8, y + 32); tft.print(airportCity(origin));  // city
+    tft.setCursor(8, y + 32); tft.print(originCity);    // city
     y += 54;
   }
   if (destKnown) {
@@ -1819,10 +1954,10 @@ void drawFlightInfo(Plane& p) {
     tft.setCursor(8, y); tft.print("Destination");
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setCursor(8, y + 16); tft.print(dest);           // airport code
-    tft.setCursor(8, y + 32); tft.print(airportCity(dest));     // city
-  } else if (g_routeFetched && destEmpty && origKnown) {
-    // OpenSky leaves arrival unknown until landing; show "--" (code + city) so
-    // the block height matches a known endpoint and isn't read as origin==dest.
+    tft.setCursor(8, y + 32); tft.print(destCity);       // city
+  } else if (hasData && !destKnown && origKnown) {
+    // OpenSky leaves arrival unknown until landing; show "--" so the block
+    // height matches a known endpoint and isn't read as origin==dest.
     tft.setTextColor(TFT_CYAN, TFT_BLACK);
     tft.setCursor(8, y); tft.print("Destination");
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
@@ -1830,7 +1965,7 @@ void drawFlightInfo(Plane& p) {
     tft.setCursor(8, y + 32); tft.print("--");   // city placeholder
   }
   // If neither side had route data, say so so it is clear the feature is there.
-  if (g_routeFetched && !origKnown && !destKnown) {
+  if (hasData && !origKnown && !destKnown) {
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(8, y);
     tft.print("No route data");
@@ -2315,6 +2450,8 @@ void drawFlightDetailPage() {
     // Origin/destination from the snapshot (same rules as drawFlightInfo).
     const char* origin = g_lastFlight.origin;
     const char* dest   = g_lastFlight.dest;
+    const char* originCity = g_lastFlight.originCity;
+    const char* destCity   = g_lastFlight.destCity;
     bool origKnown = (origin[0] != 0);
     bool destKnown = (dest[0] != 0);
     int y = 114;
@@ -2323,7 +2460,7 @@ void drawFlightDetailPage() {
       tft.setCursor(8, y); tft.print("Origin");
       tft.setTextColor(TFT_WHITE, TFT_BLACK);
       tft.setCursor(8, y + 16); tft.print(origin);
-      tft.setCursor(8, y + 32); tft.print(airportCity(origin));
+      tft.setCursor(8, y + 32); tft.print(originCity[0] ? originCity : "--");
       y += 54;
     }
     if (destKnown) {
@@ -2331,12 +2468,13 @@ void drawFlightDetailPage() {
       tft.setCursor(8, y); tft.print("Destination");
       tft.setTextColor(TFT_WHITE, TFT_BLACK);
       tft.setCursor(8, y + 16); tft.print(dest);
-      tft.setCursor(8, y + 32); tft.print(airportCity(dest));
+      tft.setCursor(8, y + 32); tft.print(destCity[0] ? destCity : "--");
     } else if (g_lastFlight.routeFetched && !destKnown && origKnown) {
       tft.setTextColor(TFT_CYAN, TFT_BLACK);
       tft.setCursor(8, y); tft.print("Destination");
       tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
       tft.setCursor(8, y + 16); tft.print("--");
+      tft.setCursor(8, y + 32); tft.print("--");
     }
     if (g_lastFlight.routeFetched && !origKnown && !destKnown) {
       tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
@@ -3144,11 +3282,17 @@ void loop() {
     // OpenSky radar-polling credits are exhausted, back off to an infrequent
     // recovery check instead of the normal cadence, so we notice once credits
     // refill (OpenSky resets daily) without hammering the API.
-    unsigned long pollInterval = g_creditsExhausted
-        ? CREDIT_RECOVERY_MS : (unsigned long)g_pollSec * 1000UL;
-    if (g_trackEnabled && now - lastPoll >= pollInterval) {
-      lastPoll = now;
-      netWantFlights = true;
+    if (g_trackEnabled) {
+      bool wantFlights = false;
+      if (g_creditsExhausted) {
+        if ((long)(now - g_nextRadarMs) >= 0) wantFlights = true;
+      } else if (now - lastPoll >= (unsigned long)g_pollSec * 1000UL) {
+        wantFlights = true;
+      }
+      if (wantFlights) {
+        lastPoll = now;
+        netWantFlights = true;
+      }
     }
     // Periodic weather refresh
     if (now - g_lastWeather >= WEATHER_REFRESH_MS) {
@@ -3217,13 +3361,11 @@ void loop() {
     else drawDashboard();
   }
 
-  // Run a queued LED blink now that the flight view has been drawn, so the user
-  // sees the data first and then the blink notification. Skipped entirely when
-  // the "Blink for Flight" setting is off.
+  // Run a queued LED blink. The color was already decided in fetchFlights()
+  // and re-checked on every poll, so we blink whenever the route state changes.
   if (g_pendingBlink) {
     g_pendingBlink = false;
-    if (g_blinkForFlight)
-      blinkLed(g_blinkDeparting, g_blinkIncoming, g_blinkTop50, g_blinkWhite);
+    if (g_blinkForFlight) blinkLed(g_blinkColor);
   }
   // Periodic heap/TLS/fetch diagnostic. No-op in release builds.
   static unsigned long lastHeapDiag = 0;

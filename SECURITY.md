@@ -37,7 +37,7 @@ Firmware is delivered over HTTPS from this repository's GitHub releases and is
 authenticated at two independent layers:
 
 - **Transport (TLS certificate verification).** The release-metadata
-  request (`api.github.com`) is verified against the `kUserTrustRootCAs`
+  request (`api.github.com`) is verified against the `kSectigoUSERTrustEccRootCAs`
   bundle (Sectigo / USERTrust ECC), and the firmware download
   (`objects.githubusercontent.com`) is verified against the `kIsrgRootCAs`
   bundle (ISRG / Let's Encrypt). Both bundles are embedded in
@@ -67,11 +67,14 @@ and always verifies.
 
 The non-OTA HTTPS calls — OpenSky (token exchange, flight data, and flight
 history), the weather provider (open-meteo), the address geocoder (Nominatim),
-and the Govee pool-temp API — are all TLS-verified against root-CA bundles
-embedded in the firmware. OpenSky, open-meteo, and Nominatim are Let's Encrypt
-signed and use the shared `kIsrgRootCAs` bundle (ISRG Root X1 + X2 and the
-Let's Encrypt intermediate chain); Govee is Amazon-signed and uses
-`kAmazonRootCAs`. There is no fallback bundle; an unmapped host fails TLS
+Govee pool-temp, and the ADSB.lol static route mirror — are all TLS-verified
+against root-CA bundles embedded in the firmware. OpenSky, open-meteo, and
+Nominatim are Let's Encrypt signed and use the shared `kIsrgRootCAs` bundle
+(ISRG Root X1 + X2 and the Let's Encrypt intermediate chain); Govee is
+Amazon-signed and uses `kAmazonRootCAs`; `vrs-standing-data.adsb.lol` is
+Google Trust Services / GlobalSign signed and uses `kGlobalSignEccRootCAs` (GlobalSign
+ECC Root CA - R4 bundled with the WE1 intermediate). There is no fallback
+bundle; an unmapped host fails TLS
 setup rather than loading a bundle that may not cover its chain. Unlike
 the OTA path there is **no** `setInsecure()` fallback, so a certificate
 validation failure is never downgraded to an insecure connection. Transient

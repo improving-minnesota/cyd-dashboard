@@ -319,8 +319,11 @@ picks the smallest bundled root set that covers the target host:
 - `kIsrgRootCAs` — OpenSky, open-meteo, Nominatim, and GitHub release assets
   (`*.githubusercontent.com`) (ISRG / Let's Encrypt).
 - `kAmazonRootCAs` — Govee (Amazon Root CA 1).
-- `kUserTrustRootCAs` — GitHub API hostnames (`github.com`, `api.github.com`)
+- `kSectigoUSERTrustEccRootCAs` — GitHub API hostnames (`github.com`, `api.github.com`)
   (Sectigo / USERTrust ECC root).
+- `kGlobalSignEccRootCAs` — `vrs-standing-data.adsb.lol` route data (GlobalSign ECC
+  Root CA - R4, bundled with the WE1 intermediate because the server does not
+  always send the full chain).
 
 There is no fallback bundle; an unmapped host returns `nullptr` from
 `trustStoreForUrl()` and `httpsBegin()` fails cleanly rather than silently using
@@ -541,7 +544,7 @@ shown above.
 
 When app flash usage becomes tight, the biggest levers are growing the app
 slots at the cost of the logos partition, or reducing other data (e.g. the
-top-500 airport table in `flight_details.ino`).
+OpenSky airport city lookup table in `flight_details.ino`).
 
 ## Temperature history persistence (pool + weather)
 
@@ -730,15 +733,21 @@ Settings are stored in NVS under the `"flight"` namespace (see `setup()` in
 | `hostname` | string | `"cyd-dashboard"` | STA hostname via `WiFi.setHostname()`; applies in both DHCP and static modes. |
 
 The onboard RGB LED blinks for every new overhead flight when **Blink for Flight**
-is on (`g_blinkForFlight`, persisted as `blinkf`). Color priority is:
+is on (`g_blinkForFlight`, persisted as `blinkf`). `fetchFlights()` recomputes
+the color on every poll and re-blinks whenever the route state changes, so a
+flight that first appears with no route data still gets the correct color once
+its route arrives. Color priority is:
 
+- **Yellow** — origin and destination are both `homeap` (same home airport).
 - **Red** — origin matches `homeap`.
 - **Green** — destination matches `homeap`.
-- **Blue** — origin or destination is in the `kTopAirports` list (but not home).
-- **White** — all other overhead flights, including flights with no route data.
+- **Blue** — all other overhead flights, including flights with no route data.
 
-Each color blinks 5 times at 240 ms on/off. The blink is queued in
-`fetchFlights()` and performed in `loop()` after the flight view is drawn.
+For each field the LED prefers the OpenSky route value when it is non-empty and
+falls back to the ADSB.lol planned route value when OpenSky is empty. Each color
+blinks 5 times at 240 ms on/off. Yellow, red, and green then stay lit for 2 seconds
+after the blink, while blue turns off. The blink is performed in `loop()` after
+the flight view is drawn.
 
 `prefs.clear()` in the Reset handler removes **all** keys for both "All" and
 "Settings" resets (the "Settings" reset only re-writes the four touch-
