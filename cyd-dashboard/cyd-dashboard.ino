@@ -109,8 +109,8 @@ enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW, 
 // Build/version shown on the About page. CI overrides APP_VERSION at build
 // time with the release version via -DAPP_VERSION=<ver> (see
 // .github/workflows/release.yml). Local/dev builds should pass
-// -DAPP_VERSION="$(cat version.txt)-dev" (see DEVELOPER.md) so About shows an
-// accurate version derived from version.txt; the literal below is only a
+// -DAPP_VERSION=<version>-dev (see DEVELOPER.md) so About shows an
+// accurate version derived from .release-please-manifest.json; the literal below is only a
 // fallback for builds that don't set the flag (e.g. the Arduino IDE) and can
 // drift out of date - it exists solely so any "-dev"-suffixed string is
 // present for isDevBuild() to detect. A "-dev" build never auto-updates (see
