@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.18.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.17.2...v1.18.0) (2026-09-11)
+
+
+### Features
+
+* display IATA airport codes from adsb.lol route data ([2e0e5d1](https://github.com/improving-minnesota/cyd-dashboard/commit/2e0e5d1a9471ba8760eeb5f6377c3345770aa092))
+* display IATA airport codes from adsb.lol route data ([81c25b9](https://github.com/improving-minnesota/cyd-dashboard/commit/81c25b9bee109001bfe7808f1cc06277c99e5a21))
+
 ## [1.17.2](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.17.1...v1.17.2) (2026-09-11)
 
 
