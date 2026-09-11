@@ -1,13 +1,11 @@
 // flight_details.ino - origin/destination + flight details view.
 //
-// When a new plane becomes the nearest overhead aircraft, its route
-// (origin/destination airports) is fetched automatically the first time it is
-// seen via the OpenSky `flights/aircraft` endpoint and cached (g_routeFetched,
-// reset whenever the overhead identity changes), so it only costs credits once
-// per distinct plane. Tapping "Details" only recalls/redisplays that cached
-// route — it does not trigger a new fetch. Airport ICAO codes are mapped to
-// city names via a small embedded table; unknown codes fall back to showing
-// the raw code.
+// Route/track/route-from-callsign fetches run once per overhead stint (the
+// fetched flags reset when the overhead identity changes) and the recall tap
+// only redisplays the g_lastFlight snapshot — no refetch. ICAO codes map to
+// city names via the table below. When adsb.lol route data carries an IATA
+// code and Show IATA is on, codes display as "ICAO | IATA"; ICAO is always
+// kept for comparisons (home airport, route diff).
 
 // ---- Airport ICAO -> city lookup (major US + some intl). Fallback = raw code.
 struct Airport { const char* icao; const char* city; };
@@ -198,13 +196,11 @@ void fetchRoute(const char* icao24) {
   g_routeBusy = false;
 }
 
-// Fetch the real ground track (past positions + current bearing) for the given
-// aircraft via the OpenSky /tracks endpoint, into g_trackPts (bounded, points
-// within ~2x radar range of the observer) and g_trackBearingDeg (the true-track
-// bearing of the newest near point, used to dead-reckon the blip along the
-// actual path). Also captures the /tracks/* bucket's remaining credits for the
-// Credits screen. A failed/empty/no-credit response simply leaves g_trackCount
-// = 0, so no track is drawn and dead-reckoning falls back to heading/speed.
+// Fetch the ground track (past positions + latest bearing) via OpenSky /tracks
+// into g_trackPts (bounded to ~2x radar range) and g_trackBearingDeg (used to
+// dead-reckon the blip along the real path). Also captures the /tracks/* credit
+// bucket. A failed/empty/no-credit response leaves g_trackCount = 0 — no track
+// drawn, dead-reckoning falls back to heading/speed.
 void fetchTrack(const char* icao24) {
   g_trackBusy = true;
   portENTER_CRITICAL(&g_trackMux);
@@ -308,16 +304,21 @@ void fetchTrack(const char* icao24) {
   g_trackBusy = false;
 }
 
-// Fetch the planned callsign route from the adsb.lol VRS standing-data mirror.
-// Uses plain HTTP because the data is public/CC0 and the host's root (GTS) is not
-// bundled; the endpoint is http://vrs-standing-data.adsb.lol/routes/{prefix}/{callsign}.json.
-// Fills g_adsbRouteOrigin/Dest and g_adsbOriginCity/DestCity.
+// Fetch the planned callsign route from the adsb.lol VRS standing-data mirror
+// over verified HTTPS (GlobalSign ECC root): the endpoint is
+// https://vrs-standing-data.adsb.lol/routes/{prefix}/{callsign}.json.
+// Fills g_adsbRouteOrigin/Dest (ICAO), g_adsbOriginIata/DestIata (display-only),
+// and g_adsbOriginCity/DestCity. The airport_codes fallback path is ICAO-only —
+// _airport_codes_iata spans the whole multi-hop route and can't be trusted to
+// pair legs with the codes we pick.
 void fetchAdsbRoute(const char* callsign) {
   g_adsbRouteBusy = true;
   g_adsbRouteOrigin = "";
   g_adsbRouteDest = "";
   g_adsbOriginCity = "";
   g_adsbDestCity = "";
+  g_adsbOriginIata = "";
+  g_adsbDestIata = "";
   if (WiFi.status() != WL_CONNECTED || !callsign || callsign[0] == 0) { g_adsbRouteBusy = false; return; }
   // Trim trailing whitespace and require at least 2 chars for the prefix directory.
   char cs[16];
@@ -337,6 +338,7 @@ void fetchAdsbRoute(const char* callsign) {
     filter["airport_codes"] = true;
     JsonObject f = filter["_airports"].add<JsonObject>();
     f["icao"] = true;
+    f["iata"] = true;
     f["location"] = true;
     f["countryiso2"] = true;
     BoundedAllocator adsbAlloc(2048);
@@ -354,23 +356,29 @@ void fetchAdsbRoute(const char* callsign) {
             JsonObject a0 = arr[n - 2];
             JsonObject a1 = arr[n - 1];
             const char* oi = a0["icao"];
+            const char* ot = a0["iata"];
             const char* oc = a0["location"];
             const char* oCountry = a0["countryiso2"];
             const char* di = a1["icao"];
+            const char* dt = a1["iata"];
             const char* dc = a1["location"];
             const char* dCountry = a1["countryiso2"];
             if (oi && oi[0]) g_adsbRouteOrigin = oi;
+            if (ot && ot[0]) g_adsbOriginIata = ot;
             if (oc && oc[0]) g_adsbOriginCity = oc;
             if (oCountry && oCountry[0] && g_adsbOriginCity.length()) g_adsbOriginCity += String(", ") + oCountry;
             if (di && di[0]) g_adsbRouteDest = di;
+            if (dt && dt[0]) g_adsbDestIata = dt;
             if (dc && dc[0]) g_adsbDestCity = dc;
             if (dCountry && dCountry[0] && g_adsbDestCity.length()) g_adsbDestCity += String(", ") + dCountry;
           } else {  // n == 1
             JsonObject a1 = arr[0];
             const char* di = a1["icao"];
+            const char* dt = a1["iata"];
             const char* dc = a1["location"];
             const char* dCountry = a1["countryiso2"];
             if (di && di[0]) g_adsbRouteDest = di;
+            if (dt && dt[0]) g_adsbDestIata = dt;
             if (dc && dc[0]) g_adsbDestCity = dc;
             if (dCountry && dCountry[0] && g_adsbDestCity.length()) g_adsbDestCity += String(", ") + dCountry;
           }
@@ -406,9 +414,9 @@ void fetchAdsbRoute(const char* callsign) {
     if (isDevBuild()) Serial.printf("[net] adsb 429/fail code=%d, retry in %lus\n", code, ADSB_RETRY_MS/1000);
   } else if (code == HTTP_CODE_OK) {
     g_adsbRouteFetched = true;
-    if (isDevBuild()) Serial.printf("[net] adsb ok origin=%s/%s dest=%s/%s code=%d free=%u\n",
-                                     g_adsbRouteOrigin.c_str(), g_adsbOriginCity.c_str(),
-                                     g_adsbRouteDest.c_str(), g_adsbDestCity.c_str(),
+    if (isDevBuild()) Serial.printf("[net] adsb ok origin=%s/%s (%s) dest=%s/%s (%s) code=%d free=%u\n",
+                                     g_adsbRouteOrigin.c_str(), g_adsbOriginCity.c_str(), g_adsbOriginIata.c_str(),
+                                     g_adsbRouteDest.c_str(), g_adsbDestCity.c_str(), g_adsbDestIata.c_str(),
                                      code, (unsigned)ESP.getFreeHeap());
   } else {
     // 404 or other HTTP error: mark fetched so we don't keep trying this callsign.

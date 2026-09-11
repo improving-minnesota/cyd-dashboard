@@ -120,13 +120,14 @@ void drawAbout() {
 }
 
 void handleAboutTouch(uint16_t x, uint16_t y) {
-  if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }
+  if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_SETTINGS; g_otaFromAbout = false; dirty = true; return; }
   // Install button (only shown when an update is available)
   if (g_updateState == 2 && inRect(x, y, 218, 140, 294, 166)) {
     g_otaVersion = g_updateLatest;
     g_otaUrl = g_updateAsset;
     g_otaSha256 = g_updateDigest;
     g_otaActive = true;
+    g_otaFromAbout = true;   // keep the About result on screen after a failed OTA
     return;
   }
 }
@@ -165,7 +166,9 @@ static const char* const kHelpLines[] = {
   "Flights: live aircraft with",
   "a radar, callsign, planned",
   "route (ADSB.lol, OpenSky",
-  "fallback), and airline logo.",
+  "fallback; shown as ICAO |",
+  "IATA when IATA is known),",
+  "airline logo.",
   "The LED blinks blue for each",
   "overhead flight, yellow when",
   "both origin/destination are your",
@@ -281,10 +284,11 @@ static const char* const kHelpLines[] = {
   "   DNS and hostname.",
   "Flight Tracker: on/off, units",
   "   (imperial), radius 3.5 mi,",
-  "   ceiling 15000 ft, poll 60s,",
+  "   ceiling 15000 ft, poll 30s,",
   "   timer bar on/off (off),",
   "   home airport (ICAO),",
   "   watch callsign (white blink),",
+  "   show IATA codes (on),",
   "   blink LED for each overhead",
   "   flight (on)."
   "Sleep Mode: on; 10 PM - 8 AM,",
@@ -595,9 +599,8 @@ void drawFtracker() {
     drawSlider(104, "Radius", g_radiusMi, 1.0f, 10.0f, 0.5f, 1);
     drawSlider(142, "Ceiling", (float)g_ceilingFt, 3000, 30000, 1000, 0);
     drawSlider(180, "Poll (s)", (float)g_pollSec, 10, 300, 10, 0);
-  } else {
-    // Page 2: Blink-for-flight toggle + Enable timer toggle + Home-airport
-    // route setting + Credentials
+  } else if (g_ftPage == 1) {
+    // Page 2: toggles + Home-airport route setting + Watch callsign
     // Blink for Flight toggle
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextFont(2);
@@ -626,28 +629,50 @@ void drawFtracker() {
     tft.setCursor(250, 79);
     tft.print("Toggle");
 
-    drawEditRow(112, "Home airport (ICAO)", g_homeAirport.length() ? g_homeAirport : "--");
+    // Show IATA toggle
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextFont(2);
+    tft.setCursor(8, 112);
+    tft.print("Show IATA");
+    tft.setTextColor(g_showIata ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
+    tft.setCursor(150, 112);
+    tft.print(g_showIata ? "ON" : "OFF");
+    tft.fillRoundRect(230, 108, 82, 24, 5, TFT_NAVY);
+    tft.setTextColor(TFT_WHITE, TFT_NAVY);
+    tft.setTextFont(1);
+    tft.setCursor(250, 115);
+    tft.print("Toggle");
+
+    drawEditRow(140, "Home airport (ICAO)", g_homeAirport.length() ? g_homeAirport : "--");
     tft.setTextFont(1);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-    tft.setCursor(8, 138);
+    tft.setCursor(8, 166);
     tft.print("Used to blink red/green for");
-    tft.setCursor(8, 150);
+    tft.setCursor(8, 178);
     tft.print("departures/arrivals. Empty = off.");
 
-    drawEditRow(164, "Watch callsign", g_watchCallsign.length() ? g_watchCallsign : "--");
-
-    tft.fillRoundRect(10, 188, 300, 24, 6, TFT_NAVY);
+    drawEditRow(190, "Watch callsign", g_watchCallsign.length() ? g_watchCallsign : "--");
+  } else {
+    // Page 3: OpenSky credentials
+    tft.fillRoundRect(10, 40, 300, 24, 6, TFT_NAVY);
     tft.setTextColor(TFT_WHITE, TFT_NAVY);
     tft.setTextFont(2);
-    tft.setCursor(20, 194);
+    tft.setCursor(20, 46);
     tft.print("OpenSky Credentials");
+
+    tft.setTextFont(1);
+    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    tft.setCursor(8, 76);
+    tft.print("Client ID/secret for a higher");
+    tft.setCursor(8, 88);
+    tft.print("OpenSky rate limit.");
   }
 
   // Pager (bottom): left/right arrows + page indicator
   tft.setTextFont(1);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setCursor(140, 222);
-  tft.printf("Page %d/2", g_ftPage + 1);
+  tft.printf("Page %d/3", g_ftPage + 1);
   if (g_ftPage > 0) {
     tft.fillRoundRect(12, 214, 44, 26, 6, TFT_DARKGREY);
     tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
@@ -655,7 +680,7 @@ void drawFtracker() {
     tft.setCursor(27, 220);
     tft.print("<");
   }
-  if (g_ftPage < 1) {
+  if (g_ftPage < 2) {
     tft.fillRoundRect(264, 214, 44, 26, 6, TFT_DARKGREY);
     tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
     tft.setTextFont(2);
@@ -668,7 +693,7 @@ void handleFtrackerTouch(uint16_t x, uint16_t y) {
   if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }
   // Pager arrows
   if (inRect(x, y, 12, 214, 56, 240)) { if (g_ftPage > 0) { g_ftPage--; dirty = true; } return; }
-  if (inRect(x, y, 264, 214, 308, 240)) { if (g_ftPage < 1) { g_ftPage++; dirty = true; } return; }
+  if (inRect(x, y, 264, 214, 308, 240)) { if (g_ftPage < 2) { g_ftPage++; dirty = true; } return; }
 
   if (g_ftPage == 0) {
     if (inRect(x, y, 230, 36, 312, 60)) {  // Enabled toggle
@@ -693,32 +718,43 @@ void handleFtrackerTouch(uint16_t x, uint16_t y) {
     return;
   }
 
-  // Page 2
-  if (inRect(x, y, 230, 36, 312, 60)) {  // Blink for Flight toggle
-    g_blinkForFlight = !g_blinkForFlight;
-    prefs.begin("flight", false); prefs.putBool("blinkf", g_blinkForFlight); prefs.end();
-    dirty = true;
+  if (g_ftPage == 1) {
+    // Page 2: toggles + edit rows
+    if (inRect(x, y, 230, 36, 312, 60)) {  // Blink for Flight toggle
+      g_blinkForFlight = !g_blinkForFlight;
+      prefs.begin("flight", false); prefs.putBool("blinkf", g_blinkForFlight); prefs.end();
+      dirty = true;
+      return;
+    }
+    if (inRect(x, y, 230, 72, 312, 96)) {  // Enable timer toggle
+      g_showTimer = !g_showTimer;
+      prefs.begin("flight", false); prefs.putBool("timer", g_showTimer); prefs.end();
+      dirty = true;
+      return;
+    }
+    if (inRect(x, y, 230, 108, 312, 132)) {  // Show IATA toggle
+      g_showIata = !g_showIata;
+      prefs.begin("flight", false); prefs.putBool("showiata", g_showIata); prefs.end();
+      dirty = true;
+      return;
+    }
+    if (inRect(x, y, 270, 140, 312, 164)) {  // Edit home airport
+      g_screen = SCR_WIFI;
+      g_wifiSub = 11;
+      dirty = true;
+      return;
+    }
+    if (inRect(x, y, 270, 190, 312, 214)) {  // Edit watch callsign
+      g_screen = SCR_WIFI;
+      g_wifiSub = 13;
+      dirty = true;
+      return;
+    }
     return;
   }
-  if (inRect(x, y, 230, 72, 312, 96)) {  // Enable timer toggle
-    g_showTimer = !g_showTimer;
-    prefs.begin("flight", false); prefs.putBool("timer", g_showTimer); prefs.end();
-    dirty = true;
-    return;
-  }
-  if (inRect(x, y, 270, 112, 312, 136)) {  // Edit home airport
-    g_screen = SCR_WIFI;
-    g_wifiSub = 11;
-    dirty = true;
-    return;
-  }
-  if (inRect(x, y, 270, 164, 312, 188)) {  // Edit watch callsign
-    g_screen = SCR_WIFI;
-    g_wifiSub = 13;
-    dirty = true;
-    return;
-  }
-  if (inRect(x, y, 10, 188, 310, 212)) {  // OpenSky credentials
+
+  // Page 3
+  if (inRect(x, y, 10, 40, 310, 64)) {  // OpenSky credentials
     g_screen = SCR_WIFI;
     g_wifiSub = 3;
     dirty = true;

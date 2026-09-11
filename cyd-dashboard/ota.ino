@@ -222,17 +222,12 @@ static bool sha256Matches(const uint8_t hash[32], const String& expected) {
 }
 
 bool performOTA(const String& url, const String& version, const String& expectedSha256) {
-  // The TLS connect/download to the release host can transiently fail after the
-  // device has been up a while (a fresh connect to the asset host sometimes gets
-  // dropped until a reboot clears the socket state). We therefore retry the
-  // WHOLE download -- connect + GET + stream + checksum -- a few times with a
-  // clean socket teardown and a short pause between attempts. Retrying just the
-  // GET (as this code used to) left the streaming body unguarded: if the fresh
-  // connection dropped mid-download the update failed immediately even though a
-  // reboot (or simply another try) would have succeeded. The drop can surface as
-  // a failed connect, a non-200, or a truncated body on any attempt, so every
-  // stage is retried; a genuine 404 merely costs a couple of extra attempts
-  // before failing.
+  // Fresh TLS connects to the release host can drop after prolonged uptime
+  // (until a reboot clears socket state), so retry the WHOLE download —
+  // connect + GET + stream + checksum — a few times with clean teardown.
+  // Retrying only the GET left the body unguarded: a mid-stream drop failed
+  // the update immediately. The drop can surface as a failed connect, non-200,
+  // or truncated body on any attempt, so every stage is retried.
 
   // Plain HTTP OTA is restricted to explicitly enabled development builds.
   bool useHttps = url.startsWith("https://");

@@ -680,19 +680,13 @@ void commitSleepTime(int which) {
 }
 
 // ---- Serial NVS provisioning ----
-// Listens for a few seconds at boot for "KEY=VALUE" lines over USB serial and
-// writes each recognized key straight into NVS via Preferences. This lets you
-// provision WiFi/OpenSky/Govee credentials without compiling them into the
-// firmware and without touching the filesystem (so pool temp history is preserved).
-// The host side is provision_config.py; it sends the lines and resets the board.
-// A blank line "@END" exits the window early.
-//
-// TEMP / TESTING ONLY: to strip this out for production, set
-// ENABLE_SERIAL_PROVISION to 0 in cyd-dashboard.ino (or delete the whole
-// block below and the serialProvision() call in setup()). Credentials stay in
-// NVS after provisioning, so the board keeps working without this code.
-// (ENABLE_SERIAL_PROVISION is defined in cyd-dashboard.ino so it is visible
-// before this file in Arduino's alphabetical concatenation.)
+// At boot, listens a few seconds for "KEY=VALUE" lines over USB serial and
+// writes each recognized key into NVS — provisions credentials without
+// compiling them into firmware or touching the filesystem. Host side:
+// provision_config.py. "@END" exits the window early.
+// Production strips this via ENABLE_SERIAL_PROVISION=0 (defined in
+// cyd-dashboard.ino so it's visible first in Arduino's alphabetical
+// concatenation); credentials stay in NVS, so the board keeps working.
 #if ENABLE_SERIAL_PROVISION
 #define PROVISION_WINDOW_MS 4000UL
 
@@ -741,6 +735,7 @@ bool provisionKey(const String& key, const String& val) {
   else if (key == "OPENSKY_CLIENT_SECRET") { prefs.putString("ocssec", val); g_osClientSecret = val; invalidateOsAuth(); return true; }
   else if (key == "HOME_AIRPORT")          { String v = val; v.toUpperCase(); prefs.putString("homeap", v); g_homeAirport = v; return true; }
   else if (key == "WATCH_CALLSIGN")        { String v = val; v.trim(); v.toUpperCase(); prefs.putString("watchcs", v); g_watchCallsign = v; return true; }
+  else if (key == "SHOW_IATA")             { bool on = !(val.equalsIgnoreCase("off") || val.equalsIgnoreCase("false") || val == "0"); g_showIata = on; prefs.putBool("showiata", on); return true; }
   else if (key == "GOVEE_KEY")       { prefs.putString("govee",  val); g_goveeKey  = val; return true; }
   else if (key == "OTA_URL")         {
     String url = buildOtaUrl(val, s_otaFile);
