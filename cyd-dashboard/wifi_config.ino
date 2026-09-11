@@ -78,7 +78,7 @@ void drawWifiScreen() {
   else if (g_wifiSub == 7) drawKeyboard("Sleep end (HHMM)", g_sleepEndStr, false);
   else if (g_wifiSub == 8) drawKeyboard("Wake duration (min)", g_wakeStr, false);
   else if (g_wifiSub == 10) drawKeyboard("Lat,Lon", g_latLonStr, false);
-  else if (g_wifiSub == 11) drawKeyboard("Home airport", g_homeAirport, false);
+  else if (g_wifiSub == 11) drawKeyboard("Home airport (ICAO)", g_homeAirport, false);
   else if (g_wifiSub == 12) drawAddrStatus();
   else if (g_wifiSub == 20) drawIpConfig();
   else if (g_wifiSub == 21) drawKeyboard("Static IP address", g_staticIp, false);

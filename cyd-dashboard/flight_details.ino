@@ -123,72 +123,7 @@ bool airlineInfo(const char* callsign, String& name, uint16_t& color) {
 // LittleFS "logos" partition at runtime (single reusable buffer, PSRAM-first),
 // and is declared at the top of cyd-dashboard.ino.
 
-// Top US airports by 2023 enplanements (ICAO codes), from FAA commercial
-// service enplanement data. KDFW is included as a major hub and blinks blue
-// like any other top-50 airport unless the user has also set it as their home
-// airport. Used to blink the LED (blue) when an overhead flight involves one
-// of these airports.
-static const char* const kTopAirports[] = {
-  "KATL","KLAX","KDFW","KDEN","KORD","KJFK","KMCO","KLAS","KCLT","KMIA",
-  "KSEA","KEWR","KSFO","KPHX","KIAH","KBOS","KFLL","KMSP","KLGA","KDTW",
-  "KPHL","KSLC","KBWI","KDCA","KSAN","KIAD","KTPA","KBNA","KAUS","KMDW","PHNL",
-  "KDAL","KPDX","KSTL","KRDU","KHOU","KSMF","KMSY","TJSJ","KSJC","KSNA",
-  "KMCI","KOAK","KSAT","KRSW","KCLE","KIND","KPIT","KCVG","KCMH","PHOG",
-  "KJAX","KONT","KBUR","KBDL","KCHS","KMKE","PANC","KABQ","KOMA","KMEM",
-  "KRIC","KBOI","KORF","KBUF","KSDF","KRNO","KSRQ","KOKC","PHKO","KELP",
-  "KGEG","KTUS","KSAV","KGRR","KLGB","PHLI","KPVD","KMYR","KPSP","KTUL",
-  "KDSM","KBHM","KSFB","KSYR","KTYS","KALB","KPNS","KROC","KGSP","KPIE",
-  "KBZN","KFAT","KCOS","KHPN","KAVL","KVPS","KPWM","KLIT","KMSN","KXNA",
-  "KPGD","KGSO","PGUM","KICT","KEUG","KECP","KHSV","TIST","KCID","KMAF",
-  "PHTO","KEYW","KLEX","KILM","KFSD","KMDT","KBTV","KMHT","KISP","KSBA",
-  "KSGF","KJAN","KDAY","KCAE","KRDM","PAFA","KLBB","KHRL","KFAR","KMFE",
-  "KJAC","KHVN","KCHA","KMFR","KATW","KMSO","PAJN","KPSC","KACY","TJBQ",
-  "KBIL","KABE","KTLH","KPVU","KSBN","KAMA","KFWA","KBTR","KGPT","KMLB",
-  "KBGR","KCRP","KDAB","KTVC","KROA","KRAP","KCAK","KGRB","KTTN","KSBP",
-  "KSTS","KPIA","KBLI","KASE","KSHV","KCHO","KPAE","KFNT","KAGS","KMOB",
-  "KGNV","KMLI","KIDA","KMRY","KBIS","KMTJ","KGJT","TISX","KLFT","KEGE",
-  "KTRI","KDRO","KHDN","KCRW","KMGM","KGTF","KAEX","KBRO","KBFL","KAVP",
-  "KFAY","KEVV","KBMI","PABE","KLRD","KLCK","PAKT","KBLV","KMOT","TJPS",
-  "KSAF","KACK","KSGU","KOAJ","KILG","KLNK","KSWF","KDLH","KRFD","KACV",
-  "KLAN","KGRK","KSUN","KORH","KCOU","KMLU","PASI","KGFK","KMBS","KRST",
-  "KHTS","KHLN","KRDD","KAZO","KCPR","PHMK","PADQ","KELM","KCWA","KMVY",
-  "KLCH","PASC","KXWA","KABI","KLBE","KLYH","KFLG","KPBG","KTOL","KCMI",
-  "KPHF","KSCK","PAEN","PAOM","KCSG","KGRI","KPUW","KITH","PAOT","KCLL",
-  "KEWN","KFSM","KPSM","KIAG","KSBY","KACT","KSJT","KMHK","KSPI","KTYR",
-  "PABG","KGUC","KERI","KLAW","KROW","KLSE","NSTU","KCKB","KGTR","KVRB",
-  "KVLD","KTXK","PABR","PAKN","KLWS","KBGM","KDHN","KSWO","KPGV","PADL",
-  "KCOD","PAHO","PHNY","KBQK","KGGG","KHGR","KBPT","PAMR","KABY","TJVQ",
-  "KGCK","KEAT","KBFI","KSBD","KSUX","KGCC","KSHR","KALW","KEAU","KBJI",
-  "KSPS","PAPG","KPRC","KDIK","KYKM","KCMX","KFLO","KPLN","KHOB","KCIU",
-  "KABR","KART","KRHI","KTWF","KOTH","KSTC","KCNY","KPQI","PADU","TJCP",
-  "PACV","KLAR","KIMT","KPIH","KHYA","KDBQ","KBRD","KRKS","KBTM","KPGA",
-  "KPIR","KMCN","KESC","KATY","KMEI","KRIW","KBID","KSLN","KEAR","KJLN",
-  "KSMX","KLBF","PAWG","KJST","KVEL","KCVN","KTUP","TJIG","KINL","KCYS",
-  "KPAH","KPIB","KALO","KWST","PAYA","KBFF","KTBN","KHIB","KCDC","PAGA",
-  "KALS","KVCT","KDEC","KLEB","KBFM","KTEX","KOWB","KEKO","KFXE","KJMS",
-  "KMWA","KBHB","KHYS","KBIH","PAGS","KCEZ","KWYS","KTVF","KLWB","PAUN",
-  "KLBL","TJMZ","KDVL","KAPN","KSDY","KSHD","KCEC","KPVC","KCGI","KGLH",
-  "KIPL","KRKD","KIWD","KSLE","KSVC","KMGW","KDDC","PAHN","KLNS","KFOD",
-  "KMBL","KMSL","KOGS","PAOH","KMCW","PAIL","PACX","KDUJ","KPDT","PFYU",
-  "KAUG","KDRT","KRUT","KHHR","KCNM","KMSS","PAGY","KSLK","PASM","KBKW",
-  "KUIN","PANI","PAVA","KHRO","KMKG","KPKB","KAIA","PAHP","KIRK","PAVD",
-  "KBRL","PAPO","PASK","KMMH","KBFD","KMCE","KSOW","KHOT","PAWN","PHMU",
-  "PACM","PASH","PASO","KPUB","PASA","KMKL","KAOO","PAOO","KOLF","KELD",
-  "PAGM","PHLU","PAMO","PACD","PAVL","PAKP","PATG","KHVR","KGGW","PASD",
-  "PAEE","PAIK","PFKW","PAMC","KPBI","PGRO","KBBG","KBED","KBJC","KCCR",
-  "KCDR","KCRQ","KDOV","KDTS","KEWB","KFHR","KFTW","KGCN","KGDV","KGPI",
-  "KGUP","KGYY","KHII","KHXD","KIPT","KIWA","KJBR","KJQF","KLAF","KLAL",
-  "KLRU","KLUK","KMCK","KMGC","KMWL","KMYL","KNYL","KOGD","KOLM","KOPF",
-};
-static const int kNumTopAirports = sizeof(kTopAirports) / sizeof(kTopAirports[0]);
 
-bool isTopAirport(const char* icao) {
-  if (!icao || icao[0] == 0) return false;
-  for (int i = 0; i < kNumTopAirports; i++) {
-    if (strcmp(kTopAirports[i], icao) == 0) return true;
-  }
-  return false;
-}
 
 // Fetch route (estDepartureAirport / estArrivalAirport) for the given aircraft
 // via OpenSky. Fills g_routeOrigin/g_routeDest (ICAO codes). Cheap-ish but uses
@@ -210,9 +145,9 @@ void fetchRoute(const char* icao24) {
   NetworkClientSecure sec;
   HTTPClient http;
   http.setTimeout(5000);
-  // Capture the /flights/* bucket's remaining credits for the Credits screen.
-  const char* hdrKeys[] = { "X-Rate-Limit-Remaining" };
-  http.collectHeaders(hdrKeys, 1);
+  // Capture the /flights/* bucket's remaining credits and 429 retry deadline.
+  const char* hdrKeys[] = { "X-Rate-Limit-Remaining", "X-Rate-Limit-Retry-After-Seconds" };
+  http.collectHeaders(hdrKeys, 2);
   String authHdr;
   if (openskyEnsureToken()) authHdr = "Bearer " + g_osToken;
   const char* routeHdrs[] = { "Authorization", authHdr.c_str(), nullptr };
@@ -248,7 +183,13 @@ void fetchRoute(const char* icao24) {
   // credits for the same overhead plane.
   if (code < 0 || code == HTTP_CODE_TOO_MANY_REQUESTS || (code == HTTP_CODE_OK && !parsedOk)) {
     g_routeFetched = true;
-    if (code == HTTP_CODE_TOO_MANY_REQUESTS) g_flightsCredits = 0;
+    if (code == HTTP_CODE_TOO_MANY_REQUESTS) {
+      g_flightsCredits = 0;
+      String retry = http.header("X-Rate-Limit-Retry-After-Seconds");
+      unsigned long waitMs = retry.length() ? (unsigned long)retry.toInt() * 1000UL : CREDIT_RECOVERY_MS;
+      g_nextRouteMs = millis() + waitMs;
+      if (isDevBuild() && retry.length()) Serial.printf("[net] 429 route retry after %lus\n", (unsigned long)retry.toInt());
+    }
   }
   if (code >= 0 && parsedOk) g_routeFetched = true;
   if (code == HTTP_CODE_OK) {
@@ -277,8 +218,8 @@ void fetchTrack(const char* icao24) {
   NetworkClientSecure sec;
   HTTPClient http;
   http.setTimeout(5000);
-  const char* hdrKeys[] = { "X-Rate-Limit-Remaining" };
-  http.collectHeaders(hdrKeys, 1);
+  const char* hdrKeys[] = { "X-Rate-Limit-Remaining", "X-Rate-Limit-Retry-After-Seconds" };
+  http.collectHeaders(hdrKeys, 2);
   String authHdr;
   if (openskyEnsureToken()) authHdr = "Bearer " + g_osToken;
   const char* trackHdrs[] = { "Authorization", authHdr.c_str(), nullptr };
@@ -355,9 +296,104 @@ void fetchTrack(const char* icao24) {
   // credits for the same overhead plane. A pure no-WiFi exit is handled above.
   if (code < 0 || code == HTTP_CODE_TOO_MANY_REQUESTS || (code == HTTP_CODE_OK && !parsedOk)) {
     g_trackFetched = true;
-    if (code == HTTP_CODE_TOO_MANY_REQUESTS) g_tracksCredits = 0;
+    if (code == HTTP_CODE_TOO_MANY_REQUESTS) {
+      g_tracksCredits = 0;
+      String retry = http.header("X-Rate-Limit-Retry-After-Seconds");
+      unsigned long waitMs = retry.length() ? (unsigned long)retry.toInt() * 1000UL : CREDIT_RECOVERY_MS;
+      g_nextTrackMs = millis() + waitMs;
+      if (isDevBuild() && retry.length()) Serial.printf("[net] 429 track retry after %lus\n", (unsigned long)retry.toInt());
+    }
   }
   if (code >= 0 && parsedOk) g_trackFetched = true;
   g_trackBusy = false;
 }
+
+// Fetch the planned callsign route from the adsb.lol VRS standing-data mirror.
+// Uses plain HTTP because the data is public/CC0 and the host's root (GTS) is not
+// bundled; the endpoint is http://vrs-standing-data.adsb.lol/routes/{prefix}/{callsign}.json.
+// Fills g_adsbRouteOrigin/Dest and g_adsbOriginCity/DestCity.
+void fetchAdsbRoute(const char* callsign) {
+  g_adsbRouteBusy = true;
+  g_adsbRouteOrigin = "";
+  g_adsbRouteDest = "";
+  g_adsbOriginCity = "";
+  g_adsbDestCity = "";
+  if (WiFi.status() != WL_CONNECTED || !callsign || callsign[0] == 0) { g_adsbRouteBusy = false; return; }
+  // Trim trailing whitespace and require at least 2 chars for the prefix directory.
+  char cs[16];
+  int n = 0;
+  for (int i = 0; i < (int)sizeof(cs) - 1 && callsign[i]; i++) cs[n++] = callsign[i];
+  while (n > 0 && (cs[n-1] == ' ' || cs[n-1] == '\t')) n--;
+  cs[n] = 0;
+  if (n < 2) { g_adsbRouteBusy = false; return; }
+  String url = String("https://vrs-standing-data.adsb.lol/routes/") + String(cs).substring(0, 2) + "/" + cs + ".json";
+  NetworkClientSecure sec;
+  HTTPClient http;
+  int code = httpsRequestRetry(http, sec, url.c_str(), HTTPS_METHOD_GET, "", nullptr, false);
+  bool parsedOk = false;
+  if (code == HTTP_CODE_OK) {
+    HttpBodyStream body(http);  // adsb.lol sends Content-Length, not chunked
+    JsonDocument filter;
+    filter["airport_codes"] = true;
+    JsonObject f = filter["_airports"].add<JsonObject>();
+    f["icao"] = true;
+    f["location"] = true;
+    BoundedAllocator adsbAlloc(2048);
+    JsonDocument doc(&adsbAlloc);
+    DeserializationError err = deserializeJson(doc, body, DeserializationOption::Filter(filter));
+    if (!err) {
+      JsonObject root = doc.as<JsonObject>();
+      if (!root.isNull()) {
+        JsonArray arr = root["_airports"];
+        if (!arr.isNull() && arr.size() >= 2) {
+          JsonObject a0 = arr[0];
+          JsonObject a1 = arr[arr.size() - 1];
+          const char* oi = a0["icao"];
+          const char* oc = a0["location"];
+          const char* di = a1["icao"];
+          const char* dc = a1["location"];
+          if (oi && oi[0]) g_adsbRouteOrigin = oi;
+          if (oc && oc[0]) g_adsbOriginCity = oc;
+          if (di && di[0]) g_adsbRouteDest = di;
+          if (dc && dc[0]) g_adsbDestCity = dc;
+          parsedOk = true;
+        } else {
+          const char* codes = root["airport_codes"];
+          if (codes && codes[0]) {
+            String s = codes;
+            int first = s.indexOf('-');
+            int last  = s.lastIndexOf('-');
+            if (first >= 0 && last > first) {
+              g_adsbRouteOrigin = s.substring(0, first);
+              g_adsbOriginCity  = airportCity(g_adsbRouteOrigin.c_str());
+              g_adsbRouteDest   = s.substring(last + 1);
+              g_adsbDestCity    = airportCity(g_adsbRouteDest.c_str());
+              parsedOk = true;
+            }
+          }
+        }
+      }
+    } else if (isDevBuild()) {
+      Serial.printf("[net] adsb parse err %s free=%u\n", err.c_str(), (unsigned)ESP.getFreeHeap());
+    }
+    parsedOk = body.drain() && parsedOk;
+  }
+  http.end();
+  if (code < 0 || code == HTTP_CODE_TOO_MANY_REQUESTS) {
+    g_nextAdsbMs = millis() + ADSB_RETRY_MS;
+    if (isDevBuild()) Serial.printf("[net] adsb 429/fail code=%d, retry in %lus\n", code, ADSB_RETRY_MS/1000);
+  } else if (code == HTTP_CODE_OK) {
+    g_adsbRouteFetched = true;
+    if (isDevBuild()) Serial.printf("[net] adsb ok origin=%s/%s dest=%s/%s code=%d free=%u\n",
+                                     g_adsbRouteOrigin.c_str(), g_adsbOriginCity.c_str(),
+                                     g_adsbRouteDest.c_str(), g_adsbDestCity.c_str(),
+                                     code, (unsigned)ESP.getFreeHeap());
+  } else {
+    // 404 or other HTTP error: mark fetched so we don't keep trying this callsign.
+    g_adsbRouteFetched = true;
+    if (isDevBuild()) Serial.printf("[net] adsb %d for %s\n", code, cs);
+  }
+  g_adsbRouteBusy = false;
+}
+
 

@@ -163,14 +163,16 @@ static const char* const kHelpLines[] = {
   "humidity, sunrise/sunset,",
   "and a 7-day forecast.",
   "Flights: live aircraft with",
-  "a radar, callsign, route,",
-  "and airline logo. The LED",
-  "blinks white for each",
-  "overhead flight, blue for",
-  "a top US airport, red when",
-  "departing or green when",
-  "arriving at your home",
-  "airport.",
+  "a radar, callsign, planned",
+  "route (ADSB.lol, OpenSky",
+  "fallback), and airline logo.",
+  "The LED blinks blue for each",
+  "overhead flight, yellow when",
+  "both origin/destination are your",
+  "home airport (ICAO), green when",
+  "arriving, or red when departing.",
+  "Stays lit 2 s for yellow/green/",
+  "red.",
   "  Tap the aircraft count",
   "  (e.g. '6 aircraft') on the",
   "  idle screen for the last",
@@ -269,7 +271,7 @@ static const char* const kHelpLines[] = {
   "   (imperial), radius 3.5 mi,",
   "   ceiling 15000 ft, poll 60s,",
   "   timer bar on/off (off),",
-  "   home airport, blink LED for",
+  "   home airport (ICAO), blink LED for",
   "   each overhead flight (on).",
   "Sleep Mode: on; 10 PM - 8 AM,",
   "   wake 10 min.",
@@ -610,7 +612,7 @@ void drawFtracker() {
     tft.setCursor(250, 79);
     tft.print("Toggle");
 
-    drawEditRow(112, "Home airport", g_homeAirport.length() ? g_homeAirport : "--");
+    drawEditRow(112, "Home airport (ICAO)", g_homeAirport.length() ? g_homeAirport : "--");
     tft.setTextFont(1);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(8, 144);
