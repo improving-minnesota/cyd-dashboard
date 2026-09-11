@@ -1,11 +1,12 @@
 # Release: run on every push/merge to main. release-please opens/updates the
-# release PR (bumping version.txt and CHANGELOG.md). When that release PR is
-# merged, this workflow reads version.txt, builds the OTA firmware, creates a
-# draft GitHub release, attaches the .bin, and then publishes the release.
+# release PR (bumping .release-please-manifest.json and CHANGELOG.md). When
+# that release PR is merged, this workflow reads the manifest version, builds
+# the OTA firmware, creates a draft GitHub release, attaches the .bin, and
+# then publishes the release.
 #
 # Drafting first means the release is never visible to on-device OTA checks
-# until the firmware asset is already attached. version.txt remains the single
-# source of truth for the version.
+# until the firmware asset is already attached. .release-please-manifest.json
+# remains the single source of truth for the version.
 name: Release
 
 on:
@@ -21,24 +22,25 @@ jobs:
       version: ${{ steps.read.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - name: Read version from version.txt
+      - name: Read version from release-please manifest
         id: read
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION=$(cat version.txt)
+          VERSION=$(jq -r '.["."]' .release-please-manifest.json)
           # github.event.head_commit.modified is empty for merge commits, so a
           # merged release-please PR never triggered the build. Instead, release
-          # whenever the version in version.txt has no GitHub release yet; this
-          # is idempotent and retries automatically on the next push if a
-          # previous release attempt failed.
-          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+          # whenever the manifest version has no published GitHub release yet.
+          # A draft release (e.g. from a failed previous publish) still counts
+          # as unreleased, so the next push retries; this keeps the job
+          # idempotent.
+          if gh release view "v${VERSION}" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx false; then
             echo "version=" >> "$GITHUB_OUTPUT"
           else
             echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           fi
 
-  # Only run release-please once the version in version.txt is already released
+  # Only run release-please once the manifest version is already released
   # (version job output is empty). On the push that merges a release PR, the
   # tag doesn't exist yet, so running release-please there would open the next
   # release PR against a stale baseline with an incorrect changelog.
@@ -60,9 +62,11 @@ jobs:
       - uses: googleapis/release-please-action@v4
         with:
           token: ${{ steps.app-token.outputs.token }}
-          release-type: simple
-          # release-please manages the release PR and version files; we create
-          # and publish the actual GitHub release ourselves after the .bin is built.
+          # release-please manages the release PR and manifest/CHANGELOG via
+          # release-please-config.json + .release-please-manifest.json; we
+          # create and publish the actual GitHub release ourselves after the
+          # .bin is built. skip-github-release is set both here and in the
+          # config so whichever layer the action honors keeps it disabled.
           skip-github-release: true
 
   build-and-release:
@@ -104,11 +108,16 @@ jobs:
         run: |
           VERSION="${{ needs.version.outputs.version }}"
           TAG="v${VERSION}"
+          # create fails if a draft release already exists from a failed
+          # previous run; in that case just attach the asset to it.
           gh release create "${TAG}" build/release/cyd-dashboard.ino.bin \
             --repo "${{ github.repository }}" \
             --draft \
             --title "${TAG}" \
-            --generate-notes
+            --generate-notes \
+          || gh release upload "${TAG}" build/release/cyd-dashboard.ino.bin \
+            --repo "${{ github.repository }}" \
+            --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -127,20 +136,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Only needed when a release just shipped (version job output is non-empty);
-  # on feature merges there is no release PR to mark.
+  # Runs after publish so the label only flips once the release (and its .bin
+  # asset) actually exists. On feature merges there is no release PR to mark.
   mark-published:
     name: Mark release-please PR as published
-    needs: version
+    needs: [version, publish]
     if: needs.version.outputs.version != ''
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
       - name: Mark release-please PR as published
         run: |
-          VERSION=$(cat version.txt)
+          VERSION="${{ needs.version.outputs.version }}"
           pr_number=$(gh pr list --repo "${{ github.repository }}" --state merged \
             --label "autorelease: pending" --limit 100 \
             --json number,title \

@@ -80,7 +80,7 @@ The `cyd-dashboard/` sketch targets the **ESP32-2432S028R "CYD"**
 
 ```bash
 arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
-  --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(cat version.txt)" cyd-dashboard
+  --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.[\".\"]' .release-please-manifest.json)" cyd-dashboard
 arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 cyd-dashboard
 ```
 
@@ -107,14 +107,15 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > `--clean` to force a full rebuild:
 > ```bash
 > arduino-cli compile --clean --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
->   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(cat version.txt)-dev" cyd-dashboard
+>   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.[\".\"]' .release-please-manifest.json)-dev" cyd-dashboard
 > ```
 > A `--clean` build also surfaces compile errors that a stale cache would hide
 > (e.g. a call to a method that doesn't exist in the installed core), so it's a
 > good habit before flashing when you're iterating on the device.
 
 > **Version flag:** the `-DAPP_VERSION` flag above derives the local build's
-> version from `version.txt` at compile time (e.g. `1.2.4`), so About always
+> version from `.release-please-manifest.json` at compile time via `jq`
+> (`brew install jq` if missing), so About always
 > shows an accurate version without needing manual updates. Add the `-dev`
 > suffix (as in the blocks below) for a development build — `isDevBuild()`
 > keys off it to enable serial diagnostics and dev-only features. If you
@@ -141,7 +142,7 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > A typical dev build and first flash (`build/release` is git-ignored):
 > ```bash
 > arduino-cli compile --clean --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
->   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(cat version.txt)-dev -DBUILD_NUM=1 -DENABLE_LOCAL_OTA=1 -DENABLE_SERIAL_PROVISION=1" \
+>   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.[\".\"]' .release-please-manifest.json)-dev -DBUILD_NUM=1 -DENABLE_LOCAL_OTA=1 -DENABLE_SERIAL_PROVISION=1" \
 >   --output-dir build/release cyd-dashboard
 > arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 --input-dir build/release cyd-dashboard
 > ```
@@ -239,30 +240,31 @@ GitHub Actions builds and releases the firmware on standard hosted runners
 > one-off doc updates, just let the build run.
 
 - **`release.yml`** — runs on every push/merge to `main` and drives the release
-  flow with `googleapis/release-please-action@v4` (`release-type: simple`):
+  flow with `googleapis/release-please-action@v4`, configured by
+  `release-please-config.json` + `.release-please-manifest.json`:
   1. release-please opens a **"release-please" PR** that bumps the version in
-     `version.txt` (the `simple` release type reads the current version from
-     `version.txt`) and updates `CHANGELOG.md` based on the conventional-commit
-     PRs merged since the last release. It only runs when the version in
-     `version.txt` already has a published release, so merging a release PR
-     can't spawn a stale next-release PR before its tag exists. Merge that PR
-     through the normal review process.
+     `.release-please-manifest.json` (the manifest is the single source of
+     truth for the version) and updates `CHANGELOG.md` based on the
+     conventional-commit PRs merged since the last release. It only runs when
+     the manifest version already has a published release, so merging a
+     release PR can't spawn a stale next-release PR before its tag exists.
+     Merge that PR through the normal review process.
   2. Once merged, the workflow builds the OTA firmware with
      `-DAPP_VERSION=<version>` (so **Settings → About** shows the release
      version), creates a draft GitHub **release**, attaches
      `cyd-dashboard.ino.bin` (the raw app image for the inactive OTA slot), and
      publishes it (release-please runs with `skip-github-release`, so devices
      never see a release before the `.bin` is attached).
-  3. The merged release-please PR is then marked `autorelease: published` so
-     the next release cycle is not blocked.
+  3. After the release is published, the merged release-please PR is marked
+     `autorelease: published` so the next release cycle is not blocked.
 
 The version shown on the About screen comes from the `APP_VERSION` compile-time
-macro (`kVersion` in `cyd-dashboard.ino`); it defaults to the current branch
-version with a `-dev` suffix (e.g. `1.1.0-dev`) when not set, so local builds
-work without the flag. Any `-dev` version is treated as a **dev build** that
-never auto-updates (see below). Keep `version.txt` in sync with that default
-when you first adopt this. OTA *delivery* of the `.bin` to a device is handled
-on-device — see **OTA updates (firmware delivery)** below.
+macro (`kVersion` in `cyd-dashboard.ino`); it falls back to a hardcoded
+`0.0.0-dev` literal when the flag isn't set, so local builds work without it —
+pass the flag as shown above so About shows the real version. Any `-dev`
+version is treated as a **dev build** that never auto-updates (see below). OTA
+*delivery* of the `.bin` to a device is handled on-device — see **OTA updates
+(firmware delivery)** below.
 
 > **Token:** `release.yml` authenticates release-please with a dedicated GitHub
 > App installation token (minted by `create-github-app-token` from the
@@ -425,9 +427,10 @@ app image** for the inactive slot, built by the release workflow with
 
 ### Release versioning (release-please)
 
-Versioning is fully automated — you never hand-edit `version.txt` or bump the
-version yourself. release-please reads the current version from `version.txt`,
-then derives the **next** version from the conventional-commit **PR titles**
+Versioning is fully automated — you never hand-edit
+`.release-please-manifest.json` or bump the version yourself. release-please
+reads the current version from the manifest, then derives the **next** version
+from the conventional-commit **PR titles**
 merged to `main` since the last release, following Semantic Versioning
 (`MAJOR.MINOR.PATCH`):
 
@@ -455,16 +458,17 @@ Behavior notes:
 - When a batch of merged PRs contains multiple bump types, the **largest
   applicable bump wins** (breaking > feat > fix).
 - A **release-please version-bump PR** is opened automatically after a
-  conventional-commit PR merges. Merging that PR updates `version.txt` (and
-  `CHANGELOG.md`). Pushing that merge to `main` triggers the `release.yml`
+  conventional-commit PR merges. Merging that PR updates
+  `.release-please-manifest.json` (and `CHANGELOG.md`). Pushing that merge to
+  `main` triggers the `release.yml`
   workflow, which builds the firmware, creates and publishes the
   `vMAJOR.MINOR.PATCH` GitHub release, attaches `cyd-dashboard.ino.bin`, and
   then marks the release-please PR as `autorelease: published` so the next
   release cycle is not blocked. The build job bakes the new version into
   **Settings → About**.
-- Do not hand-edit `version.txt`. If a release-please PR ever gets stuck with an
-  `autorelease: pending` label after the release is live, the workflow now
-  corrects it automatically.
+- Do not hand-edit `.release-please-manifest.json`. If a release-please PR ever
+  gets stuck with an `autorelease: pending` label after the release is live,
+  the workflow now corrects it automatically.
 - Non-functional changes (`docs`, `chore`, `refactor`, `build`, `ci`) update the
   changelog but, on their own, do not trigger a release.
 
