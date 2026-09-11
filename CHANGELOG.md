@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.12.1...v1.13.0) (2026-09-11)
+
+
+### Features
+
+* add ADSB.lol route source, same-airport yellow LED, and root-CA naming ([#99](https://github.com/improving-minnesota/cyd-dashboard/issues/99)) ([68c4c13](https://github.com/improving-minnesota/cyd-dashboard/commit/68c4c13bf75186cecdef3bd8ee3dc9c7cf253c07))
+
 ## [1.12.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.12.0...v1.12.1) (2026-09-10)
 
 
