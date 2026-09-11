@@ -44,7 +44,7 @@ void logoRelease(const RuntimeLogo* logo);
 struct Plane;
 
 // LED blink colors for overhead-flight notifications.
-enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW };
+enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW, BLINK_WHITE };
 
 // Serial NVS provisioning (see wifi_config.ino). Defined HERE (not in
 // wifi_config.ino) because Arduino concatenates .ino files alphabetically, and
@@ -282,6 +282,10 @@ unsigned long g_nextRouteMs = 0;  // earliest millis() to retry the /flights/* b
 unsigned long g_nextTrackMs = 0;  // earliest millis() to retry the /tracks/* bucket after a 429
 const int LOW_CREDIT_THRESHOLD = 0;         // "at the limit"
 const unsigned long CREDIT_RECOVERY_MS = 15UL * 60UL * 1000UL;  // fallback retry cadence while exhausted
+// After this many consecutive 401s (each already retried with a fresh token),
+// stop polling at the normal cadence and fall back to CREDIT_RECOVERY_MS so we
+// aren't hammering the API with credentials the server keeps rejecting.
+const int AUTH_401_BACKOFF_AFTER = 5;
 const unsigned long ADSB_RETRY_MS = 60UL * 1000UL;  // vrs-standing-data 429/transport retry
 
 // OpenSky auth state for the red border indicator
@@ -408,6 +412,16 @@ String g_osClientSecret = "";   // OpenSky OAuth2 client secret
 String g_osToken = "";          // cached OpenSky bearer token
 unsigned long g_osTokenExpiry = 0;  // millis() at which g_osToken expires
 bool   g_osTokenValid = false;
+// Consecutive radar polls that returned 401 even with a freshly minted token.
+// Drives the AUTH_BAD indicator and, past AUTH_401_BACKOFF_AFTER, the slow
+// retry cadence (see g_nextRadarMs). Reset on any successful radar poll and
+// whenever the credentials change.
+int    g_auth401Streak = 0;
+
+// True when the last radar/weather poll actually failed (not just empty).
+// Drives the "OpenSky Data Unavailable" / "Weather Data Unavailable" labels.
+bool   g_radarDataFailed = false;
+bool   g_weatherDataFailed = false;
 String g_addrSearch = "";  // address search buffer for location geocoding
 String g_lastPlace = "";   // human-readable place name from the last successful geocode
 // Address-search result code shown on the search status screen (wifiSub 12):
@@ -483,6 +497,7 @@ bool g_suppressFlight = false;
 // user sees the data first and then the blink notification.
 bool g_pendingBlink = false;
 BlinkColor g_blinkColor = BLINK_BLUE;
+BlinkColor g_routeHoldColor = BLINK_NONE;  // route color to keep lit while flight details are shown
 
 // Route details for the overhead flight (origin/destination), fetched
 // automatically the first time a new plane is overhead and cached per plane
@@ -517,6 +532,7 @@ volatile bool g_trackBusy = false;   // cross-task guard
 portMUX_TYPE g_trackMux = portMUX_INITIALIZER_UNLOCKED;
 
 String g_homeAirport = "";      // home airport: drives the incoming/outgoing LED blink (empty = none)
+String g_watchCallsign = "";    // callsign to blink white for while its flight details are shown
 
 // ---- small helpers ----
 float hav(float lat1, float lon1, float lat2, float lon2) {
@@ -1188,15 +1204,52 @@ void fetchFlights() {
   // state instead of flagging "Invalid Credentials"; the next poll recovers.
   if (code < 0) {
     g_osHandshakeFailed = true;
+    g_radarDataFailed = true;
     snprintf(lastErr, sizeof lastErr, "tls fail %d", code);
     http.end();
     dirty = true;
     return;
   }
+  if (code == HTTP_CODE_UNAUTHORIZED && authed) {
+    // The token was rejected. OpenSky tokens expire after ~30 minutes, so the
+    // common cause is a stale cached token (e.g. millis() drift, or a token
+    // revoked server-side): drop it, mint a fresh one, and retry this poll
+    // immediately rather than waiting a whole poll cycle.
+    http.end();
+    g_osTokenValid = false;
+    g_osToken = "";
+    if (openskyEnsureToken()) {
+      authHdr = "Bearer " + g_osToken;
+      const char* retryHdrs[] = { "Authorization", authHdr.c_str(), nullptr };
+      http.setTimeout(5000);
+      http.collectHeaders(hdrKeys, 2);
+      code = httpsRequestRetry(http, sec, osurl, HTTPS_METHOD_GET, "", retryHdrs, false);
+      if (isDevBuild()) Serial.printf("[net] 401 retried with fresh token code=%d\n", code);
+    } else {
+      // Couldn't even get a new token. openskyEnsureToken() distinguishes a
+      // transport failure (g_osHandshakeFailed, transient) from a rejected
+      // client (genuine bad credentials), and the auth-state block below
+      // already handles both, so just fall through with the 401.
+      code = HTTP_CODE_UNAUTHORIZED;
+    }
+  }
   if (code == HTTP_CODE_UNAUTHORIZED) {
-    // Token was rejected/expired; drop it so the next poll refreshes. Don't
-    // flag AUTH_BAD here: a stale/expired token is transient, and the refresh
-    // on the next poll determines whether the credentials are truly bad.
+    // Still unauthorized with a freshly minted token. For a configured client
+    // that means the credentials really are being rejected, so surface it;
+    // anonymous polling gets no such claim. This self-clears on the next
+    // successful poll.
+    if (g_osClientId.length() > 0 && !g_osHandshakeFailed) {
+      if (g_auth401Streak < 1000) g_auth401Streak++;
+      g_authState = AUTH_BAD;
+      // Past the streak limit, back off to the slow recovery cadence instead of
+      // retrying every poll interval.
+      if (g_auth401Streak >= AUTH_401_BACKOFF_AFTER) {
+        g_nextRadarMs = millis() + CREDIT_RECOVERY_MS;
+        if (isDevBuild())
+          Serial.printf("[net] 401 streak=%d, backing off radar polling to %lus\n",
+                        g_auth401Streak, CREDIT_RECOVERY_MS / 1000UL);
+      }
+    }
     g_osTokenValid = false;
     snprintf(lastErr, sizeof lastErr, "401");
     http.end();
@@ -1215,12 +1268,14 @@ void fetchFlights() {
     g_nextRadarMs = millis() + waitMs;
     if (isDevBuild() && retry.length()) Serial.printf("[net] 429 radar retry after %lus\n", (unsigned long)retry.toInt());
     snprintf(lastErr, sizeof lastErr, "429 no credits");
+    g_radarDataFailed = true;
     http.end();
     dirty = true;
     return;
   }
   if (code != HTTP_CODE_OK) {
     snprintf(lastErr, sizeof lastErr, "http %d", code);
+    g_radarDataFailed = true;
     http.end();
     dirty = true;
     return;
@@ -1237,6 +1292,9 @@ void fetchFlights() {
     if (g_osClientId.length() > 0) g_authState = (authed ? AUTH_OK : AUTH_BAD);
     else g_authState = AUTH_ANON;
   }
+  // A successful poll clears any 401 streak (and its backoff), so a temporary
+  // server-side rejection can't leave a permanent "Invalid Creds" error.
+  g_auth401Streak = 0;
   // Capture remaining credits from the rate-limit header (collected via
   // http.collectHeaders() above).
   String rem = http.header("X-Rate-Limit-Remaining");
@@ -1265,6 +1323,7 @@ void fetchFlights() {
     }
     snprintf(lastErr, sizeof lastErr, "json no states");
     Serial.printf("[net] flights json no states len=%u\n", (unsigned)body.bytesRead());
+    g_radarDataFailed = true;
     body.drain();
     http.end();
     dirty = true;
@@ -1321,11 +1380,13 @@ void fetchFlights() {
     snprintf(lastErr, sizeof lastErr, "json short");
     Serial.printf("[net] flights json short len=%u/%ld%s\n", (unsigned)body.bytesRead(),
                   body.contentLength(), body.stalled() ? " stalled" : "");
+    g_radarDataFailed = true;
     dirty = true;
     return;
   }
   }  // end scoped fetch block (frees states sec/http + TLS context before route/track handshake)
   sortPlanes();
+  g_radarDataFailed = false;
   if (isDevBuild()) Serial.printf("[net] flights ok planes=%d free=%u\n", planeCount, (unsigned)ESP.getFreeHeap());
   // A freshly found overhead flight re-shows the flight view even if the user
   // had dismissed it earlier via the countdown bar. If the overhead plane's
@@ -1398,17 +1459,24 @@ void fetchFlights() {
     // every poll and re-blink whenever the color changes (e.g. when route data
     // arrives after the first sighting). OpenSky is preferred per field when
     // non-empty; ADSB.lol fills the gaps. Color priority is yellow (same home
-    // airport), green (home arrival), red (home departure), then blue.
-    BlinkColor color = computeBlinkColor();
+    // airport), green (home arrival), red (home departure), then blue. A
+    // watched callsign overrides the route color and blinks white repeatedly.
+    bool watchMatch = isWatchedCallsign(planes[0].callsign);
+    BlinkColor color = watchMatch ? BLINK_WHITE : computeBlinkColor();
     if (strncmp(planes[0].icao24, lastBlinkIcao, 6) != 0) {
       strncpy(lastBlinkIcao, planes[0].icao24, 6);
       lastBlinkIcao[6] = 0;
       lastBlinkColor = color;
       g_blinkColor = color;
       g_pendingBlink = true;
-    } else if (color != lastBlinkColor) {
+    } else if (!watchMatch && color != lastBlinkColor) {
       lastBlinkColor = color;
       g_blinkColor = color;
+      g_pendingBlink = true;
+    } else if (watchMatch && g_blinkColor != BLINK_WHITE) {
+      // Keep the watched-plane blink re-armed while it stays overhead so loop()
+      // can drive the repeating white blink whenever flight details are shown.
+      g_blinkColor = BLINK_WHITE;
       g_pendingBlink = true;
     }
   } else {
@@ -1715,17 +1783,19 @@ void drawDashboard() {
 }
 
 // Returns the label for the dashboard's current critical issue, or nullptr when
-// there is none. Priority: No WiFi > invalid creds > no flight credits > pool
-// temp unavailable. Critical issues draw a red border and tint the clock bar
-// red/maroon. The "anonymous" OpenSky case is deliberately NOT here - it's a
-// non-critical warning (flights still work anonymously), handled by
-// dashboardWarningLabel() below.
+// there is none. Priority: No WiFi > invalid creds > no flight credits > data
+// unavailable (OpenSky, weather) > pool temp unavailable. Critical issues draw a
+// red border and tint the clock bar red/maroon. The "anonymous" OpenSky case is
+// deliberately NOT here - it's a non-critical warning (flights still work
+// anonymously), handled by dashboardWarningLabel() below.
 const char* dashboardCriticalLabel() {
   if (WiFi.status() != WL_CONNECTED) return "No WIFI";
   if (g_trackEnabled) {
     if (g_authState == AUTH_BAD) return "Invalid OpenSky Creds";
     if (g_creditsKnown && g_creditsExhausted) return "No Flight Credits";
+    if (g_radarDataFailed) return "OpenSky Data Unavailable";
   }
+  if (g_weatherDataFailed) return "Weather Data Unavailable";
 #if POOL_FEATURE
   if (g_poolEnabled && !g_poolValid) return g_goveeAuthBad ? "Invalid Govee Creds" : "Pool Temp Data Unavailable";
 #endif
@@ -1804,7 +1874,10 @@ void drawCog() {
 
 // ---- LED blink notifications ----
 // CYD RGB LED pins (active-low). Used to blink when an overhead flight is found.
-#define CYD_LED_RED   4
+// The red channel is GPIO 22 on this board, not GPIO 4: GPIO 4 is the panel
+// reset (see tft_setup.h). Other CYD revisions do have red on GPIO 4, so the
+// firmware is intentionally hard-coded for the unit this branch was verified on.
+#define CYD_LED_RED   22
 #define CYD_LED_GREEN 16
 #define CYD_LED_BLUE  17
 
@@ -1828,6 +1901,14 @@ static BlinkColor computeBlinkColor() {
   return BLINK_BLUE;
 }
 
+// True when the configured watch callsign matches `cs` (case-insensitive).
+static bool isWatchedCallsign(const char* cs) {
+  if (g_watchCallsign.length() == 0) return false;
+  String a = cs; a.trim(); a.toUpperCase();
+  String b = g_watchCallsign; b.trim(); b.toUpperCase();
+  return a == b;
+}
+
 // Blink `pin` (active-low) `times` times, `ms` per phase.
 void blinkLedPin(int pin, int times, int ms) {
   pinMode(pin, OUTPUT);
@@ -1840,27 +1921,25 @@ void blinkLedPin(int pin, int times, int ms) {
 }
 
 // Blink the onboard LED to signal an overhead flight:
+//   white  = configured watch callsign while its flight details are shown
 //   yellow = both origin and destination are the same home airport
 //   green  = destination matches the home airport
 //   red    = origin matches the home airport
 //   blue   = all other overhead flights (default)
 // Each color blinks 5 times at 240 ms on/off. We turn ALL LEDs off first so a
-// stale LOW on a previous color does not bleed. Red, green, and yellow then stay
-// lit for 5 seconds after the blink, while blue just blinks.
+// stale LOW on a previous color does not bleed. Red, green, and yellow stay lit
+// while the live flight details remain on the dashboard; loop() turns them off
+// when the flight leaves or the view is dismissed. Blue and white just blink.
 void blinkLed(BlinkColor color) {
   pinMode(CYD_LED_RED, OUTPUT);   digitalWrite(CYD_LED_RED, HIGH);
   pinMode(CYD_LED_GREEN, OUTPUT); digitalWrite(CYD_LED_GREEN, HIGH);
   pinMode(CYD_LED_BLUE, OUTPUT);  digitalWrite(CYD_LED_BLUE, HIGH);
   if (color == BLINK_RED) {
     blinkLedPin(CYD_LED_RED, 5, 240);
-    digitalWrite(CYD_LED_RED, LOW);   // hold lit for 5 s after blink
-    delay(5000);
-    digitalWrite(CYD_LED_RED, HIGH);
+    digitalWrite(CYD_LED_RED, LOW);   // stay lit while the flight is displayed
   } else if (color == BLINK_GREEN) {
     blinkLedPin(CYD_LED_GREEN, 5, 240);
-    digitalWrite(CYD_LED_GREEN, LOW); // hold lit for 5 s after blink
-    delay(5000);
-    digitalWrite(CYD_LED_GREEN, HIGH);
+    digitalWrite(CYD_LED_GREEN, LOW); // stay lit while the flight is displayed
   } else if (color == BLINK_YELLOW) {
     for (int i = 0; i < 5; i++) {
       digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, HIGH);
@@ -1868,13 +1947,100 @@ void blinkLed(BlinkColor color) {
       digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
       delay(240);
     }
-    digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, HIGH);
-    delay(5000);
-    digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
+    digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, HIGH);  // stay lit
+  } else if (color == BLINK_WHITE) {
+    for (int i = 0; i < 5; i++) {
+      digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, LOW);
+      delay(240);
+      digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
+      delay(240);
+    }
+    digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);  // white off after one sequence
   } else {
     blinkLedPin(CYD_LED_BLUE, 5, 240);
+    digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
   }
-  digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
+}
+
+// Continuous white blink for a watched callsign while its flight details are
+// shown. Non-blocking: called from loop() every tick and toggles the LED with
+// millis() so the main loop (touch + drawing) keeps running.
+void updateWatchBlink(unsigned long now, bool active) {
+  static unsigned long cycleStart = 0;
+  const unsigned long PHASE_MS = 240;
+  const unsigned long PAUSE_MS = 1500;
+  const unsigned long CYCLE_MS = 10 * PHASE_MS + PAUSE_MS;
+  pinMode(CYD_LED_RED, OUTPUT);
+  pinMode(CYD_LED_GREEN, OUTPUT);
+  pinMode(CYD_LED_BLUE, OUTPUT);
+  if (!active) {
+    if (cycleStart) {
+      digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
+      cycleStart = 0;
+    }
+    return;
+  }
+  if (cycleStart == 0) cycleStart = now;
+  unsigned long t = (now - cycleStart) % CYCLE_MS;
+  if (t < 10 * PHASE_MS) {
+    bool on = ((t / PHASE_MS) % 2) == 0;
+    if (on) {
+      digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, LOW);
+    } else {
+      digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
+    }
+  } else {
+    digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
+  }
+}
+
+// Keep red/green/yellow route colors solid while the live flight details are
+// shown on the dashboard, and turn them off when the flight leaves or the view
+// is dismissed (including recalled flight details).
+void updateRouteLed(bool active) {
+  pinMode(CYD_LED_RED, OUTPUT);
+  pinMode(CYD_LED_GREEN, OUTPUT);
+  pinMode(CYD_LED_BLUE, OUTPUT);
+  if (!active || g_routeHoldColor == BLINK_NONE) {
+    digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
+    if (!active) g_routeHoldColor = BLINK_NONE;
+    return;
+  }
+  switch (g_routeHoldColor) {
+    case BLINK_RED:
+      digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
+      break;
+    case BLINK_GREEN:
+      digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, HIGH);
+      break;
+    case BLINK_YELLOW:
+      digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, HIGH);
+      break;
+    default:
+      digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
+      break;
+  }
+}
+
+// When no flight notification is active, mirror the dashboard's status border:
+// red for a critical issue and yellow for the OpenSky anonymous warning. This
+// keeps the onboard LED in sync with the red/yellow lower-right screen bar.
+void updateStatusLed() {
+  pinMode(CYD_LED_RED, OUTPUT);
+  pinMode(CYD_LED_GREEN, OUTPUT);
+  pinMode(CYD_LED_BLUE, OUTPUT);
+  const char* crit = dashboardCriticalLabel();
+  const char* warn = dashboardWarningLabel();
+  if (!crit && !warn) {
+    digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
+    return;
+  }
+  // Solid, matching the steady red/yellow status border on screen.
+  if (crit) {
+    digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
+  } else {
+    digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, HIGH);
+  }
 }
 
 // ---- Flight details card ----
@@ -2898,6 +3064,7 @@ void setup() {
   }
   g_clockCol = (uint16_t)prefs.getUInt("clkcol", DEFAULT_CLOCK_COL);
   g_homeAirport = prefs.getString("homeap", "");
+  g_watchCallsign = prefs.getString("watchcs", "");
   g_goveeKey = prefs.getString("govee", "");
   g_poolDeviceId = prefs.getString("poolid", "");
   g_poolModel = prefs.getString("poolmodel", "");
@@ -3288,7 +3455,9 @@ void loop() {
     // refill (OpenSky resets daily) without hammering the API.
     if (g_trackEnabled) {
       bool wantFlights = false;
-      if (g_creditsExhausted) {
+      // Both an exhausted credit bucket and a run of rejected tokens park the
+      // next attempt in g_nextRadarMs; honor it instead of the normal cadence.
+      if (g_creditsExhausted || g_auth401Streak >= AUTH_401_BACKOFF_AFTER) {
         if ((long)(now - g_nextRadarMs) >= 0) wantFlights = true;
       } else if (now - lastPoll >= (unsigned long)g_pollSec * 1000UL) {
         wantFlights = true;
@@ -3374,10 +3543,44 @@ void loop() {
 
   // Run a queued LED blink. The color was already decided in fetchFlights()
   // and re-checked on every poll, so we blink whenever the route state changes.
+  BlinkColor blinked = BLINK_NONE;
   if (g_pendingBlink) {
     g_pendingBlink = false;
+    blinked = g_blinkColor;
     if (g_blinkForFlight) blinkLed(g_blinkColor);
   }
+
+  // Determine whether a flight is currently shown live on the dashboard (not on
+  // the recall flight-detail page), and whether that callsign is the watched one.
+  bool liveFlight = (g_blinkForFlight && g_screen == SCR_DASH && !g_suppressFlight &&
+                     planeCount > 0 && planes[0].distMi <= g_radiusMi);
+  bool watchActive = liveFlight && isWatchedCallsign(planes[0].callsign);
+
+  // A non-watch route blink that just finished is the color to hold solid while
+  // the live flight remains on the dashboard.
+  if (blinked != BLINK_NONE && blinked != BLINK_BLUE && blinked != BLINK_WHITE) {
+    g_routeHoldColor = blinked;
+  }
+
+  // Drive the LED: watch-white and route-hold notifications override the
+  // dashboard status. The status LED only runs on the main home screen when no
+  // flight notification is active.
+  bool routeActive = liveFlight && g_routeHoldColor != BLINK_NONE;
+  if (watchActive) {
+    updateRouteLed(false);
+    updateWatchBlink(now, true);
+  } else if (routeActive) {
+    updateWatchBlink(now, false);
+    updateRouteLed(true);
+  } else {
+    updateWatchBlink(now, false);
+    g_routeHoldColor = BLINK_NONE;
+    if (g_screen == SCR_DASH) updateStatusLed();
+    else {
+      digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
+    }
+  }
+
   // Periodic heap/TLS/fetch diagnostic. No-op in release builds.
   static unsigned long lastHeapDiag = 0;
   if (now - lastHeapDiag >= 30000UL) {

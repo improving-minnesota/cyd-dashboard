@@ -92,14 +92,21 @@ void fetchWeather() {
   HTTPClient http;
   http.setTimeout(5000);
   int code = httpsRequestRetry(http, sec, url, HTTPS_METHOD_GET, "", nullptr, false);
-  if (code != HTTP_CODE_OK) { http.end(); return; }
+  if (code != HTTP_CODE_OK) {
+    g_weatherDataFailed = true;
+    http.end();
+    return;
+  }
   BoundedAllocator weatherAlloc(8192);
   JsonDocument doc(&weatherAlloc);
   HttpBodyStream body(http);
   DeserializationError parseErr = deserializeJson(doc, body);
   bool bodyComplete = body.complete() || body.drain();
   http.end();
-  if (parseErr || !bodyComplete) return;
+  if (parseErr || !bodyComplete) {
+    g_weatherDataFailed = true;
+    return;
+  }
 
   JsonObject cur = doc["current"];
   g_temp = cur["temperature_2m"] | 0.0f;
@@ -130,6 +137,7 @@ void fetchWeather() {
     if (strlen(s) >= 16) { strncpy(g_sunset, s + 11, 5); g_sunset[5] = 0; }
   }
   g_weatherValid = true;
+  g_weatherDataFailed = false;
   g_lastWeather = millis();
 
   // record in the RAM ring buffer and (if available) persistent flash log

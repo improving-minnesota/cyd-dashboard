@@ -42,14 +42,13 @@ Keep PRs small and focused on a single logical change so they're quick to
 review. The primary branch is `main`; everything that lands there is intended
 to be shippable.
 
-> **Keep the README and the on-device Help screen in sync.** The end-user guide
-> lives in two places: `README.md` and the Help screen (`kHelpLines[]` in
-> `cyd-dashboard/settings.ino`). Any change to the README's features, getting
-> started, settings, credentials, or troubleshooting content should be mirrored
-> in `kHelpLines[]`, and vice versa — otherwise the on-device help drifts from
-> the README. Because Help renders fixed-width, pre-wrapped lines, keep each
-> entry short (≤ ~32 chars) and update the screen only when the README's
-> user-facing guidance actually changes.
+> **Keep the README and the on-device Help screen in sync.** Every user-facing
+> change to `README.md` (features, settings, credentials, troubleshooting, etc.)
+> must also be mirrored in the on-device Help screen (`kHelpLines[]` in
+> `cyd-dashboard/settings.ino`) — and vice versa. They are not generated from one
+> another. The Help screen is a fixed-width, pre-wrapped string array, so keep
+> each line short (≤ ~32 chars) and update it whenever the README's user-facing
+> guidance changes.
 
 ## Code comments
 
@@ -328,6 +327,26 @@ picks the smallest bundled root set that covers the target host:
 There is no fallback bundle; an unmapped host returns `nullptr` from
 `trustStoreForUrl()` and `httpsBegin()` fails cleanly rather than silently using
 a bundle that may not cover the host's chain.
+
+### OpenSky authentication
+
+`openskyEnsureToken()` mints and caches an OAuth2 bearer token from
+`auth.opensky-network.org`. Tokens are cached until `g_osTokenExpiry` (the
+response's `expires_in`, or 30 minutes by default, minus a 30-second safety
+margin) and reused until then. When credentials are changed in Settings or via
+serial provision, `invalidateOsAuth()` drops the cached token, resets the
+`AUTH_BAD` / 401 backoff state, and requests an immediate re-poll.
+
+On a 401 from the `/states/all` radar poll, `fetchFlights()` now **immediately**
+in-mints a fresh token and retries once in the same cycle. If that retry also
+401s, `g_authState` becomes `AUTH_BAD` and the dashboard shows `Invalid OpenSky
+Creds`. A `g_auth401Streak` counter clears on any successful poll; after 5
+consecutive 401s it falls back to the 15-minute `CREDIT_RECOVERY_MS` cadence to
+avoid hammering the API.
+
+`dashboardCriticalLabel()` now also reports `OpenSky Data Unavailable` for radar
+TLS/HTTP/parse failures and `Weather Data Unavailable` for failed open-meteo
+fetches, keeping the LED and border in sync with the data state.
 
 `OTA_CA_EXPIRY` is still the earliest root expiry; past that **only the OTA
 path** falls back to `setInsecure(true)` so a root rotation can't block
@@ -728,6 +747,7 @@ Settings are stored in NVS under the `"flight"` namespace (see `setup()` in
 | `timer` | bool | `false` | Show the dashboard countdown/timer bar (Flight Tracker → Enable timer). |
 | `clkcol` | uint32 | `TFT_BLUE` | Dashboard clock-bar color (General → Clock Color). |
 | `homeap` | string | `""` | Home airport (ICAO). Used for the LED blink: red when origin matches, green when destination matches. Leave empty to disable. |
+|| `watchcs` | string | `""` | Watched callsign. Blinks white repeatedly while that flight's details are shown on the dashboard. Leave empty to disable. |
 | `ipdhcp` | bool | `true` | Network addressing mode (Network → IP setup). `true` = DHCP; `false` = static using the keys below. |
 | `ipaddr` / `ipmask` / `ipgw` / `ipdns` | string | `""` | Static IP, subnet mask, gateway, DNS. Applied via `WiFi.config()`; blank DNS falls back to the gateway, and an incomplete/invalid set falls back to DHCP. |
 | `hostname` | string | `"cyd-dashboard"` | STA hostname via `WiFi.setHostname()`; applies in both DHCP and static modes. |
@@ -738,6 +758,7 @@ the color on every poll and re-blinks whenever the route state changes, so a
 flight that first appears with no route data still gets the correct color once
 its route arrives. Color priority is:
 
+- **White** — a configured watched callsign (`watchcs`) is overhead and its flight details are being shown on the dashboard. Suppressed on the recall flight-detail page.
 - **Yellow** — origin and destination are both `homeap` (same home airport).
 - **Green** — destination matches `homeap`.
 - **Red** — origin matches `homeap`.
@@ -745,9 +766,19 @@ its route arrives. Color priority is:
 
 For each field the LED prefers the OpenSky route value when it is non-empty and
 falls back to the ADSB.lol planned route value when OpenSky is empty. Each color
-blinks 5 times at 240 ms on/off. Yellow, red, and green then stay lit for 5 seconds
-after the blink, while blue turns off. The blink is performed in `loop()` after
-the flight view is drawn.
+blinks 5 times at 240 ms on/off. Red, green, and yellow then stay lit while the live
+flight is displayed on the dashboard; they turn off when the flight leaves, the user
+dismisses it, or the screen switches to recalled flight details. Blue turns off after
+its blink. White is non-blocking and repeats while the watched callsign's flight
+details remain on screen. When no flight notification is active on the home screen,
+the LED mirrors the dashboard border: solid red for a critical issue (No WiFi, invalid
+OpenSky credentials, exhausted radar credits, unavailable OpenSky/weather/pool temp
+data) or solid yellow when OpenSky is running anonymously. The blink and status
+handling is performed in `loop()` after the flight view is drawn.
+
+The onboard RGB LED pin mapping is set in `cyd-dashboard.ino`: **GPIO 22 is the red
+channel** on the verified unit, not the value claimed in the `jczn_2432s028r` variant
+file. GPIO 4 is the panel reset, so do not change `CYD_LED_RED` to 4 on this hardware.
 
 Any non-dashboard screen (settings, graphs, flight detail, etc.) automatically
 returns to the dashboard after 2 minutes of inactivity. Any touch resets this

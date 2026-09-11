@@ -22,9 +22,14 @@ no computer needed.
   actual-route fallback), airline logo, and a dotted ground-track line showing
   where the plane actually came from. The LED blinks blue for every overhead
   flight, red when departing your home airport (ICAO), green when arriving at
-  your home airport (ICAO), green when arriving at your home airport (ICAO),
-  or yellow when both origin and destination are your home airport. Yellow,
-  green, and red then stay lit for 5 s.
+  your home airport (ICAO), yellow when both origin and destination are your
+  home airport, or white for a watched callsign while its flight details are
+  shown. Red, green, and yellow stay lit while the live flight is displayed;
+  white repeats while the watched callsign is live. On the home screen the LED
+  also glows red for a critical error or yellow when OpenSky is anonymous,
+  matching the on-screen border. Critical errors include No WiFi, invalid
+  OpenSky credentials, exhausted OpenSky credits, unavailable OpenSky/weather
+  data, and an unavailable Govee pool temp.
 - **Govee pool temp monitor** — current pool water temperature from a Govee
   thermometer, with a history graph (Day / Week / Month / Year) showing the
   low, average, and high.
@@ -123,14 +128,22 @@ Defaults for a freshly reset device are shown with each setting.
   on the next connect.
 - **Flight Tracker** — on/off, units (mi or km), radar radius, altitude ceiling,
   poll interval, the countdown/timer bar on the dashboard, your home airport (ICAO),
-  and whether to blink the LED for an overhead flight. Also where you enter your
+  a watched callsign (blinks white while its flight details are shown), and
+  whether to blink the LED for an overhead flight. Also where you enter your
   OpenSky credentials. The LED blinks blue for every overhead flight, yellow when
   both origin and destination are your home airport (ICAO), green when arriving,
-  or red when departing, and then stays lit for 5 s. Any settings or graph screen
-  automatically returns to the main dashboard after 2 minutes of inactivity.
+  red when departing, or white for a watched callsign. Red, green, and yellow stay
+  lit while the live flight is displayed; white repeats while the watched
+  callsign is live. On the home screen the LED also glows red for a critical
+  error or yellow when OpenSky is anonymous, matching the on-screen border.
+  Critical errors include No WiFi, invalid OpenSky credentials, exhausted
+  OpenSky credits, unavailable OpenSky/weather data, and an unavailable Govee
+  pool temp. Any
+  settings or graph screen automatically returns to the main dashboard after 2
+  minutes of inactivity.
   Defaults: **on**, imperial units,
   **3.5 mi** radius, **15,000 ft** ceiling, **60 s** poll, timer **off**, no home
-  airport set, blinking **on**. If your OpenSky **radar-polling** credits run
+  airport set, no watched callsign, blinking **on**. If your OpenSky **radar-polling** credits run
   out, the poll backs off to a slower 15-minute recovery check until they refill
   (OpenSky resets daily).
 - **Sleep Mode** — enable it, set the start/end time, and the wake duration.

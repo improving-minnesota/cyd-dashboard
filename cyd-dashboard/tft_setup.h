@@ -21,6 +21,10 @@
 #define TFT_SCLK 14
 #define TFT_CS   15
 #define TFT_DC   2
+// GPIO 4 really is the panel reset on this unit. The esp32 core's variant file
+// claims GPIO 4 is the red LED (CYD_LED_RED), but on this board revision the
+// red channel is on GPIO 22 - verified by driving each free pin in turn (see
+// the LED pin defines in cyd-dashboard.ino).
 #define TFT_RST  4
 
 // ---- Backlight ----
