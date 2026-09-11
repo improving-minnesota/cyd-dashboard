@@ -127,10 +127,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Only needed when a release just shipped (version job output is non-empty);
+  # on feature merges there is no release PR to mark.
   mark-published:
     name: Mark release-please PR as published
+    needs: version
+    if: needs.version.outputs.version != ''
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
     permissions:
       pull-requests: write
     steps:
