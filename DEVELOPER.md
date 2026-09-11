@@ -243,13 +243,18 @@ GitHub Actions builds and releases the firmware on standard hosted runners
   1. release-please opens a **"release-please" PR** that bumps the version in
      `version.txt` (the `simple` release type reads the current version from
      `version.txt`) and updates `CHANGELOG.md` based on the conventional-commit
-     PRs merged since the last release. Merge that PR through the normal review
-     process.
-  2. Once merged, release-please creates a git tag + GitHub **release**.
-  3. A build job then compiles the OTA firmware with
-     `-DAPP_VERSION=<version>` (so **Settings → About** shows the release version)
-     and uploads `cyd-dashboard.ino.bin` (the raw app image for the inactive OTA
-     slot) as a release asset.
+     PRs merged since the last release. It only runs when the version in
+     `version.txt` already has a published release, so merging a release PR
+     can't spawn a stale next-release PR before its tag exists. Merge that PR
+     through the normal review process.
+  2. Once merged, the workflow builds the OTA firmware with
+     `-DAPP_VERSION=<version>` (so **Settings → About** shows the release
+     version), creates a draft GitHub **release**, attaches
+     `cyd-dashboard.ino.bin` (the raw app image for the inactive OTA slot), and
+     publishes it (release-please runs with `skip-github-release`, so devices
+     never see a release before the `.bin` is attached).
+  3. The merged release-please PR is then marked `autorelease: published` so
+     the next release cycle is not blocked.
 
 The version shown on the About screen comes from the `APP_VERSION` compile-time
 macro (`kVersion` in `cyd-dashboard.ino`); it defaults to the current branch
