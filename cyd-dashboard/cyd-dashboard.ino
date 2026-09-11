@@ -66,14 +66,10 @@ enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW, 
 #define BUILD_NUM 0
 #endif
 
-// Pool temperature feature (Govee). Reads the selected thermometer's current
-// temperature via the Govee Open API POST /router/api/v1/device/state
-// (developer.govee.com) and logs it to flash for the history graphs. Whether
-// this board's H5310 actually appears in the /user/devices list depends on
-// Govee's developer-API support for that model; if it isn't listed (or a fetch
-// fails), the pool value just shows "--" and a red border - a graceful
-// fallback, not a crash. Set to 1 to enable the settings menu entry, idle
-// display, history graph, and polling.
+// Pool temperature feature (Govee) via POST /router/api/v1/device/state, logged
+// to flash for the history graphs. Whether this board's H5310 appears in
+// /user/devices depends on Govee's API support for the model — if not listed
+// (or a fetch fails) the pool shows "--" and a red border, not a crash.
 #define POOL_FEATURE 1
 
 // Deep-sleep wake interval while inside the sleep window. The device wakes
@@ -81,40 +77,31 @@ enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW, 
 #define SLEEP_POOL_INTERVAL_US (5ULL * 60ULL * 1000000ULL)   // 5 minutes
 
 // ---- Touch-wake from deep sleep ----
-// VERIFIED on this unit (see the touch-irq-test sketch): the XPT2046 touch IRQ
-// is on GPIO 36 (active-low: HIGH idle, LOW on touch) and wakes the chip from
-// deep sleep via EXT0. For the wake to fire, the touch controller must stay
-// selected during sleep, so enterDeepSleep() holds its CS line low.
-// GPIO 36 is input-only (no internal pull-up), so no INPUT_PULLUP is used.
+// VERIFIED on this unit: the XPT2046 touch IRQ is GPIO 36 (active-low) and
+// wakes via EXT0. enterDeepSleep() must hold touch CS low during sleep for the
+// wake to fire. GPIO 36 is input-only — no INPUT_PULLUP.
 #define TOUCH_IRQ_ENABLED 1
 #define TOUCH_IRQ_PIN     36
 #define TOUCH_CS_PIN      33
 
 // ---- XPT2046 touch on VSPI (separate bus from the TFT's HSPI) ----
-// TFT_eSPI's getTouch() reads the touch controller on the SAME SPI bus as the
-// display, so it cannot talk to the XPT2046 here (it lives on VSPI). We drive
-// it directly over VSPI instead; see touchReadXY().
+// TFT_eSPI's getTouch() only works on the display's bus, so we drive the
+// XPT2046 directly over VSPI instead; see touchReadXY().
 #define TOUCH_SPI VSPI
 #define TOUCH_MOSI 32
 #define TOUCH_MISO 39
 #define TOUCH_CLK  25
 
-// Print raw + mapped touch coordinates to USB serial on every press (and the
-// calibration params at boot). Enable temporarily to diagnose touch/panel
-// calibration. Set to 0 to remove the prints.
+// Print raw + mapped touch coordinates on every press (and calibration params
+// at boot) to diagnose touch/panel calibration. 0 removes the prints.
 #define TOUCH_DEBUG 0
 
 // ---------------- CONFIG (edit these) ----------------
 // OpenSky bbox will be computed from g_lat/g_lon at runtime.
-// Build/version shown on the About page. CI overrides APP_VERSION at build
-// time with the release version via -DAPP_VERSION=<ver> (see
-// .github/workflows/release.yml). Local/dev builds should pass
-// -DAPP_VERSION=<version>-dev (see DEVELOPER.md) so About shows an
-// accurate version derived from .release-please-manifest.json; the literal below is only a
-// fallback for builds that don't set the flag (e.g. the Arduino IDE) and can
-// drift out of date - it exists solely so any "-dev"-suffixed string is
-// present for isDevBuild() to detect. A "-dev" build never auto-updates (see
-// g_autoUpdate handling).
+// Build/version shown on the About page. CI/dev builds pass -DAPP_VERSION=
+// <ver>-dev (see release.yml / DEVELOPER.md); the literal below is only a
+// fallback for flag-less builds (e.g. Arduino IDE) so isDevBuild() has a
+// "-dev" string to find. A "-dev" build never auto-updates (g_autoUpdate).
 #define STRINGIZE_INNER(x) #x
 #define STRINGIZE(x) STRINGIZE_INNER(x)
 #ifndef APP_VERSION
@@ -219,8 +206,8 @@ struct FlightSnap {
   char  openOrigin[6];
   char  openDest[6];
   // Chosen route for the live view and the recall screen.
-  char  origin[6];        // route ICAO codes ("" = unknown)
-  char  dest[6];
+  char  origin[12];       // route display codes ("" = unknown) — "ICAO", or
+  char  dest[12];         // "ICAO | IATA" when the adsb.lol route provides IATA
   char  originCity[24];   // city for the chosen route source
   char  destCity[24];
   bool  routeFetched;
@@ -247,6 +234,7 @@ bool  g_trackEnabled = true;   // flight tracking on/off
 bool  g_blinkForFlight = true; // blink the LED when an overhead flight is found
 bool  g_metric = false;        // false = imperial (ft/mi/mph), true = metric (m/km/kts)
 bool  g_showTimer = false;     // show/update the dashboard countdown bar (Flight Tracker)
+bool  g_showIata = true;       // show IATA airport codes in route display when ADSB.lol has them
 bool  g_autoUpdate = true;     // auto-check/install firmware updates once/day (General)
 unsigned long g_lastScanDay = 0; // epoch day of last auto-update scan (0 = never)
 
@@ -263,13 +251,14 @@ bool   g_rollbackMarked = false; // OTA rollback safeguard applied once post-boo
 TaskHandle_t g_otaTask = NULL;   // dedicated task running performOTA; created once at boot (see setup())
 TaskHandle_t g_netTask = NULL;     // net task, for stack high-water logging
 volatile bool g_otaRunning = false; // OTA task owns the display; loop() yields
+bool   g_otaFromAbout = false; // Install tapped on About — hold that page (no idle return)
 
 #define NET_TASK_STACK_BYTES 12288
 // Auto-update status shown at the bottom-left of the dashboard (reuses the
 // idle screen's status line, see drawAutoUpdateStatus()).
 int    g_autoUpdStatus = 0;       // 0 none, 1 scanning, 2 no updates, 3 updating, 4 check failed
 unsigned long g_autoUpdStatusUntil = 0; // millis() deadline to keep showing the transient status
-int   g_ftPage = 0;            // Flight Tracker settings page (0 or 1)
+int   g_ftPage = 0;            // Flight Tracker settings page (0-2)
 float g_lat = 0.0f;           // location; loaded from NVS, or guessed from IP on first boot
 float g_lon = 0.0f;
 int   g_creditsRemaining = 0; // OpenSky X-Rate-Limit-Remaining
@@ -509,9 +498,12 @@ bool   g_routeFetched = false;  // true once we've tried (success or not)
 volatile bool g_routeBusy = false;  // true while a route fetch is in flight (cross-task)
 
 // adsb.lol vrs-standing-data callsign route (planned route). Used as the primary
-// display; OpenSky is shown only when its actual route differs.
+// display; OpenSky is shown only when its actual route differs. The IATA codes
+// are display-only — comparisons always use the ICAO codes.
 String g_adsbRouteOrigin = "";
 String g_adsbRouteDest   = "";
+String g_adsbOriginIata  = "";      // 3-letter IATA codes for display ("" = none)
+String g_adsbDestIata    = "";
 String g_adsbOriginCity  = "";
 String g_adsbDestCity    = "";
 bool   g_adsbRouteFetched = false;
@@ -946,21 +938,16 @@ void logHeapDiag(const char* why) {
 #define HTTPS_METHOD_GET 0
 #define HTTPS_METHOD_POST 1
 
-// Perform a verified-TLS request with retries on transient transport failures
-// (a fresh TLS connect can drop after prolonged uptime until a reboot clears
-// the socket state - the same issue the OTA path guards against). Runs
-// httpsBegin() plus the request (GET or POST) up to HTTPS_RETRY_ATTEMPTS times,
-// tearing down and re-establishing the connection with a short pause between
-// attempts. Any real HTTP response (code >= 0, even a non-200) ends the loop,
-// since a server reply proves the network path works. Returns the final HTTP
-// code, or -1 if every attempt failed at the transport layer.
-//
-// `headers` is a nullptr-terminated array of alternating "name"/"value"
-// strings (e.g. {"Content-Type","application/json",nullptr}); an empty value
-// skips that header. Headers must be passed here rather than set with
-// addHeader() before calling, because arduino-esp32's HTTPClient clears its
-// header list on begin()/end() and would otherwise drop them. Keep `sec`/`http`
-// alive to read the response afterwards.
+// Verified-TLS request with retries on transient transport failures (fresh TLS
+// connects can drop after prolonged uptime — the same issue the OTA path guards
+// against). Retries the full begin()+request up to HTTPS_RETRY_ATTEMPTS times;
+// any real HTTP response (code >= 0, even non-200) ends the loop since a reply
+// proves the path works. Returns the final code, or -1 if all attempts failed
+// at the transport layer.
+// `headers` is a nullptr-terminated name/value array (empty value skips it);
+// pass them here, not via addHeader() — HTTPClient clears its header list on
+// begin()/end() and would drop them. Keep `sec`/`http` alive to read the
+// response afterwards.
 int httpsRequestRetry(HTTPClient& http, NetworkClientSecure& sec, const char* url,
                       int method, const String& body, const char* const* headers,
                       bool allowInsecure) {
@@ -1017,8 +1004,10 @@ String urlEncode(const String& s) {
 }
 
 // Pick the route data to show: adsb.lol by default; OpenSky only when its
-// actual airports differ from adsb.lol's planned route. Returns the ICAO codes
-// and the matching city names to draw.
+// actual airports differ from adsb.lol's planned route. Returns the airport
+// codes to draw — "ICAO | IATA" when the adsb.lol route provided an IATA code
+// and the Show IATA setting is on, else ICAO — and the matching city names.
+// All comparisons stay on ICAO.
 void getRouteDisplay(String& origin, String& originCity, String& dest, String& destCity, bool& hasData) {
   origin = ""; originCity = ""; dest = ""; destCity = ""; hasData = false;
   String adsbO = (g_adsbRouteBusy || g_adsbRouteOrigin.length() == 0) ? "" : g_adsbRouteOrigin;
@@ -1036,6 +1025,12 @@ void getRouteDisplay(String& origin, String& originCity, String& dest, String& d
     origin = adsbO; dest = adsbD;
     originCity = adsbOC.length() ? adsbOC : airportCity(origin.c_str());
     destCity = adsbDC.length() ? adsbDC : airportCity(dest.c_str());
+    // Show "ICAO | IATA" when enabled and adsb.lol provided an IATA code (the
+    // ICAO codes above were already used for the diff check and city lookup).
+    if (g_showIata) {
+      if (origin.length() && g_adsbOriginIata.length()) origin += " | " + g_adsbOriginIata;
+      if (dest.length()   && g_adsbDestIata.length())   dest   += " | " + g_adsbDestIata;
+    }
   } else if (openO.length() || openD.length()) {
     origin = openO; dest = openD;
     originCity = airportCity(openO.c_str());
@@ -1156,13 +1151,9 @@ void fetchFlights() {
   NetworkClientSecure sec;
   HTTPClient http;
   char osurl[240];
-  // Bound the query to what the radar can actually draw: the ring is g_radiusMi
-  // and we keep/track planes out to 2x radius (min 8 mi), so a box that large is
-  // all we need. A wider box returns far more aircraft than we keep, which
-  // overwhelmed the old whole-document parse. The states[] rows are now
-  // stream-parsed, but the box still keeps the response small. Widen longitude
-  // by 1/cos(lat) so the box is a true circle on the ground and doesn't clip
-  // planes due east/west.
+  // Bound the query to what the radar draws (2x radius, min 8 mi) so the
+  // response stays small. Longitude is widened by 1/cos(lat) so the box is a
+  // true circle and doesn't clip planes due east/west.
   const float bboxMi = max(g_radiusMi * 2.0f, 8.0f);
   const float dLat = bboxMi / 69.0f;                        // ~1 deg lat ~ 69 mi
   const float dLon = dLat / cosf(g_lat * PI / 180.0f);
@@ -1179,14 +1170,10 @@ void fetchFlights() {
   // OpenSky credit balance) would never be available.
   const char* hdrKeys[] = { "X-Rate-Limit-Remaining", "X-Rate-Limit-Retry-After-Seconds" };
   http.collectHeaders(hdrKeys, 2);
-  // Authenticate via OAuth2 client-credentials for the higher 4000-credit/day
-  // rate. If no client is configured, openskyEnsureToken() returns false and we
-  // fall back to anonymous (400 credits/day). A TLS/handshake failure on the
-  // token exchange is flagged via g_osHandshakeFailed, but it is a transient
-  // network error, NOT invalid credentials: if the flight-data request below
-  // still succeeds over verified TLS we keep the last known auth state and use
-  // the (anonymous) response, so a blip can't show a false "Invalid
-  // Credentials" error or freeze the dashboard.
+  // OAuth2 client-credentials raise the rate limit (4000 vs 400 credits/day).
+  // A token-exchange transport failure (g_osHandshakeFailed) is transient, NOT
+  // bad credentials — the request below may still succeed anonymously, so we
+  // keep the last known auth state rather than flagging a false AUTH_BAD.
   bool authed = openskyEnsureToken();
   if (isDevBuild()) {
     Serial.printf("[net] OpenSky auth client=%s token=%s handshake=%d\n",
@@ -1280,14 +1267,10 @@ void fetchFlights() {
     dirty = true;
     return;
   }
-  // Auth state reflects what OpenSky actually accepted, so invalid credentials
-  // can't silently run as anonymous. A configured client whose token exchange
-  // was rejected (a non-200 response from the token endpoint) is bad
-  // credentials (warn); otherwise OK when a token was used, or ANON when the
-  // request went out unauthenticated. A token-exchange transport/TLS failure
-  // (g_osHandshakeFailed) already invalidated the cached token inside
-  // openskyEnsureToken() so the next poll retries it, and it is transient
-  // (not invalid creds), so we leave the last known auth state unchanged.
+  // Auth state reflects what OpenSky actually accepted: a configured client
+  // whose token exchange was rejected means bad credentials (AUTH_BAD);
+  // otherwise AUTH_OK with a token, AUTH_ANON without. A transport failure
+  // (g_osHandshakeFailed) is transient — keep the last known state.
   if (!g_osHandshakeFailed) {
     if (g_osClientId.length() > 0) g_authState = (authed ? AUTH_OK : AUTH_BAD);
     else g_authState = AUTH_ANON;
@@ -1414,8 +1397,8 @@ void fetchFlights() {
       String o, oc, d, dc;
       bool hasData;
       getRouteDisplay(o, oc, d, dc, hasData);
-      g_lastFlight.origin[0] = 0; strncpy(g_lastFlight.origin, o.c_str(), 5); g_lastFlight.origin[5] = 0;
-      g_lastFlight.dest[0]   = 0; strncpy(g_lastFlight.dest,   d.c_str(), 5); g_lastFlight.dest[5]   = 0;
+      g_lastFlight.origin[0] = 0; strncpy(g_lastFlight.origin, o.c_str(), sizeof(g_lastFlight.origin) - 1); g_lastFlight.origin[sizeof(g_lastFlight.origin) - 1] = 0;
+      g_lastFlight.dest[0]   = 0; strncpy(g_lastFlight.dest,   d.c_str(), sizeof(g_lastFlight.dest)   - 1); g_lastFlight.dest[sizeof(g_lastFlight.dest)   - 1]   = 0;
       g_lastFlight.originCity[0] = 0; strncpy(g_lastFlight.originCity, oc.c_str(), sizeof(g_lastFlight.originCity) - 1); g_lastFlight.originCity[sizeof(g_lastFlight.originCity) - 1] = 0;
       g_lastFlight.destCity[0]   = 0; strncpy(g_lastFlight.destCity,   dc.c_str(), sizeof(g_lastFlight.destCity)   - 1); g_lastFlight.destCity[sizeof(g_lastFlight.destCity)   - 1] = 0;
       g_lastFlight.routeFetched = hasData;
@@ -1437,6 +1420,8 @@ void fetchFlights() {
       g_adsbRouteFetched = false;
       g_adsbRouteOrigin = "";
       g_adsbRouteDest = "";
+      g_adsbOriginIata = "";
+      g_adsbDestIata = "";
       g_adsbOriginCity = "";
       g_adsbDestCity = "";
       g_trackFetched = false;
@@ -1766,9 +1751,9 @@ void drawDashboard() {
   bool overhead = g_trackEnabled && !g_suppressFlight
                   && (planeCount > 0 && planes[0].distMi <= g_radiusMi);
   if (overhead) {
-    // Route details are drawn inline by drawFlightInfo (above the Details
-    // button). They appear once the route is auto-fetched (see fetchRoute in
-    // flight_details.ino); the Details tap only recalls the cached result.
+    // Route details are drawn inline by drawFlightInfo. They appear once the
+    // route is auto-fetched (see fetchRoute in flight_details.ino); the
+    // aircraft-count recall tap only redisplays the snapshotted result.
     drawFlightInfo(planes[0]);
     drawRadar();
   } else {
@@ -3034,13 +3019,10 @@ void setup() {
   g_sleepEndH = prefs.getInt("sleepeH", 8);
   g_sleepEndM = prefs.getInt("sleepeM", 0);
   g_wakeMin = prefs.getInt("wake", 10);
-  // The Sleep Mode screen edits these as HHMM/minute text buffers, but they're
-  // only ever written when the user actually edits a field (see
-  // handleKeyboardTouch()/commitSleepTime() in wifi_config.ino) - they default
-  // to hardcoded strings at declaration, so without this they'd keep showing
-  // "22:00"/"08:00"/"10 min" on the Settings screen after every reboot (OTA,
-  // deep sleep, power cycle) even though the loaded ints above (and the actual
-  // sleep behavior) are correct. Sync them from the just-loaded values now.
+  // The Sleep Mode edit buffers default to hardcoded strings and are only
+  // written on edit (see commitSleepTime() in wifi_config.ino) — sync them from
+  // the loaded values or the Settings screen shows stale "22:00"/"08:00"/"10
+  // min" after every reboot.
   {
     char buf[8];
     snprintf(buf, sizeof buf, "%02d%02d", g_sleepStartH, g_sleepStartM);
@@ -3053,6 +3035,7 @@ void setup() {
   g_blinkForFlight = prefs.getBool("blinkf", true);
   g_metric = prefs.getBool("metric", false);
   g_showTimer = prefs.getBool("timer", false);
+  g_showIata = prefs.getBool("showiata", true);
   g_autoUpdate = prefs.getBool("autoupd", true);
   g_lastScanDay = prefs.getULong("lastscan", 0);
   // Dev builds (version ending in "-dev") never auto-update: force it OFF for
@@ -3094,26 +3077,19 @@ void setup() {
   weatherfsInit();  // load persisted weather temp history from flash into RAM
   logosInit();    // mount the "logos" partition (may be absent -> run logo-less)
 
-  // esp_sleep_get_wakeup_cause() reads a hardware register that is NOT cleared
-  // by a software reset (esp_restart(), used by OTA and Factory Reset). So on
-  // any boot that ISN'T actually waking from deep sleep, it can still report
-  // the cause from the last real deep-sleep exit, potentially hours earlier.
-  // Only trust it when esp_reset_reason() confirms this boot really is a
-  // deep-sleep wake; otherwise a stale value could send a fresh OTA/reset boot
-  // straight into the low-power sleeperRun() path below (before the display
-  // even initializes) instead of a normal boot.
+  // esp_sleep_get_wakeup_cause() reads a register NOT cleared by software
+  // reset (esp_restart()/OTA/Factory Reset) — it can report a stale cause from
+  // an earlier deep-sleep exit. Only trust it when esp_reset_reason() confirms
+  // a real deep-sleep wake, else a stale value could send a fresh boot into
+  // sleeperRun() before the display even initializes.
   bool wokeFromDeepSleep = (esp_reset_reason() == ESP_RST_DEEPSLEEP);
   esp_sleep_wakeup_cause_t wakeCause = wokeFromDeepSleep
       ? esp_sleep_get_wakeup_cause() : ESP_SLEEP_WAKEUP_UNDEFINED;
 #if TOUCH_IRQ_ENABLED
-  // enterDeepSleep() latches TOUCH_CS_PIN low via gpio_hold_en() so the
-  // XPT2046 stays selected and can assert its IRQ during sleep. That hold
-  // survives the reset caused by waking from deep sleep, so it must be
-  // released here - otherwise CS stays stuck low forever, keeping the touch
-  // controller permanently selected. That leaves its IRQ line asserted
-  // (LOW) indefinitely, and since the EXT0 wakeup below is level-triggered
-  // on LOW, every later deep-sleep attempt would wake right back up
-  // immediately, so the device would never actually stay asleep.
+  // enterDeepSleep() latches TOUCH_CS_PIN low via gpio_hold_en() so the XPT2046
+  // can assert its IRQ during sleep. The hold survives the wake reset, so
+  // release it here — otherwise CS stays low, the IRQ stays asserted, and the
+  // level-triggered EXT0 wake would re-fire on every later deep-sleep attempt.
   gpio_hold_dis((gpio_num_t)TOUCH_CS_PIN);
   pinMode(TOUCH_CS_PIN, OUTPUT);
   digitalWrite(TOUCH_CS_PIN, HIGH);   // deselect the touch controller
@@ -3128,12 +3104,10 @@ void setup() {
   }
 #endif
 
-  // If we woke from the deep-sleep timer while inside the sleep window, run
-  // the low-power pool logger (it keeps sleeping on its own). It only
-  // returns once the sleep window has ended, or if WiFi/time couldn't be
-  // obtained - either way we fall through to a normal boot below. When it
-  // returns due to the window ending, WiFi is already connected and time is
-  // already synced, so we skip repeating that work.
+  // On a deep-sleep timer wake inside the sleep window, run the low-power
+  // pool logger. It returns when the window ends (WiFi + time already synced,
+  // so we skip repeating that work) or if WiFi/time couldn't be obtained —
+  // either way we fall through to a normal boot.
   bool alreadyAwake = false;
   if (g_sleepOn && wakeCause == ESP_SLEEP_WAKEUP_TIMER) {
     alreadyAwake = sleeperRun();
@@ -3143,11 +3117,9 @@ void setup() {
   tft.setRotation(1); // landscape 320x240
   tft.fillScreen(TFT_BLACK);
 
-  // First-boot wizard. If no touch calibration is saved, kick it off now; it
-  // runs on its own screen (driven by calPoll() in loop()) and, when it
-  // finishes, advances to the WiFi step if needed or to the dashboard. If
-  // calibration is already saved but no WiFi credentials are, jump straight to
-  // the WiFi setup screen here.
+  // First-boot wizard: missing touch calibration starts calBegin() (driven by
+  // calPoll() in loop(), then advances to WiFi or the dashboard); missing WiFi
+  // credentials with saved calibration jumps straight to the WiFi screen.
   if (g_bootStage == BOOT_CALIB) {
     calBegin();
     // Calibration needs a responsive touch path before anything else.
@@ -3234,21 +3206,12 @@ void enterDeepSleep() {
 // Is the current local time inside the configured sleep window?
 bool inSleepWindowNow() {
   if (!g_sleepOn) return false;
-  // Only trust the clock once NTP has synced. After a soft reset (e.g. OTA),
-  // the RTC retains a valid-looking UTC time, but the timezone isn't set until
-  // configTime() runs after WiFi connects - so getLocalTime() would apply the
-  // default UTC offset and could report a local time that lands in the sleep
-  // window even when the real time is outside it (causing an unwanted sleep).
-  // sntp_get_sync_status() is NOT used here: Arduino-ESP32's configTime()
-  // never drives it to SNTP_SYNC_STATUS_COMPLETED (confirmed on-device - it
-  // stays SNTP_SYNC_STATUS_RESET forever even once the clock is correctly
-  // synced), which would permanently block sleep.
-  // The epoch check below alone is NOT enough: after a soft reset (OTA) the
-  // RTC retains a valid-looking UTC epoch, so time() clears it even though the
-  // timezone isn't applied yet. Until setupNTP()/configTime() has run in THIS
-  // boot, getLocalTime() reports UTC, which can land inside the sleep window
-  // and cause an unwanted sleep. g_timeReady (set by setupNTP) gates on the
-  // timezone actually being applied; combine it with the epoch check.
+  // Only trust the clock once NTP has synced: after a soft reset (e.g. OTA) the
+  // RTC retains a valid-looking UTC epoch but the timezone isn't applied until
+  // configTime() runs, so an epoch check alone could land inside the sleep
+  // window and trigger an unwanted sleep. sntp_get_sync_status() is unusable
+  // (Arduino-ESP32's configTime() never drives it to COMPLETED on-device), so
+  // g_timeReady (set by setupNTP) is the gate; combine it with the epoch check.
   if (!g_timeReady) return false;
   if (time(nullptr) < 1600000000L) return false;
   struct tm t;
@@ -3366,13 +3329,10 @@ void loop() {
   if (g_otaActive && !g_otaRunning) {
     g_otaActive = false;
     g_otaRunning = true;
-    // Without this return, the rest of THIS loop() iteration can still fall
-    // through to the dirty-redraw block below (e.g. because netUpdated was
-    // just set true by the same auto-scan that set g_otaActive), issuing
-    // TFT/SPI draw calls concurrently with the OTA task's drawOtaHeader().
-    // TFT_eSPI has no cross-task locking, so that race can hang the SPI bus
-    // indefinitely (observed as a full freeze: no crash, no reboot, stale
-    // screen content).
+    g_screenIdleUntil = 0;   // drop any armed idle return so it can't fire mid-OTA
+    // Bail here so the dirty-redraw below can't issue TFT/SPI draws
+    // concurrently with the OTA task — TFT_eSPI has no cross-task locking and
+    // that race can hang the SPI bus (observed as a full freeze).
     return;
   }
   // OTA rollback safeguard: after a successful boot grace period, cancel any
@@ -3499,8 +3459,12 @@ void loop() {
 
   // Auto-return from any non-dashboard screen to the dashboard after 2 minutes
   // of inactivity. Any touch resets the timer. Boot screens (calibration and
-  // first-time WiFi setup) are excluded so the initial wizard isn't interrupted.
-  if (g_calState == CAL_NONE && g_bootStage == BOOT_DONE) {
+  // first-time WiFi setup) are excluded so the initial wizard isn't interrupted,
+  // and a pending/running OTA is excluded so the download can't be disrupted.
+  // The About page is also held after its Install button is tapped so a failed
+  // OTA's result stays visible instead of timing back out to the dashboard.
+  if (g_calState == CAL_NONE && g_bootStage == BOOT_DONE && !g_otaActive && !g_otaRunning &&
+      !(g_screen == SCR_ABOUT && g_otaFromAbout)) {
     if (g_screen != SCR_DASH) {
       if (g_screenIdleUntil == 0) g_screenIdleUntil = now + SCREEN_IDLE_TIMEOUT_MS;
       if (g_screenIdleUntil != 0 && (long)(now - g_screenIdleUntil) >= 0) {
@@ -3510,6 +3474,7 @@ void loop() {
         g_ftPage = 0;
         g_addrSearch = "";
         g_wifiSub = 0;
+        g_otaFromAbout = false;
         g_screenIdleUntil = 0;
         dirty = true;
       }

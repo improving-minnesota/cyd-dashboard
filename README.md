@@ -18,8 +18,10 @@ no computer needed.
   logged to flash (always on) and graphed over Day / Week / Month / Year with the
   low, average, and high.
 - **Flight tracker** — live aircraft overhead (from OpenSky) with a mini radar,
-  callsign, altitude/speed/distance, planned route from ADSB.lol (with OpenSky
-  actual-route fallback), airline logo, and a dotted ground-track line showing
+  callsign, altitude/speed/distance, planned route from ADSB.lol shown as
+  `ICAO | IATA` airport codes when IATA is available (with OpenSky actual-route
+  fallback; toggleable in Flight Tracker settings), airline
+  logo, and a dotted ground-track line showing
   where the plane actually came from. The LED blinks blue for every overhead
   flight, red when departing your home airport (ICAO), green when arriving at
   your home airport (ICAO), yellow when both origin and destination are your
@@ -142,7 +144,7 @@ Defaults for a freshly reset device are shown with each setting.
   settings or graph screen automatically returns to the main dashboard after 2
   minutes of inactivity.
   Defaults: **on**, imperial units,
-  **3.5 mi** radius, **15,000 ft** ceiling, **60 s** poll, timer **off**, no home
+  **3.5 mi** radius, **15,000 ft** ceiling, **30 s** poll, timer **off**, no home
   airport set, no watched callsign, blinking **on**. If your OpenSky **radar-polling** credits run
   out, the poll backs off to a slower 15-minute recovery check until they refill
   (OpenSky resets daily).

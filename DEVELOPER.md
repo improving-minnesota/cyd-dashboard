@@ -754,6 +754,7 @@ Settings are stored in NVS under the `"flight"` namespace (see `setup()` in
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `timer` | bool | `false` | Show the dashboard countdown/timer bar (Flight Tracker → Enable timer). |
+| `showiata` | bool | `true` | Display route airports as `ICAO | IATA` when ADSB.lol provides an IATA code (Flight Tracker → Show IATA). |
 | `clkcol` | uint32 | `TFT_BLUE` | Dashboard clock-bar color (General → Clock Color). |
 | `homeap` | string | `""` | Home airport (ICAO). Used for the LED blink: red when origin matches, green when destination matches. Leave empty to disable. |
 || `watchcs` | string | `""` | Watched callsign. Blinks white repeatedly while that flight's details are shown on the dashboard. Leave empty to disable. |
@@ -791,7 +792,9 @@ file. GPIO 4 is the panel reset, so do not change `CYD_LED_RED` to 4 on this har
 
 Any non-dashboard screen (settings, graphs, flight detail, etc.) automatically
 returns to the dashboard after 2 minutes of inactivity. Any touch resets this
-timer; boot screens (calibration and first-time WiFi setup) are excluded.
+timer; boot screens (calibration and first-time WiFi setup) are excluded, and
+the timer is suspended while an OTA update is pending or running so a download
+can't be interrupted by an auto-return redraw.
 
 `prefs.clear()` in the Reset handler removes **all** keys for both "All" and
 "Settings" resets (the "Settings" reset only re-writes the four touch-
@@ -869,4 +872,12 @@ light-grey **dotted line** on the dashboard and the flight-detail recall page,
 and the overhead flight dead-recks along the track's real bearing when it's
 available (falling back to heading/speed otherwise). A failed or empty track
 (e.g. no `/tracks/*` credits) simply draws no line.
+
+The adsb.lol callsign route (`fetchAdsbRoute()`) additionally carries each
+airport's **IATA** code (`_airports[].iata`). When the **Show IATA** setting is
+on (default), the displayed origin/destination codes render as
+`ICAO | IATA` (e.g. `OJAI | AMM`); with it off or when no IATA is available the
+plain ICAO code is shown. All comparisons — the home-airport LED logic, the
+OpenSky-vs-adsb.lol route diff, and the ICAO-keyed city lookup — always use the
+ICAO codes.
 
