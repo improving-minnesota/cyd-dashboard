@@ -739,8 +739,8 @@ flight that first appears with no route data still gets the correct color once
 its route arrives. Color priority is:
 
 - **Yellow** — origin and destination are both `homeap` (same home airport).
-- **Red** — origin matches `homeap`.
 - **Green** — destination matches `homeap`.
+- **Red** — origin matches `homeap`.
 - **Blue** — all other overhead flights, including flights with no route data.
 
 For each field the LED prefers the OpenSky route value when it is non-empty and

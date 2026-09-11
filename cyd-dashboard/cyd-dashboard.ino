@@ -1397,8 +1397,8 @@ void fetchFlights() {
     // Decide the LED color from the best available route source. Re-check on
     // every poll and re-blink whenever the color changes (e.g. when route data
     // arrives after the first sighting). OpenSky is preferred per field when
-    // non-empty; ADSB.lol fills the gaps. Yellow = origin and destination are
-    // the same home airport.
+    // non-empty; ADSB.lol fills the gaps. Color priority is yellow (same home
+    // airport), green (home arrival), red (home departure), then blue.
     BlinkColor color = computeBlinkColor();
     if (strncmp(planes[0].icao24, lastBlinkIcao, 6) != 0) {
       strncpy(lastBlinkIcao, planes[0].icao24, 6);
@@ -1816,14 +1816,15 @@ static String ledRouteField(const String& openVal, const String& adsbVal) {
 
 // Decide the LED color for the currently overhead flight.
 // OpenSky route data is preferred per field when non-empty; ADSB.lol fills in
-// the gaps. Yellow = both origin and destination are the same home airport.
+// the gaps. Priority: yellow (same home), green (home arrival), red (home
+// departure), blue (other).
 static BlinkColor computeBlinkColor() {
   if (g_homeAirport.length() == 0) return BLINK_BLUE;
   String o = ledRouteField(g_routeOrigin, g_adsbRouteOrigin);
   String d = ledRouteField(g_routeDest,   g_adsbRouteDest);
   if (o.length() && d.length() && o == d && o == g_homeAirport) return BLINK_YELLOW;
-  if (o == g_homeAirport) return BLINK_RED;
   if (d == g_homeAirport) return BLINK_GREEN;
+  if (o == g_homeAirport) return BLINK_RED;
   return BLINK_BLUE;
 }
 
@@ -1839,9 +1840,9 @@ void blinkLedPin(int pin, int times, int ms) {
 }
 
 // Blink the onboard LED to signal an overhead flight:
-//   red    = origin matches the home airport
-//   green  = destination matches the home airport
 //   yellow = both origin and destination are the same home airport
+//   green  = destination matches the home airport
+//   red    = origin matches the home airport
 //   blue   = all other overhead flights (default)
 // Each color blinks 5 times at 240 ms on/off. We turn ALL LEDs off first so a
 // stale LOW on a previous color does not bleed. Red, green, and yellow then stay
