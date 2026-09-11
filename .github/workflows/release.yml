@@ -14,30 +14,8 @@ on:
       - main
 
 jobs:
-  release-please:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - name: Mint release-please app token
-        id: app-token
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ secrets.RELEASE_PLEASE_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_PLEASE_PRIVATE_KEY }}
-
-      - uses: googleapis/release-please-action@v4
-        with:
-          token: ${{ steps.app-token.outputs.token }}
-          release-type: simple
-          # release-please manages the release PR and version files; we create
-          # and publish the actual GitHub release ourselves after the .bin is built.
-          skip-github-release: true
-
   version:
     name: Read version
-    needs: release-please
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.read.outputs.version }}
@@ -59,6 +37,33 @@ jobs:
           else
             echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           fi
+
+  # Only run release-please once the version in version.txt is already released
+  # (version job output is empty). On the push that merges a release PR, the
+  # tag doesn't exist yet, so running release-please there would open the next
+  # release PR against a stale baseline with an incorrect changelog.
+  release-please:
+    needs: version
+    if: needs.version.outputs.version == ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Mint release-please app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.RELEASE_PLEASE_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          release-type: simple
+          # release-please manages the release PR and version files; we create
+          # and publish the actual GitHub release ourselves after the .bin is built.
+          skip-github-release: true
 
   build-and-release:
     name: Build firmware and create draft release
