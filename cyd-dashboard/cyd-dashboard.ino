@@ -227,7 +227,8 @@ struct FlightSnap {
   unsigned long tickMs;   // millis() of the last known position / dead-reckon step
 };
 FlightSnap g_lastFlight;
-unsigned long g_flightDetailUntil = 0;   // millis() at which the detail page auto-returns
+const unsigned long SCREEN_IDLE_TIMEOUT_MS = 120000UL; // 2 minutes
+unsigned long g_screenIdleUntil = 0;       // non-dashboard screen auto-return deadline
 
 // Radar blip bookkeeping for the flight-detail page (its radar shows a single
 // plane, so it has its own last-pixel state). g_radarShown records whether a
@@ -355,7 +356,6 @@ int   g_curDayN = 0;
 // Pool graph screen state
 enum PoolTF { TF_DAY, TF_WEEK, TF_MONTH, TF_YEAR };
 int g_poolTF = TF_WEEK;
-unsigned long g_graphUntil = 0;   // 0 = graph not showing
 
 // Weather temp history: tiered storage mirroring pool temp (see weatherfs.ino
 // and poolfs.ino). Open-Meteo current temperature is fetched every 10 min -
@@ -1846,20 +1846,20 @@ void blinkLedPin(int pin, int times, int ms) {
 //   blue   = all other overhead flights (default)
 // Each color blinks 5 times at 240 ms on/off. We turn ALL LEDs off first so a
 // stale LOW on a previous color does not bleed. Red, green, and yellow then stay
-// lit for 2 seconds after the blink, while blue just blinks.
+// lit for 5 seconds after the blink, while blue just blinks.
 void blinkLed(BlinkColor color) {
   pinMode(CYD_LED_RED, OUTPUT);   digitalWrite(CYD_LED_RED, HIGH);
   pinMode(CYD_LED_GREEN, OUTPUT); digitalWrite(CYD_LED_GREEN, HIGH);
   pinMode(CYD_LED_BLUE, OUTPUT);  digitalWrite(CYD_LED_BLUE, HIGH);
   if (color == BLINK_RED) {
     blinkLedPin(CYD_LED_RED, 5, 240);
-    digitalWrite(CYD_LED_RED, LOW);   // hold lit for 2 s after blink
-    delay(2000);
+    digitalWrite(CYD_LED_RED, LOW);   // hold lit for 5 s after blink
+    delay(5000);
     digitalWrite(CYD_LED_RED, HIGH);
   } else if (color == BLINK_GREEN) {
     blinkLedPin(CYD_LED_GREEN, 5, 240);
-    digitalWrite(CYD_LED_GREEN, LOW); // hold lit for 2 s after blink
-    delay(2000);
+    digitalWrite(CYD_LED_GREEN, LOW); // hold lit for 5 s after blink
+    delay(5000);
     digitalWrite(CYD_LED_GREEN, HIGH);
   } else if (color == BLINK_YELLOW) {
     for (int i = 0; i < 5; i++) {
@@ -1869,7 +1869,7 @@ void blinkLed(BlinkColor color) {
       delay(240);
     }
     digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, HIGH);
-    delay(2000);
+    delay(5000);
     digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
   } else {
     blinkLedPin(CYD_LED_BLUE, 5, 240);
@@ -2594,6 +2594,9 @@ void handleTouch() {
   // doesn't consume or mis-handle calibration taps.
   if (g_calState != CAL_NONE) { prevPressed = pressed; return; }
 
+  // Any touch resets the idle timeout for non-dashboard screens.
+  if (pressed) g_screenIdleUntil = millis() + SCREEN_IDLE_TIMEOUT_MS;
+
   // Long-press (10s) on any screen enters touch calibration. Track the press in
   // real time so a held finger is caught before it's released.
   if (g_calState == CAL_NONE) {
@@ -2793,7 +2796,7 @@ void handleTouch() {
     // tapping the pool icon (idle, pool enabled) opens the history graph
     if (!overhead && g_poolEnabled && inRect(x, y, 4, 146, 100, 170)) {
       g_screen = SCR_POOLGRAPH;
-      g_graphUntil = millis() + 30000UL;
+      g_screenIdleUntil = millis() + SCREEN_IDLE_TIMEOUT_MS;
       dirty = true;
       return;
     }
@@ -2802,7 +2805,7 @@ void handleTouch() {
     // temp history graph
     if (!overhead && inRect(x, y, 4, 38, 100, 72)) {
       g_screen = SCR_WXGRAPH;
-      g_graphUntil = millis() + 30000UL;
+      g_screenIdleUntil = millis() + SCREEN_IDLE_TIMEOUT_MS;
       dirty = true;
       return;
     }
@@ -2811,7 +2814,7 @@ void handleTouch() {
     // the last overhead flight's details (dashes if none has been seen yet).
     if (!overhead && inRect(x, y, 4, 216, 170, 236)) {
       g_screen = SCR_FLIGHTDETAIL;
-      g_flightDetailUntil = millis() + 30000UL;
+      g_screenIdleUntil = millis() + SCREEN_IDLE_TIMEOUT_MS;
       dirty = true;
       return;
     }
@@ -2821,7 +2824,7 @@ void handleTouch() {
     // Any tap keeps the page open (resets the 30s auto-return); the upper-right
     // Back button returns to the dashboard; tapping the header credits opens
     // the OpenSky Credits screen (returning back here).
-    g_flightDetailUntil = millis() + 30000UL;
+    g_screenIdleUntil = millis() + SCREEN_IDLE_TIMEOUT_MS;
     if (g_trackEnabled && inRect(x, y, 194, 0, 264, 33)) { g_creditsReturn = SCR_FLIGHTDETAIL; g_screen = SCR_CREDITS; dirty = true; return; }
     if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_DASH; dirty = true; return; }
     return;
@@ -3325,18 +3328,25 @@ void loop() {
     updateDashboard();
   }
 
-  // Auto-dismiss the pool/weather history graphs after 30s (touch resets it)
-  if ((g_screen == SCR_POOLGRAPH || g_screen == SCR_WXGRAPH) &&
-      g_graphUntil != 0 && (long)(now - g_graphUntil) >= 0) {
-    g_screen = SCR_DASH;
-    dirty = true;
-  }
-
-  // Auto-return from the flight-detail page after 30s of inactivity.
-  if (g_screen == SCR_FLIGHTDETAIL && g_flightDetailUntil != 0 &&
-      (long)(now - g_flightDetailUntil) >= 0) {
-    g_screen = SCR_DASH;
-    dirty = true;
+  // Auto-return from any non-dashboard screen to the dashboard after 2 minutes
+  // of inactivity. Any touch resets the timer. Boot screens (calibration and
+  // first-time WiFi setup) are excluded so the initial wizard isn't interrupted.
+  if (g_calState == CAL_NONE && g_bootStage == BOOT_DONE) {
+    if (g_screen != SCR_DASH) {
+      if (g_screenIdleUntil == 0) g_screenIdleUntil = now + SCREEN_IDLE_TIMEOUT_MS;
+      if (g_screenIdleUntil != 0 && (long)(now - g_screenIdleUntil) >= 0) {
+        g_screen = SCR_DASH;
+        g_helpScroll = 0;
+        g_resetConfirm = 0;
+        g_ftPage = 0;
+        g_addrSearch = "";
+        g_wifiSub = 0;
+        g_screenIdleUntil = 0;
+        dirty = true;
+      }
+    } else {
+      g_screenIdleUntil = 0;
+    }
   }
 
   if (dirty) {

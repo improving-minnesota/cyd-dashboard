@@ -745,9 +745,13 @@ its route arrives. Color priority is:
 
 For each field the LED prefers the OpenSky route value when it is non-empty and
 falls back to the ADSB.lol planned route value when OpenSky is empty. Each color
-blinks 5 times at 240 ms on/off. Yellow, red, and green then stay lit for 2 seconds
+blinks 5 times at 240 ms on/off. Yellow, red, and green then stay lit for 5 seconds
 after the blink, while blue turns off. The blink is performed in `loop()` after
 the flight view is drawn.
+
+Any non-dashboard screen (settings, graphs, flight detail, etc.) automatically
+returns to the dashboard after 2 minutes of inactivity. Any touch resets this
+timer; boot screens (calibration and first-time WiFi setup) are excluded.
 
 `prefs.clear()` in the Reset handler removes **all** keys for both "All" and
 "Settings" resets (the "Settings" reset only re-writes the four touch-
