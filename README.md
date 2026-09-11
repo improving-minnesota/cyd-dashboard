@@ -24,7 +24,7 @@ no computer needed.
   flight, red when departing your home airport (ICAO), green when arriving at
   your home airport (ICAO), green when arriving at your home airport (ICAO),
   or yellow when both origin and destination are your home airport. Yellow,
-  green, and red then stay lit for 2 s.
+  green, and red then stay lit for 5 s.
 - **Govee pool temp monitor** — current pool water temperature from a Govee
   thermometer, with a history graph (Day / Week / Month / Year) showing the
   low, average, and high.
@@ -126,7 +126,9 @@ Defaults for a freshly reset device are shown with each setting.
   and whether to blink the LED for an overhead flight. Also where you enter your
   OpenSky credentials. The LED blinks blue for every overhead flight, yellow when
   both origin and destination are your home airport (ICAO), green when arriving,
-  or red when departing, and then stays lit for 2 s. Defaults: **on**, imperial units,
+  or red when departing, and then stays lit for 5 s. Any settings or graph screen
+  automatically returns to the main dashboard after 2 minutes of inactivity.
+  Defaults: **on**, imperial units,
   **3.5 mi** radius, **15,000 ft** ceiling, **60 s** poll, timer **off**, no home
   airport set, blinking **on**. If your OpenSky **radar-polling** credits run
   out, the poll backs off to a slower 15-minute recovery check until they refill

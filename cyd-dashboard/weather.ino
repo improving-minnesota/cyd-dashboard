@@ -368,8 +368,8 @@ void drawWxGraph() {
 }
 
 void handleWxGraphTouch(uint16_t x, uint16_t y) {
-  // any touch keeps the graph alive for another 30s
-  g_graphUntil = millis() + 30000UL;
+  // any touch keeps the screen alive for another 2 minutes
+  g_screenIdleUntil = millis() + SCREEN_IDLE_TIMEOUT_MS;
 
   if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_DASH; dirty = true; return; }  // close
   int bx = 8;
