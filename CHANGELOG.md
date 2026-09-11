@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.15.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.14.0...v1.15.0) (2026-09-11)
+
+
+### Features
+
+* use last two adsb.lol airports for route and append country ([8a30a38](https://github.com/improving-minnesota/cyd-dashboard/commit/8a30a38380ef5ac7a9f0b5fffa26690116c531b6))
+* use last two adsb.lol airports for route and append country ([f1f8c59](https://github.com/improving-minnesota/cyd-dashboard/commit/f1f8c59bb13060d3bcd2e65091e3672a017d634b))
+
 ## [1.14.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.13.1...v1.14.0) (2026-09-11)
 
 
