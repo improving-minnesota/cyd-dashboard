@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.13.1...v1.14.0) (2026-09-11)
+
+
+### Features
+
+* add watched callsign, dashboard status LED, OpenSky 401 retry, and data-unavailable labels ([#104](https://github.com/improving-minnesota/cyd-dashboard/issues/104)) ([9431814](https://github.com/improving-minnesota/cyd-dashboard/commit/9431814a1bf52413c4d4cc0d4f57f7a9e4a86abe))
+
 ## [1.13.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.13.0...v1.13.1) (2026-09-11)
 
 
