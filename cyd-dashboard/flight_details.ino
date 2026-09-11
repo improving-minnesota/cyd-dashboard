@@ -338,6 +338,7 @@ void fetchAdsbRoute(const char* callsign) {
     JsonObject f = filter["_airports"].add<JsonObject>();
     f["icao"] = true;
     f["location"] = true;
+    f["countryiso2"] = true;
     BoundedAllocator adsbAlloc(2048);
     JsonDocument doc(&adsbAlloc);
     DeserializationError err = deserializeJson(doc, body, DeserializationOption::Filter(filter));
@@ -345,31 +346,52 @@ void fetchAdsbRoute(const char* callsign) {
       JsonObject root = doc.as<JsonObject>();
       if (!root.isNull()) {
         JsonArray arr = root["_airports"];
-        if (!arr.isNull() && arr.size() >= 2) {
-          JsonObject a0 = arr[0];
-          JsonObject a1 = arr[arr.size() - 1];
-          const char* oi = a0["icao"];
-          const char* oc = a0["location"];
-          const char* di = a1["icao"];
-          const char* dc = a1["location"];
-          if (oi && oi[0]) g_adsbRouteOrigin = oi;
-          if (oc && oc[0]) g_adsbOriginCity = oc;
-          if (di && di[0]) g_adsbRouteDest = di;
-          if (dc && dc[0]) g_adsbDestCity = dc;
-          parsedOk = true;
-        } else {
+        if (!arr.isNull() && arr.size() >= 1) {
+          int n = arr.size();
+          // Multi-leg routes list every hop; the current leg is the last two
+          // airports. A single airport is destination-only, with no origin.
+          if (n >= 2) {
+            JsonObject a0 = arr[n - 2];
+            JsonObject a1 = arr[n - 1];
+            const char* oi = a0["icao"];
+            const char* oc = a0["location"];
+            const char* oCountry = a0["countryiso2"];
+            const char* di = a1["icao"];
+            const char* dc = a1["location"];
+            const char* dCountry = a1["countryiso2"];
+            if (oi && oi[0]) g_adsbRouteOrigin = oi;
+            if (oc && oc[0]) g_adsbOriginCity = oc;
+            if (oCountry && oCountry[0] && g_adsbOriginCity.length()) g_adsbOriginCity += String(", ") + oCountry;
+            if (di && di[0]) g_adsbRouteDest = di;
+            if (dc && dc[0]) g_adsbDestCity = dc;
+            if (dCountry && dCountry[0] && g_adsbDestCity.length()) g_adsbDestCity += String(", ") + dCountry;
+          } else {  // n == 1
+            JsonObject a1 = arr[0];
+            const char* di = a1["icao"];
+            const char* dc = a1["location"];
+            const char* dCountry = a1["countryiso2"];
+            if (di && di[0]) g_adsbRouteDest = di;
+            if (dc && dc[0]) g_adsbDestCity = dc;
+            if (dCountry && dCountry[0] && g_adsbDestCity.length()) g_adsbDestCity += String(", ") + dCountry;
+          }
+          parsedOk = (g_adsbRouteOrigin.length() > 0 || g_adsbRouteDest.length() > 0);
+        }
+        if (!parsedOk) {
           const char* codes = root["airport_codes"];
           if (codes && codes[0]) {
             String s = codes;
-            int first = s.indexOf('-');
             int last  = s.lastIndexOf('-');
-            if (first >= 0 && last > first) {
-              g_adsbRouteOrigin = s.substring(0, first);
-              g_adsbOriginCity  = airportCity(g_adsbRouteOrigin.c_str());
+            if (last < 0) {
+              // One airport code = destination only.
+              g_adsbRouteDest = s;
+            } else {
+              int prev = (last > 0) ? s.lastIndexOf('-', last - 1) : -1;
+              g_adsbRouteOrigin = (prev >= 0) ? s.substring(prev + 1, last) : s.substring(0, last);
               g_adsbRouteDest   = s.substring(last + 1);
-              g_adsbDestCity    = airportCity(g_adsbRouteDest.c_str());
-              parsedOk = true;
             }
+            if (g_adsbRouteOrigin.length()) g_adsbOriginCity = airportCity(g_adsbRouteOrigin.c_str());
+            if (g_adsbRouteDest.length())   g_adsbDestCity    = airportCity(g_adsbRouteDest.c_str());
+            parsedOk = (g_adsbRouteOrigin.length() > 0 || g_adsbRouteDest.length() > 0);
           }
         }
       }
