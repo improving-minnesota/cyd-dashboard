@@ -170,9 +170,18 @@ static const char* const kHelpLines[] = {
   "overhead flight, yellow when",
   "both origin/destination are your",
   "home airport (ICAO), green when",
-  "arriving, or red when departing.",
-  "Stays lit 5 s for yellow/green/",
-  "red.",
+  "arriving, red when departing,",
+  "or white for a watched callsign",
+  "while its flight details are shown.",
+  "Yellow/green/red stay lit while",
+  "the live flight is displayed. White",
+  "repeats while the watched callsign",
+  "is live. The LED also glows red",
+  "for a critical error (No WiFi,",
+  "invalid creds, exhausted credits,",
+  "or unavailable data) or yellow",
+  "for OpenSky anonymous, matching",
+  "the home-screen border.",
   "  Any settings or graph screen",
   "  returns to the main dashboard",
   "  after 2 minutes of inactivity.",
@@ -274,8 +283,10 @@ static const char* const kHelpLines[] = {
   "   (imperial), radius 3.5 mi,",
   "   ceiling 15000 ft, poll 60s,",
   "   timer bar on/off (off),",
-  "   home airport (ICAO), blink LED for",
-  "   each overhead flight (on).",
+  "   home airport (ICAO),",
+  "   watch callsign (white blink),",
+  "   blink LED for each overhead",
+  "   flight (on)."
   "Sleep Mode: on; 10 PM - 8 AM,",
   "   wake 10 min.",
   "Pool Temp: off; add Govee key,",
@@ -618,10 +629,12 @@ void drawFtracker() {
     drawEditRow(112, "Home airport (ICAO)", g_homeAirport.length() ? g_homeAirport : "--");
     tft.setTextFont(1);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-    tft.setCursor(8, 144);
+    tft.setCursor(8, 138);
     tft.print("Used to blink red/green for");
-    tft.setCursor(8, 156);
+    tft.setCursor(8, 150);
     tft.print("departures/arrivals. Empty = off.");
+
+    drawEditRow(164, "Watch callsign", g_watchCallsign.length() ? g_watchCallsign : "--");
 
     tft.fillRoundRect(10, 188, 300, 24, 6, TFT_NAVY);
     tft.setTextColor(TFT_WHITE, TFT_NAVY);
@@ -696,6 +709,12 @@ void handleFtrackerTouch(uint16_t x, uint16_t y) {
   if (inRect(x, y, 270, 112, 312, 136)) {  // Edit home airport
     g_screen = SCR_WIFI;
     g_wifiSub = 11;
+    dirty = true;
+    return;
+  }
+  if (inRect(x, y, 270, 164, 312, 188)) {  // Edit watch callsign
+    g_screen = SCR_WIFI;
+    g_wifiSub = 13;
     dirty = true;
     return;
   }

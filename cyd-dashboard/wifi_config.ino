@@ -79,6 +79,7 @@ void drawWifiScreen() {
   else if (g_wifiSub == 8) drawKeyboard("Wake duration (min)", g_wakeStr, false);
   else if (g_wifiSub == 10) drawKeyboard("Lat,Lon", g_latLonStr, false);
   else if (g_wifiSub == 11) drawKeyboard("Home airport (ICAO)", g_homeAirport, false);
+  else if (g_wifiSub == 13) drawKeyboard("Watch callsign", g_watchCallsign, false);
   else if (g_wifiSub == 12) drawAddrStatus();
   else if (g_wifiSub == 20) drawIpConfig();
   else if (g_wifiSub == 21) drawKeyboard("Static IP address", g_staticIp, false);
@@ -505,6 +506,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
     if (g_wifiSub == 9) { g_screen = SCR_POOL; dirty = true; return; }       // Govee key
     if (g_wifiSub == 10) { g_screen = SCR_LOCATION; dirty = true; return; }  // lat/lon
     if (g_wifiSub == 11) { g_screen = SCR_FTRACKER; dirty = true; return; }   // home airport
+    if (g_wifiSub == 13) { g_screen = SCR_FTRACKER; dirty = true; return; }   // watch callsign
     if (g_wifiSub >= 21 && g_wifiSub <= 25) { g_wifiSub = 20; dirty = true; return; }  // IP field
     g_wifiSub = 0; dirty = true; return;
   }
@@ -521,6 +523,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
     case 9: bp = &g_goveeKey; break;
     case 10: bp = &g_latLonStr; break;
     case 11: bp = &g_homeAirport; break;
+    case 13: bp = &g_watchCallsign; break;
     case 21: bp = &g_staticIp; break;
     case 22: bp = &g_staticMask; break;
     case 23: bp = &g_staticGw; break;
@@ -562,6 +565,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
     case 9: maxlen = 80; break;
     case 10: maxlen = 24; break;
     case 11: maxlen = 6; break;
+    case 13: maxlen = 8; break;
     case 21: case 22: case 23: case 24: maxlen = 15; break;  // IP addresses
     case 25: maxlen = 32; break;   // hostname
     default: maxlen = 63; break;
@@ -641,6 +645,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
         g_screen = SCR_LOCATION; dirty = true;
       }
       else if (g_wifiSub == 11) { saveHomeAirport(); g_screen = SCR_FTRACKER; dirty = true; }
+      else if (g_wifiSub == 13) { saveWatchCallsign(); g_screen = SCR_FTRACKER; dirty = true; }
       else if (g_wifiSub >= 21 && g_wifiSub <= 25) { saveNetCfg(); g_netCfgDirty = true; g_wifiSub = 20; dirty = true; }
     }
     return;
@@ -732,9 +737,10 @@ bool provisionKey(const String& key, const String& val) {
   else if (key == "WIFI_GATEWAY")    { prefs.putString("ipgw",   val);  g_staticGw = val; return true; }
   else if (key == "WIFI_DNS")        { prefs.putString("ipdns",  val);  g_staticDns = val; return true; }
   else if (key == "WIFI_HOSTNAME")   { prefs.putString("hostname", val); g_hostname = val; return true; }
-  else if (key == "OPENSKY_CLIENT_ID")     { prefs.putString("oscid",  val); g_osClientId     = val; return true; }
-  else if (key == "OPENSKY_CLIENT_SECRET") { prefs.putString("ocssec", val); g_osClientSecret = val; return true; }
+  else if (key == "OPENSKY_CLIENT_ID")     { prefs.putString("oscid",  val); g_osClientId     = val; invalidateOsAuth(); return true; }
+  else if (key == "OPENSKY_CLIENT_SECRET") { prefs.putString("ocssec", val); g_osClientSecret = val; invalidateOsAuth(); return true; }
   else if (key == "HOME_AIRPORT")          { String v = val; v.toUpperCase(); prefs.putString("homeap", v); g_homeAirport = v; return true; }
+  else if (key == "WATCH_CALLSIGN")        { String v = val; v.trim(); v.toUpperCase(); prefs.putString("watchcs", v); g_watchCallsign = v; return true; }
   else if (key == "GOVEE_KEY")       { prefs.putString("govee",  val); g_goveeKey  = val; return true; }
   else if (key == "OTA_URL")         {
     String url = buildOtaUrl(val, s_otaFile);
@@ -856,14 +862,35 @@ void handleSerialCommands() {
     }
   }
 }
+
 #endif  // ENABLE_SERIAL_PROVISION
 
-// Persist OpenSky credentials to NVS.
+// Persist OpenSky credentials to NVS and force the next poll to re-authenticate
+// with them. Without this, a cached bearer token minted from the OLD client
+// would keep being used until it expired (~30 min), so corrected credentials
+// appeared not to take effect - and a stale AUTH_BAD/401 backoff would keep the
+// "Invalid OpenSky Creds" error on screen.
 void saveOsCreds() {
   prefs.begin("flight", false);
   prefs.putString("oscid",  g_osClientId);
   prefs.putString("ocssec", g_osClientSecret);
   prefs.end();
+  invalidateOsAuth();
+}
+
+// Drop any cached OpenSky token/auth verdict so the next radar poll starts
+// clean. Also clears the 401 backoff so the retry happens immediately.
+void invalidateOsAuth() {
+  g_osToken = "";
+  g_osTokenValid = false;
+  g_osTokenExpiry = 0;
+  g_osHandshakeFailed = false;
+  g_auth401Streak = 0;
+  g_nextRadarMs = millis();
+  g_authChecked = false;
+  g_authState = (g_osClientId.length() > 0 && g_osClientSecret.length() > 0) ? AUTH_OK : AUTH_ANON;
+  netWantFlights = true;   // re-poll now rather than waiting for the interval
+  dirty = true;
 }
 
 // Persist the "home airport" route-display setting to NVS (uppercased).
@@ -871,6 +898,15 @@ void saveHomeAirport() {
   g_homeAirport.toUpperCase();
   prefs.begin("flight", false);
   prefs.putString("homeap", g_homeAirport);
+  prefs.end();
+}
+
+// Persist the watched callsign to NVS (uppercased, trimmed).
+void saveWatchCallsign() {
+  g_watchCallsign.trim();
+  g_watchCallsign.toUpperCase();
+  prefs.begin("flight", false);
+  prefs.putString("watchcs", g_watchCallsign);
   prefs.end();
 }
 
