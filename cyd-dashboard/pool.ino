@@ -123,7 +123,7 @@ void drawPool() {
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("Pool Temp");
+  tft.print("Settings > Pool Temp");
 
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
   tft.setCursor(274, 7);
@@ -327,7 +327,7 @@ void drawPoolGraph() {
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("Pool Temp History");
+  tft.print("History > Pool Temperature");
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
   tft.setCursor(274, 7);
   tft.setTextColor(TFT_WHITE, TFT_MAROON);

@@ -310,7 +310,7 @@ void drawWxGraph() {
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("Weather Temperature History");
+  tft.print("History > Weather Temperature");
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
   tft.setCursor(274, 7);
   tft.setTextColor(TFT_WHITE, TFT_MAROON);

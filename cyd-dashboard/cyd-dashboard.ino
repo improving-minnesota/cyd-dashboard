@@ -290,7 +290,7 @@ bool g_osHandshakeFailed = false;
 bool g_sleepOn = true;
 int  g_sleepStartH = 22, g_sleepStartM = 0;   // default 10:00 PM
 int  g_sleepEndH   = 8,  g_sleepEndM   = 0;   // default 8:00 AM
-int  g_wakeMin     = 10;                        // wake duration after a touch
+int  g_wakeMin     = 5;                         // wake duration after a touch
 
 // Sleep runtime state
 bool g_displayOff = false;
@@ -419,13 +419,12 @@ String g_addrErr = "";
 String g_latLonStr = "";   // "lat,lon" edit buffer for the Location page
 String g_sleepStartStr = "2200";  // HHMM for editing in settings
 String g_sleepEndStr   = "0800";
-String g_wakeStr       = "10";
 
 enum Screen { SCR_DASH, SCR_SETTINGS, SCR_GENERAL, SCR_ABOUT, SCR_HELP, SCR_WIFI, SCR_RESET, SCR_SLEEP, SCR_FTRACKER, SCR_POOL, SCR_POOLGRAPH, SCR_WXGRAPH, SCR_LOCATION, SCR_CALIB, SCR_FLIGHTDETAIL, SCR_CREDITS };
 Screen g_screen = SCR_DASH;
 Screen g_creditsReturn = SCR_DASH;   // screen to return to from the OpenSky Credits page
 int g_helpScroll = 0;   // Help page vertical scroll offset (px)
-int g_resetConfirm = 0;  // Reset screen sub-state: 0=choose, 1=confirm All, 2=confirm Settings, 3=confirm Data
+int g_resetConfirm = 0;  // Reset screen sub-state: 0=choose, 1=Factory, 2=Settings, 3=Graph Data, 4=Restart
 
 extern int g_wifiSub;   // defined in wifi_config.ino
 
@@ -1588,7 +1587,7 @@ void drawHeaderCredit(int x, int y, const char* label, int value, bool known,
     valCol = TFT_YELLOW;    // awaiting a value
   }
   tft.setTextColor(valCol, bg);
-  tft.setCursor(x + 30, y);
+  tft.setCursor(x + 26, y);
   if (known) tft.printf("%d", value);
   else tft.print("?");
 }
@@ -1612,16 +1611,28 @@ void drawHeaderBand() {
   if (g_trackEnabled) {
     tft.setTextFont(1);
     tft.setTextSize(1);
-    drawHeaderCredit(194, 4,  "CRP:", g_creditsRemaining, g_creditsKnown,        bg);
-    drawHeaderCredit(194, 14, "CRL:", g_flightsCredits,   g_flightsCredits >= 0, bg);
-    drawHeaderCredit(194, 24, "CFT:", g_tracksCredits,    g_tracksCredits >= 0,  bg);
+    drawHeaderCredit(202, 4,  "CRP:", g_creditsRemaining, g_creditsKnown,        bg);
+    drawHeaderCredit(202, 14, "CRL:", g_flightsCredits,   g_flightsCredits >= 0, bg);
+    drawHeaderCredit(202, 24, "CFT:", g_tracksCredits,    g_tracksCredits >= 0,  bg);
   }
-  // bigger, bolder clock: FONT2 doubled
+  // bigger, bolder clock: FONT2 doubled, with a small AM/PM marker stacked to
+  // its right - AM occupies the top slot, PM the bottom slot (only the active
+  // one is drawn).
+  String clk = fmtClock();
   tft.setTextFont(2);
   tft.setTextSize(2);
   tft.setTextColor(TFT_WHITE, bg);
-  tft.setCursor(112, 1);
-  tft.print(fmtClock());
+  tft.setCursor(96, 1);
+  int clkEndX = 96 + tft.textWidth(clk);   // measure while FONT2 x2 is active
+  tft.print(clk);
+  struct tm ct;
+  if (getLocalTime(&ct, 0)) {
+    tft.setTextFont(1);
+    tft.setTextSize(1);
+    tft.setCursor(clkEndX + 4, ct.tm_hour < 12 ? 6 : 24);
+    tft.print(ct.tm_hour < 12 ? "AM" : "PM");
+    tft.setTextFont(2);
+  }
   tft.setTextSize(1);
 }
 
@@ -2798,7 +2809,7 @@ void handleTouch() {
   if (g_screen == SCR_RESET) {
     if (g_resetConfirm == 0) {
       // Step 1: choose what to reset. Buttons stacked top-right: Factory Reset,
-      // Graph Data, Settings; Cancel alone at bottom-right.
+      // Graph Data, Settings; Restart bottom-left, Cancel bottom-right.
       if (inRect(x, y, 172, 36, 312, 66)) { g_resetConfirm = 1; dirty = true; }          // Factory Reset
       else if (inRect(x, y, 172, 80, 312, 110)) { g_resetConfirm = 3; dirty = true; }    // Graph Data
       else if (inRect(x, y, 172, 124, 312, 154)) { g_resetConfirm = 2; dirty = true; }   // Settings
@@ -3018,18 +3029,17 @@ void setup() {
   g_sleepStartM = prefs.getInt("sleepsM", 0);
   g_sleepEndH = prefs.getInt("sleepeH", 8);
   g_sleepEndM = prefs.getInt("sleepeM", 0);
-  g_wakeMin = prefs.getInt("wake", 10);
+  g_wakeMin = prefs.getInt("wake", 5);
   // The Sleep Mode edit buffers default to hardcoded strings and are only
   // written on edit (see commitSleepTime() in wifi_config.ino) — sync them from
-  // the loaded values or the Settings screen shows stale "22:00"/"08:00"/"10
-  // min" after every reboot.
+  // the loaded values or the Settings screen shows stale "22:00"/"08:00"
+  // after every reboot.
   {
     char buf[8];
     snprintf(buf, sizeof buf, "%02d%02d", g_sleepStartH, g_sleepStartM);
     g_sleepStartStr = buf;
     snprintf(buf, sizeof buf, "%02d%02d", g_sleepEndH, g_sleepEndM);
     g_sleepEndStr = buf;
-    g_wakeStr = String(g_wakeMin);
   }
   g_trackEnabled = prefs.getBool("track", true);
   g_blinkForFlight = prefs.getBool("blinkf", true);

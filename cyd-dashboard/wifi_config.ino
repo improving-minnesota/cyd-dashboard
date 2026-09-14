@@ -76,7 +76,6 @@ void drawWifiScreen() {
   else if (g_wifiSub == 5) drawKeyboard("Search address", g_addrSearch, false);
   else if (g_wifiSub == 6) drawKeyboard("Sleep start (HHMM)", g_sleepStartStr, false);
   else if (g_wifiSub == 7) drawKeyboard("Sleep end (HHMM)", g_sleepEndStr, false);
-  else if (g_wifiSub == 8) drawKeyboard("Wake duration (min)", g_wakeStr, false);
   else if (g_wifiSub == 10) drawKeyboard("Lat,Lon", g_latLonStr, false);
   else if (g_wifiSub == 11) drawKeyboard("Home airport (ICAO)", g_homeAirport, false);
   else if (g_wifiSub == 13) drawKeyboard("Watch callsign", g_watchCallsign, false);
@@ -104,7 +103,7 @@ void drawWifiList() {
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("Network");
+  tft.print("Settings > Network");
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
   tft.setCursor(274, 7);
   tft.setTextColor(TFT_WHITE, TFT_MAROON);
@@ -253,7 +252,7 @@ void drawIpConfig() {
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("IP Settings");
+  tft.print("Settings > IP Settings");
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
   tft.setCursor(274, 7);
   tft.setTextColor(TFT_WHITE, TFT_MAROON);
@@ -502,7 +501,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
     if (g_wifiSub == 3) { g_screen = SCR_FTRACKER; dirty = true; return; }   // OpenSky creds
     if (g_wifiSub == 4) { g_wifiSub = 3; dirty = true; return; }
     if (g_wifiSub == 5) { g_screen = SCR_LOCATION; dirty = true; return; }   // address search
-    if (g_wifiSub == 6 || g_wifiSub == 7 || g_wifiSub == 8) { g_screen = SCR_SLEEP; dirty = true; return; }
+    if (g_wifiSub == 6 || g_wifiSub == 7) { g_screen = SCR_SLEEP; dirty = true; return; }
     if (g_wifiSub == 9) { g_screen = SCR_POOL; dirty = true; return; }       // Govee key
     if (g_wifiSub == 10) { g_screen = SCR_LOCATION; dirty = true; return; }  // lat/lon
     if (g_wifiSub == 11) { g_screen = SCR_FTRACKER; dirty = true; return; }   // home airport
@@ -519,7 +518,6 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
     case 4: bp = &g_osClientSecret; break;
     case 6: bp = &g_sleepStartStr; break;
     case 7: bp = &g_sleepEndStr; break;
-    case 8: bp = &g_wakeStr; break;
     case 9: bp = &g_goveeKey; break;
     case 10: bp = &g_latLonStr; break;
     case 11: bp = &g_homeAirport; break;
@@ -561,7 +559,6 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
   switch (g_wifiSub) {
     case 1: maxlen = 32; break;
     case 6: case 7: maxlen = 4; break;
-    case 8: maxlen = 3; break;
     case 9: maxlen = 80; break;
     case 10: maxlen = 24; break;
     case 11: maxlen = 6; break;
@@ -619,11 +616,6 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
       }
       else if (g_wifiSub == 6) { commitSleepTime(6); g_screen = SCR_SLEEP; dirty = true; }
       else if (g_wifiSub == 7) { commitSleepTime(7); g_screen = SCR_SLEEP; dirty = true; }
-      else if (g_wifiSub == 8) {
-        g_wakeMin = constrain(g_wakeStr.toInt(), 1, 120);
-        prefs.begin("flight", false); prefs.putInt("wake", g_wakeMin); prefs.end();
-        g_screen = SCR_SLEEP; dirty = true;
-      }
       else if (g_wifiSub == 9) {
         prefs.begin("flight", false); prefs.putString("govee", g_goveeKey); prefs.end();
         g_screen = SCR_POOL; dirty = true;

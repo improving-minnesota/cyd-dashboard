@@ -796,10 +796,9 @@ timer; boot screens (calibration and first-time WiFi setup) are excluded, and
 the timer is suspended while an OTA update is pending or running so a download
 can't be interrupted by an auto-return redraw.
 
-`prefs.clear()` in the Reset handler removes **all** keys for both "All" and
-"Settings" resets (the "Settings" reset only re-writes the four touch-
-calibration keys afterwards), so the clock color reverts to its default after
-either reset.
+`prefs.clear()` in the Reset handler removes **all** keys for both "Factory
+Reset" and "Settings" resets (the "Settings" reset only re-writes the four
+touch-calibration keys afterwards).
 
 The dashboard draws a colored screen border and tints the clock bar to flag
 state (`drawAuthBorder` / `drawStatusBorder` in `cyd-dashboard.ino`):
@@ -880,4 +879,46 @@ on (default), the displayed origin/destination codes render as
 plain ICAO code is shown. All comparisons — the home-airport LED logic, the
 OpenSky-vs-adsb.lol route diff, and the ICAO-keyed city lookup — always use the
 ICAO codes.
+
+## Printable user guide
+
+[`docs/user-guide/DEVELOPER-USERGUIDE.md`](docs/user-guide/DEVELOPER-USERGUIDE.md)
+is the markdown source for `DEVELOPER-USERGUIDE.pdf` in the same folder — a
+two-page printable guide for new users (front = setup, back = reference;
+duplex-print one Letter sheet). It condenses the README's user-facing content
+— keep it in sync with `README.md` and the on-device Help screen whenever
+user-facing behavior changes, then regenerate the PDF:
+
+```bash
+# needs the `markdown` package once: cyd-dashboard/.venv/bin/python -m pip install markdown
+cyd-dashboard/.venv/bin/python docs/user-guide/render_userguide.py
+```
+
+`render_userguide.py` first runs `render_dash_mock.py` (same folder), which
+draws four simulated screens as SVG → PNG via CairoSVG, all populated with
+**live data**:
+
+- `DEVELOPER-USERGUIDE-dashboard.png` — the flight-overhead view (or idle
+  view when no plane is near): callsign/airline, route, radar with heading-
+  rotated plane-icon blips (tracked cyan 1.6x, red in-radius, green outside),
+  the cyan dotted ground track, and the projection ray.
+- `DEVELOPER-USERGUIDE-idle.png` — the idle weather view with the real Govee
+  pool temperature.
+- `DEVELOPER-USERGUIDE-wxgraph.png` — the History > Weather Temperature graph
+  (Day) plotted from the last 24 h of real Open-Meteo temps.
+- `DEVELOPER-USERGUIDE-ftracker.png` — the Settings > Flight Tracker screen
+  (page 1) with the device's default values.
+
+Data sources: OpenSky `/states/all` + `/tracks/all` and the adsb.lol callsign
+route using `cyd-dashboard/.env` creds, Open-Meteo weather, the Govee device
+state API, and a fixed header date/time (`MOCK_DT`) so the screenshots stay
+stable between renders. The mock scans nearby planes until one has a usable
+track (`--monitor SECONDS` extends the window; `--once` for a single pass).
+All inputs are optional: with no creds/network it still renders with
+placeholders. The images are then converted with the markdown to styled HTML
+and printed via headless Chrome (`--print-to-pdf`); a `<!-- PAGEBREAK -->`
+comment in the markdown marks the front/back split (the back page renders at
+a slightly smaller type scale via a `.back` wrapper). It reports the rendered
+page count — if it ever exceeds 2, trim the guide or tighten the CSS in the
+script.
 

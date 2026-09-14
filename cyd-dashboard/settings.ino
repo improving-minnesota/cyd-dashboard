@@ -51,7 +51,7 @@ void drawAbout() {
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("About");
+  tft.print("Settings > About");
 
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
   tft.setCursor(274, 7);
@@ -163,12 +163,13 @@ static const char* const kHelpLines[] = {
   "Weather: temp, feels-like,",
   "humidity, sunrise/sunset,",
   "and a 7-day forecast.",
-  "Flights: live aircraft with",
-  "a radar, callsign, planned",
-  "route (ADSB.lol, OpenSky",
-  "fallback; shown as ICAO |",
-  "IATA when IATA is known),",
-  "airline logo.",
+  "Flights (optional, on):",
+  "  live aircraft with a",
+  "  radar, callsign, planned",
+  "  route (ADSB.lol, OpenSky",
+  "  fallback; shown as ICAO |",
+  "  IATA when IATA is known),",
+  "  airline logo.",
   "The LED blinks blue for each",
   "overhead flight, yellow when",
   "both origin/destination are your",
@@ -209,7 +210,7 @@ static const char* const kHelpLines[] = {
   "  below 50. Tap for details.",
   "  A dotted line shows the",
   "  plane's past ground track.",
-  "Govee pool temp monitor:",
+  "Govee pool temp (opt, off):",
   "  thermometer temp plus a",
   "  history graph with low /",
   "  average / high.",
@@ -230,8 +231,8 @@ static const char* const kHelpLines[] = {
   "the device first - see",
   "DEVELOPER.md for build and",
   "flash instructions.",
-  "First boot: the device",
-  "  calibrates the touchscreen",
+  "Fresh device / after Factory",
+  "  Reset: it calibrates touch,",
   "  then asks for your WiFi.",
   "To redo either later:",
   "  Calibrate: Settings ->",
@@ -282,7 +283,7 @@ static const char* const kHelpLines[] = {
   "   IP setup - DHCP or a",
   "   static IP, mask, gateway,",
   "   DNS and hostname.",
-  "Flight Tracker: on/off, units",
+  "Flight Tracker (on): units",
   "   (imperial), radius 3.5 mi,",
   "   ceiling 15000 ft, poll 30s,",
   "   timer bar on/off (off),",
@@ -292,20 +293,22 @@ static const char* const kHelpLines[] = {
   "   blink LED for each overhead",
   "   flight (on)."
   "Sleep Mode: on; 10 PM - 8 AM,",
-  "   wake 10 min.",
+  "   wake 5 min.",
   "Pool Temp: off; add Govee key,",
   "   pick thermometer.",
   "Calibrate Touch: if taps land",
   "   in the wrong spot, rerun it.",
   "About: version, author, update.",
-  "Reset: Factory Reset clears",
-  "   settings, files, airline",
-  "   logos & touch calibration.",
-  "   Settings clears settings &",
-  "   credentials. Graph Data",
-  "   clears pool & weather temp",
-  "   history. All three reboot;",
-  "   Cancel keeps everything.",
+  "Reset: Settings clears",
+  "   settings & credentials",
+  "   (keeps touch calibration).",
+  "   Graph Data clears pool &",
+  "   weather temp history.",
+  "   Factory Reset clears ALL",
+  "   incl. touch cal - airline",
+  "   logos must be reloaded",
+  "   from a computer. Restart",
+  "   reboots; Cancel keeps all.",
   "",
   "TROUBLESHOOTING",
   "Screen not accurate? Press and",
@@ -335,7 +338,7 @@ void drawHelp() {
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("Help");
+  tft.print("Settings > Help");
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
   tft.setCursor(274, 7);
   tft.setTextColor(TFT_WHITE, TFT_MAROON);
@@ -416,7 +419,7 @@ void drawGeneral() {
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("General");
+  tft.print("Settings > General");
 
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
   tft.setCursor(274, 7);
@@ -494,7 +497,7 @@ void drawLocation() {
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("Location");
+  tft.print("Settings > Location");
 
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
   tft.setCursor(274, 7);
@@ -561,7 +564,7 @@ void drawFtracker() {
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("Flight Tracker");
+  tft.print("Settings > Flight Tracker");
 
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
   tft.setCursor(274, 7);
@@ -762,7 +765,7 @@ void handleFtrackerTouch(uint16_t x, uint16_t y) {
   }
 }
 
-// Reset screen. Two steps: choose what to reset (All / Settings / Data / Cancel),
+// Reset screen. Two steps: choose what to reset (Factory / Settings / Graph Data / Restart / Cancel),
 // then a confirmation prompt before anything is wiped and the device reboots.
 void drawReset() {
   tft.fillScreen(TFT_BLACK);
@@ -770,7 +773,7 @@ void drawReset() {
   tft.setTextColor(TFT_WHITE, TFT_MAROON);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("Reset Device");
+  tft.print("Settings > Reset");
 
   if (g_resetConfirm != 0) {
     // Confirmation prompt for the chosen reset.
@@ -869,7 +872,7 @@ void drawSleep() {
   tft.setTextColor(TFT_WHITE, TFT_NAVY);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("Sleep Mode");
+  tft.print("Settings > Sleep Mode");
 
   tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
   tft.setCursor(274, 7);
@@ -892,7 +895,7 @@ void drawSleep() {
 
   drawEditRow(84, "Start (HHMM)", g_sleepStartStr);
   drawEditRow(124, "End (HHMM)", g_sleepEndStr);
-  drawEditRow(164, "Wake duration (min)", g_wakeStr);
+  drawSlider(164, "Wake min", (float)g_wakeMin, 1, 120, 1, 0);
 
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setTextFont(1);
@@ -933,7 +936,8 @@ void handleSleepTouch(uint16_t x, uint16_t y) {
   }
   if (inRect(x, y, 270, 84, 312, 108)) { g_screen = SCR_WIFI; g_wifiSub = 6; dirty = true; return; }  // start
   if (inRect(x, y, 270, 124, 312, 148)) { g_screen = SCR_WIFI; g_wifiSub = 7; dirty = true; return; }  // end
-  if (inRect(x, y, 270, 164, 312, 188)) { g_screen = SCR_WIFI; g_wifiSub = 8; dirty = true; return; }  // wake
+  if      (rowMinus(x, y, 164)) { g_wakeMin = constrain(g_wakeMin - 1, 1, 120); saveInt("wake", g_wakeMin); }
+  else if (rowPlus(x, y, 164))  { g_wakeMin = constrain(g_wakeMin + 1, 1, 120); saveInt("wake", g_wakeMin); }
 }
 
 // type 1 = float step, type 0 = int

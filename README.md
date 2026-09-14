@@ -10,6 +10,18 @@ touchscreen. It turns that little display into a live weather station, flight
 tracker, and Govee pool temp monitor. Once it's set up it runs on its own over your WiFi —
 no computer needed.
 
+> **New here?** Grab the printable two-page [User Guide (PDF)](docs/user-guide/DEVELOPER-USERGUIDE.pdf)
+> — front page is setup, back page is everyday reference.
+
+<table>
+  <tr>
+    <td><img src="docs/user-guide/DEVELOPER-USERGUIDE-dashboard.png" width="150" alt="Flight-overhead dashboard view"></td>
+    <td><img src="docs/user-guide/DEVELOPER-USERGUIDE-idle.png" width="150" alt="Idle weather and pool view"></td>
+    <td><img src="docs/user-guide/DEVELOPER-USERGUIDE-wxgraph.png" width="150" alt="Weather temperature history graph"></td>
+    <td><img src="docs/user-guide/DEVELOPER-USERGUIDE-ftracker.png" width="150" alt="Flight Tracker settings"></td>
+  </tr>
+</table>
+
 ## What it does
 
 - **Clock** — a big time and date in the header.
@@ -17,7 +29,8 @@ no computer needed.
   a 7-day forecast, refreshed every 10 minutes. The current temperature is also
   logged to flash (always on) and graphed over Day / Week / Month / Year with the
   low, average, and high.
-- **Flight tracker** — live aircraft overhead (from OpenSky) with a mini radar,
+- **Flight tracker** *(optional; on by default)* — live aircraft overhead
+  (from OpenSky) with a mini radar,
   callsign, altitude/speed/distance, planned route from ADSB.lol shown as
   `ICAO | IATA` airport codes when IATA is available (with OpenSky actual-route
   fallback; toggleable in Flight Tracker settings), airline
@@ -32,9 +45,9 @@ no computer needed.
   matching the on-screen border. Critical errors include No WiFi, invalid
   OpenSky credentials, exhausted OpenSky credits, unavailable OpenSky/weather
   data, and an unavailable Govee pool temp.
-- **Govee pool temp monitor** — current pool water temperature from a Govee
-  thermometer, with a history graph (Day / Week / Month / Year) showing the
-  low, average, and high.
+- **Govee pool temp monitor** *(optional; off by default)* — current pool
+  water temperature from a Govee thermometer, with a history graph
+  (Day / Week / Month / Year) showing the low, average, and high.
 - **Sleep mode** — deep-sleeps overnight and wakes on touch.
 - **Firmware updates** — updates itself over WiFi from GitHub, either
   automatically once a day or manually from the About screen.
@@ -149,7 +162,7 @@ Defaults for a freshly reset device are shown with each setting.
   out, the poll backs off to a slower 15-minute recovery check until they refill
   (OpenSky resets daily).
 - **Sleep Mode** — enable it, set the start/end time, and the wake duration.
-  Defaults: **on**, sleeps 10:00 PM – 8:00 AM, **10 min** wake.
+  Defaults: **on**, sleeps 10:00 PM – 8:00 AM, **5 min** wake.
 - **Pool Temp** — enable it, enter your Govee API key, and pick your
   thermometer. Default: **off**.
 - **Calibrate Touch** — recalibrate the touchscreen if taps land in the wrong
@@ -159,10 +172,12 @@ Defaults for a freshly reset device are shown with each setting.
 - **Help** — this guide, on the device.
 - **Reset** — confirms before wiping and shows a message saying exactly what's
   being reset. **Factory Reset** clears settings *and* all files (including
-  pool and weather temperature history and airline logos) and touch calibration,
-  so the next boot asks you to recalibrate; **Settings** clears settings and
-  credentials; **Graph Data** clears pool and weather temperature history. All
-  three reboot the device. **Cancel** changes nothing.
+  pool and weather temperature history and airline logos) and touch
+  calibration, so the next boot asks you to recalibrate — if the device came
+  pre-loaded with airline logos, restoring them requires reloading them from a
+  computer; **Settings** clears settings and credentials; **Graph Data**
+  clears pool and weather temperature history. All three reboot the device.
+  **Restart** reboots without clearing anything; **Cancel** changes nothing.
 
 ## Updates (OTA)
 
