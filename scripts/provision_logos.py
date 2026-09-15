@@ -12,14 +12,21 @@ logos already on the device. Steps:
 3. Write the image to the logos partition via esptool (skip if --no-flash).
 
 Usage:
-    .venv/bin/python provision_logos.py [--port /dev/cu.usbserial-XXXX]
-    .venv/bin/python provision_logos.py --no-flash   # only build the image
+    cyd-dashboard/.venv/bin/python scripts/provision_logos.py [--port /dev/cu.usbserial-XXXX]
+    cyd-dashboard/.venv/bin/python scripts/provision_logos.py --no-flash   # only build the image
+
+With no --port, every board found by detect_boards.py is flashed (the logos
+partition layout is identical on all variants). Each board's known-good
+upload baud is used; override with --baud.
 """
 import argparse
+import glob
 import os
-import shutil
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import detect_boards
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ARDUINO15 = os.path.expanduser("~/Library/Arduino15/packages/esp32")
@@ -27,6 +34,11 @@ ARDUINO15 = os.path.expanduser("~/Library/Arduino15/packages/esp32")
 # Defaults match the "logos" partition in partitions.csv (0x370000, 512KB).
 DEFAULT_OFFSET = 0x370000
 DEFAULT_SIZE = 512 * 1024
+
+# Upload baud each board's USB-serial bridge tolerates (matches flash.py);
+# unknown boards get the slow, safe rate.
+BOARD_BAUD = {"e32r40t": 460800, "2432s028r": 115200}
+SAFE_BAUD = 115200
 
 
 def find_tool(rel, name, override):
@@ -54,15 +66,17 @@ def shlex_quote(s):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--port", help="serial port to flash to (omit to skip flash)")
-    ap.add_argument("--baud", type=int, default=460800)
+    ap.add_argument("--port", help="serial port to flash to (default: flash "
+                                   "every board detect_boards.py finds)")
+    ap.add_argument("--baud", type=int,
+                    help="upload baud (default: per-board, 115200 if unknown)")
     ap.add_argument("--offset", default="0x370000",
                     help="flash offset of the logos partition")
     ap.add_argument("--size", type=int, default=DEFAULT_SIZE,
                     help="logos partition size in bytes")
-    ap.add_argument("--out-dir", default=os.path.join(HERE, "build", "logos"),
+    ap.add_argument("--out-dir", default=os.path.normpath(os.path.join(HERE, "..", "build", "logos")),
                     help="where convert_logos.py writes the <ICAO>.bin files")
-    ap.add_argument("--image", default=os.path.join(HERE, "build", "logos.img"),
+    ap.add_argument("--image", default=os.path.normpath(os.path.join(HERE, "..", "build", "logos.img")),
                     help="LittleFS image file to create")
     ap.add_argument("--skip-convert", action="store_true",
                     help="reuse existing --out-dir instead of regenerating")
@@ -89,16 +103,35 @@ def main():
     print(f"\nWrote LittleFS image ({os.path.getsize(args.image)} bytes) "
           f"to {args.image}")
 
-    # 3. Flash to the logos partition.
-    if args.no_flash or not args.port:
-        print("Not flashing (--no-flash or no --port).")
+    # 3. Flash to the logos partition on every detected board (or --port).
+    if args.no_flash:
+        print("Not flashing (--no-flash).")
         return 0
+
+    if args.port:
+        targets = [(args.port, None)]
+    else:
+        ports = sorted(glob.glob("/dev/cu.usbserial*"))
+        if not ports:
+            sys.exit("no /dev/cu.usbserial-* ports found - is a board "
+                     "plugged in? (pass --port or --no-flash)")
+        print("detecting boards on %d port(s)..." % len(ports))
+        info = detect_boards.probe_ports(ports, detect_boards.PROBE_S,
+                                         want_ip=False)
+        targets = [(p, info.get(p, {}).get("board")) for p in ports]
+        for p, b in targets:
+            print("  %s -> %s" % (p, b or "unknown"))
+
     esptool = find_tool("esptool_py", "esptool", args.esptool)
-    run([esptool, "--chip", "esp32", "--port", args.port,
-         "--baud", str(args.baud),
-         "write_flash", args.offset, args.image])
-    print("\nLogos flashed to the 'logos' partition. "
-          "The device keeps them across OTA updates.")
+    for port, board in targets:
+        baud = args.baud or BOARD_BAUD.get(board, SAFE_BAUD)
+        print("\nflashing logos to %s (%s) @ %d baud"
+              % (port, board or "unknown board", baud))
+        run([esptool, "--chip", "esp32", "--port", port,
+             "--baud", str(baud),
+             "write_flash", args.offset, args.image])
+    print("\nLogos flashed to %d device(s). The 'logos' partition survives "
+          "OTA updates." % len(targets))
     return 0
 
 

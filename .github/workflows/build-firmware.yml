@@ -42,11 +42,12 @@ jobs:
             VERSION="${{ inputs.app_version }}"
             VERSION="${VERSION#v}"
           fi
-          if [ -n "$VERSION" ]; then
-            arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
-              --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=${VERSION}" \
-              --output-dir build/release cyd-dashboard
-          else
-            arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
-              --output-dir build/release cyd-dashboard
-          fi
+          FLAGS=""
+          if [ -n "$VERSION" ]; then FLAGS="-DAPP_VERSION=${VERSION}"; fi
+          # Compile every board variant so a change that breaks one fails CI.
+          arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
+            --build-property "compiler.cpp.extra_flags=${FLAGS}" \
+            --output-dir build/release cyd-dashboard
+          arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
+            --build-property "compiler.cpp.extra_flags=${FLAGS} -DCYD_E32R40T=1" \
+            --output-dir build/release-e32r40t cyd-dashboard

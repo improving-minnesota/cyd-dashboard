@@ -1,5 +1,5 @@
-// cyd-dashboard: standalone dashboard for the ESP32-2432S028
-// (2.8" ILI9341 TFT with XPT2046 resistive touch).
+// cyd-dashboard: standalone dashboard for CYD-family boards
+// (see "Board variants" in DEVELOPER.md; pins in tft_setup.h).
 //
 // Fetches live aircraft positions from the OpenSky API over WiFi, filters
 // for planes near/overhead your location, draws a dashboard on the TFT, and
@@ -13,7 +13,7 @@
 //      Setup_ESP32_2432S028_CYD.h (correct pinout for the 2432S028R: TFT on
 //      HSPI, XPT2046 touch on VSPI, touch IRQ on GPIO 36).
 //
-// Display rotates to landscape 320x240.
+// Display rotates to landscape; 320x240 logical (480x320 panel on E32R40T).
 
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -84,6 +84,13 @@ enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW, 
 #define TOUCH_IRQ_PIN     36
 #define TOUCH_CS_PIN      33
 
+#ifdef CYD_E32R40T
+// ---- E32R40T 4" variant: XPT2046 shares the TFT's HSPI bus ----
+#define TOUCH_SPI  HSPI
+#define TOUCH_MOSI 13
+#define TOUCH_MISO 12
+#define TOUCH_CLK  14
+#else
 // ---- XPT2046 touch on VSPI (separate bus from the TFT's HSPI) ----
 // TFT_eSPI's getTouch() only works on the display's bus, so we drive the
 // XPT2046 directly over VSPI instead; see touchReadXY().
@@ -91,6 +98,7 @@ enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW, 
 #define TOUCH_MOSI 32
 #define TOUCH_MISO 39
 #define TOUCH_CLK  25
+#endif
 
 // Print raw + mapped touch coordinates on every press (and calibration params
 // at boot) to diagnose touch/panel calibration. 0 removes the prints.
@@ -107,16 +115,169 @@ enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW, 
 #ifndef APP_VERSION
   #define APP_VERSION "0.0.0-dev"
   const char* const kVersion = APP_VERSION;
+  #define kVersionStr "0.0.0-dev"
 #else
   const char* const kVersion = STRINGIZE(APP_VERSION);
+  #define kVersionStr STRINGIZE(APP_VERSION)
 #endif
+// Marker embedded in the binary so scripts/ota_push.py can label the OTA
+// screen with the version it is serving. It's also printed at boot in dev
+// builds, which is what keeps the linker from garbage-collecting it.
+const char kBuildTag[] = "CYD_TAG=" kVersionStr ", Build " STRINGIZE(BUILD_NUM);
 bool isDevBuild() { return strstr(kVersion, "-dev") != NULL; }
 // User-Agent sent on every network call so servers can identify the client,
 // e.g. "cyd-dashboard/v1.8.0" (dev builds carry the "-dev" suffix).
 String appUserAgent() { return "cyd-dashboard/v" + String(kVersion); }
 // ------------------------------------------------------
 
-TFT_eSPI tft = TFT_eSPI();
+// ---- Display wrapper: logical UI, optionally scaled to the panel ----
+// All layout code is written in logical pixels: DISP_W x 240. On the 2.8"
+// board that is 320x240 and this wrapper is an identity pass-through. On
+// CYD_E32R40T the logical space is 360x240 and every geometry argument is
+// scaled x4/3 onto the 480x320 panel - the SAME factor on both axes so
+// nothing stretches; the extra 40 logical columns are spent on spacing
+// instead (RX()/CX() push right-edge and centered elements outward).
+//
+// Text: F1 keeps the classic 8px font - it is the same physical size as on
+// the 2.8" panel and the only tier small enough to fit three credit rows in
+// the header. Larger text uses smooth FreeFonts a notch below the x4/3
+// target so the panel's extra width goes to spacing instead of wider
+// glyphs: F2->FreeSans9, F4/F6->FreeSansBold18 (big values and header
+// clock). FreeFonts draw at the text baseline
+// rather than top-left, so the wrapper tracks the active font's ascent and
+// offsets setCursor() to preserve "y = top of text"; the drawString family
+// already applies the freefont datum adjustment internally.
+//
+// Rect sizes scale by EDGES (x2 = S(x+w) - S(x)), not by scaling w alone -
+// integer truncation would otherwise leave 1px seams between adjacent
+// logical rects (e.g. the incremental OTA progress fill).
+//
+// Touch maps panel->logical in touchReadXY(). Raw panel access (init,
+// rotation, board commands) goes through `lcd`.
+#ifdef CYD_E32R40T
+  #define DISP_W   360
+  #define SCALEX(v)   ((v) * 4 / 3)
+  #define SCALEY(v)   ((v) * 4 / 3)
+  #define UNSCALEX(v) ((v) * 3 / 4)
+  #define UNSCALEY(v) ((v) * 3 / 4)
+#else
+  #define DISP_W   320
+  #define SCALEX(v)   (v)
+  #define SCALEY(v)   (v)
+  #define UNSCALEX(v) (v)
+  #define UNSCALEY(v) (v)
+#endif
+// RX(): x position anchored to the right edge (keeps its right margin on
+// wider UIs). CX: horizontal centre. Both are identity on the 2.8" build.
+#define RX(v) ((v) + (DISP_W - 320))
+#define CX    (DISP_W / 2)
+// FONT_AUX: secondary text (button captions like Toggle/Edit, forecast cells,
+// status lines). The 8px classic F1 is fine on the 2.8" panel but reads tiny
+// on the 4", where it maps to the smooth FreeSans F2 instead.
+#ifdef CYD_E32R40T
+  #define FONT_AUX 2
+#else
+  #define FONT_AUX 1
+#endif
+
+class UiTft {
+public:
+  UiTft(TFT_eSPI& d) : lcd(d) {}
+  TFT_eSPI& lcd;
+
+  // ---- raw panel ops (unscaled) ----
+  void init(uint8_t tc = 0)          { lcd.init(tc); }
+  void setRotation(uint8_t r)        { lcd.setRotation(r); }
+  // Callers pass logical coords (the help-text view), so scale like drawing.
+  void setViewport(int32_t x, int32_t y, int32_t w, int32_t h, bool d = true) { lcd.setViewport(SCALEX(x), SCALEY(y), SCALEX(w), SCALEY(h), d); }
+  void resetViewport()               { lcd.resetViewport(); }
+  template<typename... A> void writecommand(A... a) { lcd.writecommand(a...); }
+
+  // ---- text state ----
+  void setTextFont(uint8_t f)        { applyFont(f); }
+  void setTextSize(uint8_t s)        { curSize = s; lcd.setTextSize(s); }
+  void setTextColor(uint16_t c)      { lcd.setTextColor(c); }
+  void setTextColor(uint16_t c, uint16_t bg) { lcd.setTextColor(c, bg); }
+  void setTextDatum(uint8_t d)       { lcd.setTextDatum(d); }
+  // Font metrics come back in panel pixels - scale down so layout math stays
+  // in logical coordinates.
+  int16_t textWidth(const char* s)             { return UNSCALEX(lcd.textWidth(s)); }
+  int16_t textWidth(const String& s)           { return UNSCALEX(lcd.textWidth(s)); }
+  int16_t textWidth(const char* s, uint8_t f)  { applyFont(f); return UNSCALEX(lcd.textWidth(s, fontArg(f))); }
+  int16_t textWidth(const String& s, uint8_t f){ applyFont(f); return UNSCALEX(lcd.textWidth(s, fontArg(f))); }
+  int16_t getCursorX() { return UNSCALEX(lcd.getCursorX()); }
+  int16_t getCursorY() { return UNSCALEY(lcd.getCursorY() - curAsc * curSize); }
+  // Full cell height of the active font, in logical px (0 for classic fonts).
+  int16_t fontHeight() { return UNSCALEY((curAsc + curDesc) * curSize); }
+
+  // ---- text drawing ----
+  // setCursor's y is "top of text" in the layout code; for FreeFonts the
+  // panel cursor is the baseline, so shift down by the font's ascent.
+  void setCursor(int16_t x, int16_t y)                { lcd.setCursor(SCALEX(x), SCALEY(y) + curAsc * curSize); }
+  void setCursor(int16_t x, int16_t y, uint8_t f)     { applyFont(f); setCursor(x, y); }
+  int16_t drawString(const char* s, int32_t x, int32_t y)          { return lcd.drawString(s, SCALEX(x), SCALEY(y)); }
+  int16_t drawString(const char* s, int32_t x, int32_t y, uint8_t f) { applyFont(f); return lcd.drawString(s, SCALEX(x), SCALEY(y), fontArg(f)); }
+  int16_t drawString(const String& s, int32_t x, int32_t y)        { return lcd.drawString(s, SCALEX(x), SCALEY(y)); }
+  int16_t drawString(const String& s, int32_t x, int32_t y, uint8_t f) { applyFont(f); return lcd.drawString(s, SCALEX(x), SCALEY(y), fontArg(f)); }
+  int16_t drawCentreString(const char* s, int32_t x, int32_t y, uint8_t f) { applyFont(f); return lcd.drawCentreString(s, SCALEX(x), SCALEY(y), fontArg(f)); }
+  int16_t drawCentreString(const String& s, int32_t x, int32_t y, uint8_t f) { applyFont(f); return lcd.drawCentreString(s, SCALEX(x), SCALEY(y), fontArg(f)); }
+  int16_t drawRightString(const char* s, int32_t x, int32_t y, uint8_t f)  { applyFont(f); return lcd.drawRightString(s, SCALEX(x), SCALEY(y), fontArg(f)); }
+  int16_t drawRightString(const String& s, int32_t x, int32_t y, uint8_t f)  { applyFont(f); return lcd.drawRightString(s, SCALEX(x), SCALEY(y), fontArg(f)); }
+
+  template<typename T> size_t print(const T& v) { return lcd.print(v); }
+  template<typename T, typename F> size_t print(const T& v, F f) { return lcd.print(v, f); }
+  template<typename T> size_t println(const T& v) { return lcd.println(v); }
+  size_t println() { return lcd.println(); }
+  template<typename... A> size_t printf(const char* fmt, A... a) { return lcd.printf(fmt, a...); }
+
+  // ---- geometry (scaled by edges so adjacent rects tile without seams) ----
+  void fillScreen(uint32_t c) { lcd.fillScreen(c); }
+  void fillRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t c) { lcd.fillRect(SCALEX(x), SCALEY(y), SCALEX(x + w) - SCALEX(x), SCALEY(y + h) - SCALEY(y), c); }
+  void drawRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t c) { lcd.drawRect(SCALEX(x), SCALEY(y), SCALEX(x + w) - SCALEX(x), SCALEY(y + h) - SCALEY(y), c); }
+  void fillRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint32_t c) { lcd.fillRoundRect(SCALEX(x), SCALEY(y), SCALEX(x + w) - SCALEX(x), SCALEY(y + h) - SCALEY(y), SCALEX(r), c); }
+  void drawRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint32_t c) { lcd.drawRoundRect(SCALEX(x), SCALEY(y), SCALEX(x + w) - SCALEX(x), SCALEY(y + h) - SCALEY(y), SCALEX(r), c); }
+  void drawFastHLine(int32_t x, int32_t y, int32_t w, uint32_t c) { lcd.drawFastHLine(SCALEX(x), SCALEY(y), SCALEX(x + w) - SCALEX(x), c); }
+  void drawFastVLine(int32_t x, int32_t y, int32_t h, uint32_t c) { lcd.drawFastVLine(SCALEX(x), SCALEY(y), SCALEY(y + h) - SCALEY(y), c); }
+  void drawLine(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint32_t c) { lcd.drawLine(SCALEX(x0), SCALEY(y0), SCALEX(x1), SCALEY(y1), c); }
+  void fillCircle(int32_t x, int32_t y, int32_t r, uint32_t c) { lcd.fillCircle(SCALEX(x), SCALEY(y), SCALEY(r), c); }
+  void drawCircle(int32_t x, int32_t y, int32_t r, uint32_t c) { lcd.drawCircle(SCALEX(x), SCALEY(y), SCALEY(r), c); }
+  void fillTriangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t c) { lcd.fillTriangle(SCALEX(x0), SCALEY(y0), SCALEX(x1), SCALEY(y1), SCALEX(x2), SCALEY(y2), c); }
+  void drawTriangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t c) { lcd.drawTriangle(SCALEX(x0), SCALEY(y0), SCALEX(x1), SCALEY(y1), SCALEX(x2), SCALEY(y2), c); }
+  void drawPixel(int32_t x, int32_t y, uint32_t c) { lcd.drawPixel(SCALEX(x), SCALEY(y), c); }
+
+private:
+  // Active font state for baseline compensation. curAsc/curDesc are the
+  // FreeFont's max above/below-baseline extents; 0 for classic fonts, so the
+  // 2.8" pass-through stays exact.
+  uint8_t curAsc = 0;
+  uint8_t curDesc = 0;
+  uint8_t curSize = 1;
+
+  void applyFont(uint8_t f) {
+#ifdef CYD_E32R40T
+    const GFXfont* g = nullptr;
+    uint8_t asc = 0, desc = 0;
+    switch (f) {
+      // F1 intentionally has no FreeFont mapping: it stays on the classic
+      // 8px font (same physical size as the 2.8" panel and the only tier
+      // that fits the header's three credit rows).
+      case 2: g = &FreeSans9pt7b;      asc = 13; desc = 5; break;  // body text
+      case 4: g = &FreeSansBold18pt7b; asc = 25; desc = 8; break;  // big values
+      case 6: g = &FreeSansBold18pt7b; asc = 25; desc = 8; break;  // header clock
+      default: break;
+    }
+    if (g) { lcd.setFreeFont(g); curAsc = asc; curDesc = desc; return; }
+#endif
+    lcd.setTextFont(f);
+    curAsc = 0;
+    curDesc = 0;
+  }
+  // TFT_eSPI draws a FreeFont when the font arg is 1 and a gfxFont is active.
+  uint8_t fontArg(uint8_t f) { return curAsc ? 1 : f; }
+};
+
+TFT_eSPI lcd = TFT_eSPI();
+UiTft tft(lcd);
 Preferences prefs;
 
 // A busy airspace's /states/all response has no fixed size cap, and
@@ -232,7 +393,26 @@ int   g_ceilingFt = 15000;
 int   g_pollSec = 30;
 bool  g_trackEnabled = true;   // flight tracking on/off
 bool  g_blinkForFlight = true; // blink the LED when an overhead flight is found
-bool  g_metric = false;        // false = imperial (ft/mi/mph), true = metric (m/km/kts)
+// Units selection: Imperial (ft/mph/mi), Metric (m/kts/km), Aviation
+// (ft/kts/nm). Distances are stored in miles and altitudes in feet
+// internally; the helpers convert for display, and the settings sliders
+// edit in the displayed unit. Switching units keeps the displayed number
+// and reinterprets it in the new unit (3.5 mi -> 3.5 km stored as ~2.2 mi).
+#define UNITS_IMPERIAL 0
+#define UNITS_METRIC   1
+#define UNITS_AVIATION 2
+int g_units = UNITS_IMPERIAL;
+float       distConv()  { return g_units == UNITS_METRIC ? 1.60934f : (g_units == UNITS_AVIATION ? 0.868976f : 1.0f); }  // miles -> display
+const char* distUnit()  { return g_units == UNITS_METRIC ? "km" : (g_units == UNITS_AVIATION ? "nm" : "mi"); }
+float       altConv()   { return g_units == UNITS_METRIC ? 0.3048f : 1.0f; }  // feet -> display
+const char* altUnit()   { return g_units == UNITS_METRIC ? "m" : "ft"; }
+const char* unitsName() { return g_units == UNITS_METRIC ? "Metric" : (g_units == UNITS_AVIATION ? "Aviation" : "Imperial"); }
+// Temperatures are fetched and logged in degrees F (canonical storage);
+// convert at display time so Metric/Aviation users see C without invalidating
+// stored history.
+float tempDisp(float f) { return g_units == UNITS_IMPERIAL ? f : (f - 32.0f) * 5.0f / 9.0f; }
+char  tempUnit()        { return g_units == UNITS_IMPERIAL ? 'F' : 'C'; }
+bool  g_clock24 = false;       // false = 12-hour clock with AM/PM, true = 24-hour
 bool  g_showTimer = false;     // show/update the dashboard countdown bar (Flight Tracker)
 bool  g_showIata = true;       // show IATA airport codes in route display when ADSB.lol has them
 bool  g_autoUpdate = true;     // auto-check/install firmware updates once/day (General)
@@ -420,13 +600,19 @@ String g_latLonStr = "";   // "lat,lon" edit buffer for the Location page
 String g_sleepStartStr = "2200";  // HHMM for editing in settings
 String g_sleepEndStr   = "0800";
 
-enum Screen { SCR_DASH, SCR_SETTINGS, SCR_GENERAL, SCR_ABOUT, SCR_HELP, SCR_WIFI, SCR_RESET, SCR_SLEEP, SCR_FTRACKER, SCR_POOL, SCR_POOLGRAPH, SCR_WXGRAPH, SCR_LOCATION, SCR_CALIB, SCR_FLIGHTDETAIL, SCR_CREDITS };
+enum Screen { SCR_DASH, SCR_SETTINGS, SCR_GENERAL, SCR_ABOUT, SCR_HELP, SCR_WIFI, SCR_RESET, SCR_SLEEP, SCR_FTRACKER, SCR_POOL, SCR_POOLGRAPH, SCR_WXGRAPH, SCR_LOCATION, SCR_CALIB, SCR_FLIGHTDETAIL, SCR_CREDITS, SCR_ALARMS, SCR_ALARMFIRE, SCR_COLORPICK };
 Screen g_screen = SCR_DASH;
 Screen g_creditsReturn = SCR_DASH;   // screen to return to from the OpenSky Credits page
 int g_helpScroll = 0;   // Help page vertical scroll offset (px)
 int g_resetConfirm = 0;  // Reset screen sub-state: 0=choose, 1=Factory, 2=Settings, 3=Graph Data, 4=Restart
 
 extern int g_wifiSub;   // defined in wifi_config.ino
+// Alarm state lives in alarms.ino (alphabetically first of the secondary
+// files); these externs make it visible here in the main file.
+extern bool   g_alarmFiring;
+extern bool   g_alarmDelConfirm;
+extern int    g_alarmIdx;
+extern int    g_alarmCount;
 
 // ---- Touch calibration state (see calibration.ino) ----
 // Defined here (not calibration.ino) because Arduino concatenates .ino files
@@ -1561,6 +1747,14 @@ bool geocodeAddress() {
 // Header bar: date, time, credits. The time is rendered larger (FONT2, text
 // size 2 = 32px) so it stands out; the header band is widened to fit it.
 #define HEADER_H 36
+// Shared time-of-day editor geometry (drawTimeAdj in settings.ino, used by
+// alarms.ino too, which is concatenated before settings.ino). A horizontal
+// [▼▲] hour pair sits left of the time, a minute pair right; stepping the
+// hour wraps through AM/PM automatically, so there's no separate meridiem
+// control.
+#define TADJ_HX 80      // hour [▼▲] pair x ([▲] is TADJ_BW+4 to its right)
+#define TADJ_MX RX(252) // minute / value [▼▲] pair x (right-anchored)
+#define TADJ_BW 30    // stepper button width (buttons are 24px tall)
 // Header theme: the user-selectable clock color (g_clockCol, default blue) when
 // there is no critical issue; red/maroon when a critical dashboard issue is
 // showing so an ongoing error is always obvious. Non-critical warnings (e.g.
@@ -1569,14 +1763,123 @@ bool geocodeAddress() {
 #define DEFAULT_CLOCK_COL TFT_BLUE
 uint16_t g_clockCol = DEFAULT_CLOCK_COL;
 
-// Draw one header credit bucket: a white label (e.g. "CRP:") with its value.
-// The value is color-tiered by absolute remaining amounts (no assumed daily
-// budget): pink below 50, yellow below 500, grey otherwise. An unobserved
-// bucket shows "?" in yellow (awaiting a value, not yet an error). Drawn in
-// FONT1 (6x8) so the three stacked rows fit inside the 36px header band.
+// Perceived luminance (~0-255) of an RGB565 color.
+int colorLum(uint16_t c) {
+  int r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
+  return (r * 8 * 299 + g * 4 * 587 + b * 8 * 114) / 1000;
+}
+
+// Text color on top of a filled RGB565 color (the picked theme color on
+// buttons/headers): black when the fill is light, white when dark.
+uint16_t btnFg(uint16_t bg) {
+  return colorLum(bg) > 140 ? TFT_BLACK : TFT_WHITE;
+}
+
+// Ordinary-button color: the picked theme color nudged a step darker when
+// it's light and lighter when it's dark, so buttons subtly stand out from
+// the header band while keeping the same hue. Lightening blends toward
+// white rather than scaling up: a saturated channel is already at its max,
+// so a scalar multiply would clamp back to the identical color.
+uint16_t btnCol() {
+  int r = (g_clockCol >> 11) & 31, g = (g_clockCol >> 5) & 63, b = g_clockCol & 31;
+  if (colorLum(g_clockCol) > 140) {
+    r = r * 13 / 16; g = g * 13 / 16; b = b * 13 / 16;              // darker
+  } else {
+    r += (31 - r) / 4; g += (63 - g) / 4; b += (31 - b) / 4;        // toward white
+  }
+  return (r << 11) | (g << 5) | b;
+}
+
+// Draw an ordinary themed button: the adjusted theme color, plus a white
+// outline when the fill is near-black so it stays visible on black screens.
+// "Near-black" means every channel is low — luminance alone would also flag
+// saturated dark blues/reds that are plainly visible on black.
+void themeBtn(int x, int y, int w, int h, int r) {
+  uint16_t c = btnCol();
+  tft.fillRoundRect(x, y, w, h, r, c);
+  int cr = (c >> 11) & 31, cg = (c >> 5) & 63, cb = c & 31;
+  if (max(cr * 8, max(cg * 4, cb * 8)) < 64)
+    tft.drawRoundRect(x, y, w, h, r, TFT_WHITE);
+}
+
+// Header Back/close button, top-right of every sub-screen. Ordinary button
+// color — it navigates, it isn't destructive.
+void backBtn(const char* label) {
+  themeBtn(RX(265), 4, 50, 20, 5);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
+  tft.setTextFont(2);
+  tft.drawCentreString(label, RX(290), 6, 2);
+}
+
+// Per-channel blend of RGB565 `a` toward `b` by num/den.
+uint16_t mix565(uint16_t a, uint16_t b, int num, int den) {
+  int ar = (a >> 11) & 31, ag = (a >> 5) & 63, ab = a & 31;
+  int br = (b >> 11) & 31, bg = (b >> 5) & 63, bb = b & 31;
+  return ((ar + (br - ar) * num / den) << 11)
+       | ((ag + (bg - ag) * num / den) << 5)
+       |  (ab + (bb - ab) * num / den);
+}
+
+// History-graph colors, derived from the theme so they track the picked clock
+// color. The data line is the theme pushed 75% toward white on dark themes /
+// black on light themes — the same light/dark split btnFg uses — so it
+// contrasts with the btnCol() plot background. The average line applies the
+// same 75% blend to the theme's complement (hue +180°), keeping the luminance
+// but reading as a different color; greys have no hue to complement, so their
+// avg line falls back to orange.
+uint16_t graphBgCol() { return btnCol(); }
+uint16_t graphLineCol() {
+  return mix565(g_clockCol, colorLum(g_clockCol) > 140 ? TFT_BLACK : TFT_WHITE, 3, 4);
+}
+uint16_t graphAvgCol() {
+  int h, s; colorHS(g_clockCol, h, s);
+  uint16_t c = (s >= 60) ? hsv565(h + 180, s, 255) : TFT_ORANGE;
+  return mix565(c, colorLum(g_clockCol) > 140 ? TFT_BLACK : TFT_WHITE, 3, 4);
+}
+
+// Hue (0-359) and saturation (0-255) of an RGB565 color. Hue is meaningless
+// when s is ~0 (greys, black, white).
+void colorHS(uint16_t c, int& h, int& s) {
+  int r = ((c >> 11) & 31) * 255 / 31;
+  int g = ((c >> 5) & 63) * 255 / 63;
+  int b = (c & 31) * 255 / 31;
+  int mx = max(r, max(g, b)), mn = min(r, min(g, b)), d = mx - mn;
+  s = mx ? d * 255 / mx : 0;
+  if (!d) { h = 0; return; }
+  if (mx == r)      h = ((60 * (g - b) / d) + 360) % 360;
+  else if (mx == g) h = ((60 * (b - r) / d) + 480) % 360;
+  else              h = ((60 * (r - g) / d) + 600) % 360;
+}
+
+// Color for destructive buttons (Del, Yes, Factory Reset): red.
+// When the theme itself is close to red (saturated, hue within ~25 deg of
+// 0), use yellow so the button still contrasts with the header band it
+// sits on.
+uint16_t dangerCol() {
+  int h, s; colorHS(g_clockCol, h, s);
+  if (s >= 80 && min(h, 360 - h) <= 25) return TFT_YELLOW;
+  return TFT_RED;
+}
+
+// Fill for unselected/disabled toggles. Dark grey normally; when the theme
+// is itself a mid grey, use white so selected/unselected states can't be
+// confused.
+uint16_t disabledCol() {
+  int h, s; colorHS(g_clockCol, h, s);
+  int lum = colorLum(g_clockCol);
+  if (s < 60 && lum > 70 && lum < 190) return TFT_WHITE;
+  return TFT_DARKGREY;
+}
+
+// Draw one header credit bucket: a label (e.g. "CRP:") in the header text
+// color with its value. The value is color-tiered by absolute remaining
+// amounts (no assumed daily budget): pink below 50, yellow below 500, grey
+// otherwise. An unobserved bucket shows "?" in yellow (awaiting a value, not
+// yet an error). Drawn in FONT1 (6x8) so the three stacked rows fit inside
+// the 36px header band.
 void drawHeaderCredit(int x, int y, const char* label, int value, bool known,
                       uint16_t bg) {
-  tft.setTextColor(TFT_WHITE, bg);
+  tft.setTextColor(btnFg(bg), bg);
   tft.setCursor(x, y);
   tft.print(label);
   uint16_t valCol = TFT_LIGHTGREY;
@@ -1595,9 +1898,10 @@ void drawHeaderCredit(int x, int y, const char* label, int value, bool known,
 void drawHeaderBand() {
   bool err = (dashboardCriticalLabel() != nullptr);
   uint16_t bg = err ? TFT_MAROON : (isDevBuild() ? TFT_DARKGREY : g_clockCol);
-  tft.fillRect(0, 0, 320, HEADER_H, bg);
-  // date (left) + credits (right) in FONT2
-  tft.setTextColor(TFT_WHITE, bg);
+  tft.fillRect(0, 0, DISP_W, HEADER_H, bg);
+  // date (left) + credits (right) in FONT2; text follows the band color so a
+  // light picked color still gets readable black text.
+  tft.setTextColor(btnFg(bg), bg);
   tft.setTextFont(2);
   tft.setTextSize(1);
   tft.setCursor(4, 11);
@@ -1611,26 +1915,43 @@ void drawHeaderBand() {
   if (g_trackEnabled) {
     tft.setTextFont(1);
     tft.setTextSize(1);
-    drawHeaderCredit(202, 4,  "CRP:", g_creditsRemaining, g_creditsKnown,        bg);
-    drawHeaderCredit(202, 14, "CRL:", g_flightsCredits,   g_flightsCredits >= 0, bg);
-    drawHeaderCredit(202, 24, "CFT:", g_tracksCredits,    g_tracksCredits >= 0,  bg);
+    drawHeaderCredit(RX(202), 4,  "CRP:", g_creditsRemaining, g_creditsKnown,        bg);
+    drawHeaderCredit(RX(202), 14, "CRL:", g_flightsCredits,   g_flightsCredits >= 0, bg);
+    drawHeaderCredit(RX(202), 24, "CFT:", g_tracksCredits,    g_tracksCredits >= 0,  bg);
   }
-  // bigger, bolder clock: FONT2 doubled, with a small AM/PM marker stacked to
-  // its right - AM occupies the top slot, PM the bottom slot (only the active
-  // one is drawn).
+  // bigger, bolder clock: FONT2 doubled on the 2.8"; on the 4" panel F6 maps
+  // to FreeSansBold18 (a notch under the x4/3 target so the band stays airy).
+  // A small AM/PM marker sits to its right in the bottom slot (12h only);
+  // the alarm bell takes the top slot when any alarm is enabled.
   String clk = fmtClock();
+#ifdef CYD_E32R40T
+  tft.setTextFont(6);
+  tft.setTextSize(1);
+  // Centre the clock+marker block horizontally and the font box vertically.
+  const int clkX = CX - tft.textWidth(clk) / 2 - 8;
+  const int clkY = (HEADER_H - tft.fontHeight()) / 2;
+#else
   tft.setTextFont(2);
   tft.setTextSize(2);
-  tft.setTextColor(TFT_WHITE, bg);
-  tft.setCursor(96, 1);
-  int clkEndX = 96 + tft.textWidth(clk);   // measure while FONT2 x2 is active
+  const int clkX = 96;
+  const int clkY = 1;
+#endif
+  tft.setTextColor(btnFg(bg), bg);
+  tft.setCursor(clkX, clkY);
+  int clkEndX = clkX + tft.textWidth(clk);
   tft.print(clk);
   struct tm ct;
   if (getLocalTime(&ct, 0)) {
+    int sx = clkEndX + 4;
     tft.setTextFont(1);
     tft.setTextSize(1);
-    tft.setCursor(clkEndX + 4, ct.tm_hour < 12 ? 6 : 24);
-    tft.print(ct.tm_hour < 12 ? "AM" : "PM");
+    // The bell takes the top slot and the AM/PM marker the bottom slot -
+    // the bell sits too low against the header's bottom edge otherwise.
+    if (anyAlarmEnabled()) drawAlarmBell(sx, 5, bg);
+    if (!g_clock24) {
+      tft.setCursor(sx, 24);
+      tft.print(ct.tm_hour < 12 ? "AM" : "PM");
+    }
     tft.setTextFont(2);
   }
   tft.setTextSize(1);
@@ -1656,16 +1977,13 @@ void drawCreditsRow(int y, const char* label, int remaining, bool known) {
 void drawCredits() {
   tft.fillScreen(TFT_BLACK);
   uint16_t bg = g_clockCol;
-  tft.fillRect(0, 0, 320, HEADER_H, bg);
-  tft.setTextColor(TFT_WHITE, bg);
+  tft.fillRect(0, 0, DISP_W, HEADER_H, bg);
+  tft.setTextColor(btnFg(bg), bg);
   tft.setTextFont(2);
   tft.setTextSize(1);
   tft.setCursor(4, 11);
   tft.print("OpenSky Credits");
-  tft.fillRect(265, 4, 50, 20, TFT_DARKGREY);
-  tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
-  tft.setCursor(272, 8);
-  tft.print("Back");
+  backBtn("Back");
 
   int y = 48;
   drawCreditsRow(y,     "Radar Polling",   g_creditsRemaining, g_creditsKnown);
@@ -1715,7 +2033,9 @@ void updateDashboard() {
     if (g_radarShown || onDetail) drawFlightBackButton();
   }
   if (g_screen == SCR_DASH && g_showTimer && g_trackEnabled) drawCountdownBar(); // updates the bar in place
-  drawAutoUpdateStatus();
+  // The snooze countdown owns the status line while pending; the transient
+  // auto-update status stays hidden for those few minutes.
+  if (snoozePending()) drawSnoozeStatus(); else drawAutoUpdateStatus();
   // Dead-reckon the radar blips forward and redraw them in place.
   stepRadar();
 }
@@ -1738,11 +2058,37 @@ void drawAutoUpdateStatus() {
     case 4: msg = "Update: Check Failed"; col = TFT_RED; break;
     default: return;
   }
-  const int x = 8, y = 224, w = 180, h = 12;   // reuse the bottom-left status line (lastErr)
+  // Reuse the bottom-left status line (lastErr). Stop above the status
+  // border's bottom frame rows (y=238/239) so a live border isn't erased.
+  const int x = 8, y = 224, w = 180, h = (FONT_AUX == 2) ? 14 : 12;
   tft.fillRect(x, y, w, h, TFT_BLACK);
-  tft.setTextFont(1);
+  tft.setTextFont(FONT_AUX);
   tft.setTextColor(col, TFT_BLACK);
-  tft.setCursor(x, y + 2);
+  tft.setCursor(x, y);
+  tft.print(msg);
+}
+
+// While an alarm snooze is pending, draw its countdown over the bottom-left
+// status line (same spot drawAutoUpdateStatus uses). Only re-renders when the
+// minute count changes so it doesn't flicker every second. drawIdle() shows
+// the same text on full redraws, and the alarm-fire screen takes over when it
+// matures, so no erase is needed when the pending state ends.
+void drawSnoozeStatus() {
+  char msg[40];
+  if (!snoozeStatusText(msg, sizeof msg)) return;
+  // Cache keyed to the pending refire: a different snooze forces a redraw
+  // even if the minute text matches the previous one's.
+  static time_t drawnFor = 0;
+  static char last[40] = "";
+  time_t ref = snoozeRefireAt();
+  if (ref == drawnFor && strcmp(msg, last) == 0) return;
+  drawnFor = ref;
+  strncpy(last, msg, sizeof last);
+  const int x = 8, y = 224, w = 180, h = (FONT_AUX == 2) ? 14 : 12;
+  tft.fillRect(x, y, w, h, TFT_BLACK);
+  tft.setTextFont(FONT_AUX);
+  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+  tft.setCursor(x, y);
   tft.print(msg);
 }
 
@@ -1819,20 +2165,25 @@ void drawAuthBorder() {
 
 void drawStatusBorder(const char* label, uint16_t col) {
   // 2px frame around the screen
-  tft.drawRect(0, 0, 320, 240, col);
-  tft.drawRect(1, 1, 318, 238, col);
+  tft.drawRect(0, 0, DISP_W, 240, col);
+  tft.drawRect(1, 1, DISP_W - 2, 238, col);
 
-  // tag on the bottom-right corner of the frame
-  tft.fillRect(150, 232, 170, 8, col);
+  // tag on the bottom-right corner of the frame, sized to the label. The 4"
+  // uses the smoother F2 which needs a taller tag.
+  tft.setTextFont(FONT_AUX);
+  int tagW = tft.textWidth(label) + 8;
+  int tagH = (FONT_AUX == 2) ? 16 : 8;
+  int tagY = 240 - tagH;
+  int tagX = DISP_W - 4 - tagW;
+  tft.fillRect(tagX, tagY, tagW, tagH, col);
   // Black text is legible on the yellow anonymous-warning border; white on red.
   tft.setTextColor((col == TFT_YELLOW) ? TFT_BLACK : TFT_WHITE, col);
-  tft.setTextFont(1);
-  tft.setCursor(154, 233);
+  tft.setCursor(tagX + 4, tagY + 1);
   tft.print(label);
 }
 
 void drawCountdownBar() {
-  int x = 303, w = 14, topY = HEADER_H + 2, botY = 200;
+  int x = RX(303), w = 14, topY = HEADER_H + 2, botY = 200;
   int h = botY - topY;
   unsigned long now = millis();
   // Reference the bar to when the last flight data was shown (g_lastData) so
@@ -1855,7 +2206,7 @@ void drawCountdownBar() {
 }
 
 void drawCog() {
-  int cx = 310, cy = 215, r = 9;
+  int cx = RX(310), cy = 215, r = 9;
   tft.fillCircle(cx, cy, r, TFT_DARKGREY);
   for (int i = 0; i < 6; i++) {
     float a = i * PI / 3.0f;
@@ -2042,17 +2393,13 @@ void updateStatusLed() {
 // ---- Flight details card ----
 // Back button (upper-right) that dismisses the overhead flight back to idle.
 void drawFlightBackButton() {
-  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
-  tft.setTextFont(2);
-  tft.setCursor(274, 7);
-  tft.print("Back");
+  backBtn("Back");
 }
 
 // Draw an RGB565 bitmap (in RAM, not PROGMEM) upscaled by `scale`
 // (nearest-neighbor), skipping pixels equal to `transp`. Uses fillRect per
 // pixel so no large scratch buffer is needed on the stack. Airline logos are
-// stored at their on-screen size (see convert_logos.py) and drawn with
+// stored at their on-screen size (see scripts/convert_logos.py) and drawn with
 // scale=1 to preserve detail; `scale` stays generic in case a future caller
 // needs to upscale.
 void drawScaledBitmap(int x, int y, const uint16_t* data, int w, int h,
@@ -2073,6 +2420,7 @@ void drawFlightInfo(Plane& p) {
   tft.setTextFont(4);
   tft.setCursor(8, 40);
   tft.print(p.callsign);
+  tft.setTextSize(1);
   tft.setTextFont(2);
 
   // Airline name below the callsign (from the ICAO code in the callsign).
@@ -2087,8 +2435,10 @@ void drawFlightInfo(Plane& p) {
 
   tft.setCursor(8, 94);
   tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-  if (g_metric) {
+  if (g_units == UNITS_METRIC) {
     tft.printf("%dm  %dkts  %.1fkm", (int)round(p.altFt * 0.3048f), p.spdKt, p.distMi * 1.60934f);
+  } else if (g_units == UNITS_AVIATION) {
+    tft.printf("%dft  %dkts  %.1fnm", p.altFt, p.spdKt, p.distMi * 0.868976f);
   } else {
     tft.printf("%dft  %dmph  %.1fmi", p.altFt, (int)round(p.spdKt * 1.15078f), p.distMi);
   }
@@ -2135,11 +2485,11 @@ void drawFlightInfo(Plane& p) {
   }
 
   // Airline logo in the top-right corner, if one exists (drawn at its native
-  // stored size - see convert_logos.py - so no blocky upscaling). No fallback
+  // stored size - see scripts/convert_logos.py - so no blocky upscaling). No fallback
   // badge - just the logo (or nothing).
   const RuntimeLogo* logo = findAirlineLogo(p.callsign);
   if (logo) {
-    drawScaledBitmap(226, 40, logo->data, logo->w, logo->h, 1, 0xF81F);
+    drawScaledBitmap(RX(226), 40, logo->data, logo->w, logo->h, 1, 0xF81F);
     logoRelease(logo);
   }
 }
@@ -2147,7 +2497,7 @@ void drawFlightInfo(Plane& p) {
 // ---- Radar (frame, blips, ground track, projection) ----
 // Shared radar geometry: the dashboard overhead radar and the flight-detail
 // radar both use the same center/radius, so blips can be redrawn in place.
-static const int kRadarCX = 235, kRadarCY = 155, kRadarR = 48;
+static const int kRadarCX = RX(235), kRadarCY = 155, kRadarR = 48;
 
 // Draw the static radar rings, crosshairs and range label.
 void drawRadarFrame(int cx, int cy, int r) {
@@ -2158,8 +2508,7 @@ void drawRadarFrame(int cx, int cy, int r) {
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setTextFont(2);
   tft.setCursor(cx - 12, cy + r + 6);
-  if (g_metric) tft.printf("%dkm", (int)round(g_radiusMi * 1.60934f));
-  else tft.printf("%dmi", (int)round(g_radiusMi));
+  tft.printf("%d%s", (int)round(g_radiusMi * distConv()), distUnit());
 }
 
 // Draw a dashed (dotted) line segment, used for the ground track so it stays
@@ -2245,7 +2594,7 @@ void drawTrackProjection(int cx, int cy, float scale, float planeDxMi, float pla
   ux /= um; uy /= um;
   // Extend the ray from the start point until it leaves the screen.
   float t = 1e9f;
-  if (ux > 0.0001f) t = fminf(t, (319 - sx) / ux);
+  if (ux > 0.0001f) t = fminf(t, (DISP_W - 1 - sx) / ux);
   if (ux < -0.0001f) t = fminf(t, (0 - sx) / ux);
   if (uy > 0.0001f) t = fminf(t, (239 - sy) / uy);
   if (uy < -0.0001f) t = fminf(t, (0 - sy) / uy);
@@ -2297,17 +2646,17 @@ void drawDottedLineSafe(int x0, int y0, int x1, int y1, uint16_t col, int dash, 
   // Dynamic zones are always clipped: the header/menu bar (with the clock) and
   // the countdown bar when enabled. These change/redraw frequently, so a line
   // drawn over them would leave stale artifacts.
-  rects[nRects++] = { -50, -50, 370, 33 + R };              // header/menu bar + clock
+  rects[nRects++] = { -50, -50, DISP_W + 50, 33 + R };              // header/menu bar + clock
   if (g_screen == SCR_DASH && g_showTimer && g_trackEnabled)
-    rects[nRects++] = { 302 - R, 34 - R, 320 + R, 200 + R };   // countdown bar
+    rects[nRects++] = { RX(302) - R, 34 - R, RX(320) + R, 200 + R };   // countdown bar
   // The settings cog is clipped for the track and projection.
   if (g_screen == SCR_DASH && zones != CLIP_DYN)
-    rects[nRects++] = { 296 - R, 200 - R, 320 + R, 213 + R };  // settings cog
+    rects[nRects++] = { RX(296) - R, 200 - R, RX(320) + R, 213 + R };  // settings cog
   // Static zones (flight-info text, airline logo) are only clipped for the
   // projection; the track is allowed to pass over them.
   if (zones == CLIP_ALL) {
     rects[nRects++] = { -R, 34 - R, 171 + R, 208 + R };     // flight-info text
-    rects[nRects++] = { 222 - R, 34 - R, 320 + R, 93 + R }; // airline logo
+    rects[nRects++] = { RX(222) - R, 34 - R, RX(320) + R, 93 + R }; // airline logo
   }
   Seg cur[32]; int m = 1;                       // current segments (safe portions)
   cur[0] = { x0, y0, x1, y1 };
@@ -2348,14 +2697,14 @@ bool blipBlocked(int px, int py) {
   const int R = kBlipR;
   if (py <= 33 + R) return true;                                     // header band
   if (inRect(px, py, -R, 34 - R, 171 + R, 208 + R)) return true;     // flight-info text
-  if (inRect(px, py, 222 - R, 34 - R, 320 + R, 93 + R)) return true; // airline logo
+  if (inRect(px, py, RX(222) - R, 34 - R, RX(320) + R, 93 + R)) return true; // airline logo
   if (g_screen == SCR_DASH) {
     // The countdown bar only occupies the right strip while the timer is shown;
     // when it's toggled off, that space is free for blips to draw in.
     if (g_showTimer && g_trackEnabled &&
-        inRect(px, py, 302 - R, 34 - R, 320 + R, 200 + R)) return true;  // countdown bar
+        inRect(px, py, RX(302) - R, 34 - R, RX(320) + R, 200 + R)) return true;  // countdown bar
     // The settings cog is always drawn on the dashboard, so it stays protected.
-    if (inRect(px, py, 296 - R, 200 - R, 320 + R, 213 + R)) return true; // settings cog
+    if (inRect(px, py, RX(296) - R, 200 - R, RX(320) + R, 213 + R)) return true; // settings cog
   }
   if (py >= 213) return true;                                        // bottom status/border strip
   return false;
@@ -2413,7 +2762,7 @@ bool plotRadarBlip(int cx, int cy, float scale, float dxMi, float dyMi, float di
                    int& outPx, int& outPy, uint16_t color, float hdgDeg, float glyphScale) {
   int px = cx + (int)(dxMi * scale);
   int py = cy - (int)(dyMi * scale);
-  if (px < 0 || px > 319 || py < 0 || py > 239) return false;
+  if (px < 0 || px > DISP_W - 1 || py < 0 || py > 239) return false;
   if (blipBlocked(px, py)) return false;
   drawPlaneIcon(px, py, hdgDeg, color, glyphScale);
   outPx = px; outPy = py;
@@ -2437,7 +2786,7 @@ uint16_t blipColor(const Plane& p, int index) {
 void drawTrackedBlip(int cx, int cy, float scale, Plane& p) {
   int px = cx + (int)(p.dxMi * scale);
   int py = cy - (int)(p.dyMi * scale);
-  if (px >= 0 && px <= 319 && py >= 0 && py <= 239) {
+  if (px >= 0 && px <= DISP_W - 1 && py >= 0 && py <= 239) {
     p.blipOn = plotRadarBlip(cx, cy, scale, p.dxMi, p.dyMi, p.distMi,
                              p.lastPx, p.lastPy, TFT_CYAN, p.hdgDeg, kTrackedScale);
   } else {
@@ -2590,6 +2939,7 @@ void drawFlightDetailPage() {
   tft.setCursor(8, 40);
   if (g_lastFlight.valid) tft.print(g_lastFlight.callsign);
   else tft.print("-No Data-");
+  tft.setTextSize(1);
   tft.setTextFont(2);
 
   if (g_lastFlight.valid) {
@@ -2602,9 +2952,12 @@ void drawFlightDetailPage() {
 
     tft.setCursor(8, 94);
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-    if (g_metric) {
+    if (g_units == UNITS_METRIC) {
       tft.printf("%dm  %dkts  %.1fkm", (int)round(g_lastFlight.altFt * 0.3048f),
                  g_lastFlight.spdKt, g_lastFlight.distMi * 1.60934f);
+    } else if (g_units == UNITS_AVIATION) {
+      tft.printf("%dft  %dkts  %.1fnm", g_lastFlight.altFt,
+                 g_lastFlight.spdKt, g_lastFlight.distMi * 0.868976f);
     } else {
       tft.printf("%dft  %dmph  %.1fmi", g_lastFlight.altFt,
                  (int)round(g_lastFlight.spdKt * 1.15078f), g_lastFlight.distMi);
@@ -2647,7 +3000,7 @@ void drawFlightDetailPage() {
     // Airline logo (top-right), if one exists.
     const RuntimeLogo* logo = findAirlineLogo(g_lastFlight.callsign);
     if (logo) {
-      drawScaledBitmap(226, 40, logo->data, logo->w, logo->h, 1, 0xF81F);
+      drawScaledBitmap(RX(226), 40, logo->data, logo->w, logo->h, 1, 0xF81F);
       logoRelease(logo);
     }
   } else {
@@ -2675,8 +3028,8 @@ bool inRect(int x, int y, int x0, int y0, int x1, int y1) {
   return x >= x0 && x <= x1 && y >= y0 && y <= y1;
 }
 
-bool rowMinus(int x, int y, int rowY) { return inRect(x, y, 170, rowY, 204, rowY + 24); }
-bool rowPlus(int x, int y, int rowY)  { return inRect(x, y, 238, rowY, 272, rowY + 24); }
+bool rowMinus(int x, int y, int rowY) { return inRect(x, y, RX(246), rowY, RX(276), rowY + 24); }
+bool rowPlus(int x, int y, int rowY)  { return inRect(x, y, RX(280), rowY, RX(310), rowY + 24); }
 
 void saveFloat(const char* key, float v) {
   prefs.begin("flight", false); prefs.putFloat(key, v); prefs.end();
@@ -2732,11 +3085,20 @@ bool touchReadXY(uint16_t& outX, uint16_t& outY, uint16_t* rawX = nullptr, uint1
   if (rawX) *rawX = rx;
   if (rawY) *rawY = ry;
 
-  // Map raw -> display using the NVS-calibrated linear transform
+  // Map raw -> panel coords using the NVS-calibrated linear transform
   // (see calibration.ino). disp = (raw - offset) * 1000 / scale.
   long dx = ((long)ry - g_calOffX) * 1000L / g_calScaleX;
   long dy = ((long)rx - g_calOffY) * 1000L / g_calScaleY;
-  outX = (uint16_t)constrain(dx, 0, 319);
+#ifdef CYD_E32R40T
+  // The E32R40T's touch axes run opposite the panel on both X and Y (a
+  // bottom-right tap reads as top-left). The cal fit can't express inversion
+  // (positive scale only), so flip the axes in panel space, then convert
+  // panel -> logical DISP_W x 240 UI coordinates to match the drawing wrapper
+  // (uniform x3/4 inverse of the x4/3 draw scale).
+  dx = (479 - dx) * 3 / 4;
+  dy = (319 - dy) * 3 / 4;
+#endif
+  outX = (uint16_t)constrain(dx, 0, DISP_W - 1);
   outY = (uint16_t)constrain(dy, 0, 239);
 
   return true;
@@ -2801,8 +3163,13 @@ void handleTouch() {
 
   if (g_screen == SCR_WXGRAPH) { handleWxGraphTouch(x, y); return; }
 
+  if (g_screen == SCR_COLORPICK) { handleColorPickTouch(x, y); return; }
+  if (g_screen == SCR_ALARMS) { handleAlarmsTouch(x, y); return; }
+
+  if (g_screen == SCR_ALARMFIRE) { handleAlarmFireTouch(x, y); return; }
+
   if (g_screen == SCR_CREDITS) {
-    if (inRect(x, y, 265, 4, 315, 24)) { g_screen = g_creditsReturn; dirty = true; return; }  // Back
+    if (inRect(x, y, RX(265), 4, RX(315), 24)) { g_screen = g_creditsReturn; dirty = true; return; }  // Back
     return;
   }
 
@@ -2810,11 +3177,11 @@ void handleTouch() {
     if (g_resetConfirm == 0) {
       // Step 1: choose what to reset. Buttons stacked top-right: Factory Reset,
       // Graph Data, Settings; Restart bottom-left, Cancel bottom-right.
-      if (inRect(x, y, 172, 36, 312, 66)) { g_resetConfirm = 1; dirty = true; }          // Factory Reset
-      else if (inRect(x, y, 172, 80, 312, 110)) { g_resetConfirm = 3; dirty = true; }    // Graph Data
-      else if (inRect(x, y, 172, 124, 312, 154)) { g_resetConfirm = 2; dirty = true; }   // Settings
+      if (inRect(x, y, RX(172), 36, RX(312), 66)) { g_resetConfirm = 1; dirty = true; }          // Factory Reset
+      else if (inRect(x, y, RX(172), 80, RX(312), 110)) { g_resetConfirm = 3; dirty = true; }    // Graph Data
+      else if (inRect(x, y, RX(172), 124, RX(312), 154)) { g_resetConfirm = 2; dirty = true; }   // Settings
       else if (inRect(x, y, 10, 210, 150, 236)) { g_resetConfirm = 4; dirty = true; }    // Restart
-      else if (inRect(x, y, 172, 210, 312, 236)) { g_resetConfirm = 0; g_screen = SCR_SETTINGS; dirty = true; }  // Cancel
+      else if (inRect(x, y, RX(172), 210, RX(312), 236)) { g_resetConfirm = 0; g_screen = SCR_SETTINGS; dirty = true; }  // Cancel
       return;
     }
     // Step 2: confirmation prompt.
@@ -2851,16 +3218,16 @@ void handleTouch() {
       tft.setTextColor(TFT_WHITE, TFT_BLACK);
       tft.setTextFont(2);
       if (g_resetConfirm == 1) {                      // Factory Reset
-        tft.drawCentreString("Performing Factory Reset...", 160, 108, 2);
+        tft.drawCentreString("Performing Factory Reset...", CX, 108, 2);
       } else if (g_resetConfirm == 2) {               // Settings
-        tft.drawCentreString("Resetting Stored", 160, 100, 2);
-        tft.drawCentreString("Settings...", 160, 118, 2);
+        tft.drawCentreString("Resetting Stored", CX, 100, 2);
+        tft.drawCentreString("Settings...", CX, 118, 2);
       } else {                                        // Graph Data
-        tft.drawCentreString("Resetting Graph Data...", 160, 108, 2);
+        tft.drawCentreString("Resetting Graph Data...", CX, 108, 2);
       }
       delay(1500);
       ESP.restart();
-    } else if (inRect(x, y, 180, 180, 290, 214)) {  // No -> back to choose
+    } else if (inRect(x, y, CX + 20, 180, CX + 130, 214)) {  // No -> back to choose
       g_resetConfirm = 0;
       dirty = true;
     }
@@ -2870,12 +3237,12 @@ void handleTouch() {
   if (g_screen == SCR_SETTINGS) {
     // 2-column grid; geometry mirrors drawSettings() in settings.ino.
     const int n = 10, rowH = 34, step = 38;
-    const int colX[2] = { 10, 164 };
-    const int colW = 146;
+    const int colW = (DISP_W - 30) / 2;          // mirrors drawSettings()
+    const int colX[2] = { 10, 10 + colW + 10 };
     const int y0 = 42;
-    if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_DASH; dirty = true; return; }   // Back
+    if (inRect(x, y, RX(265), 4, RX(315), 24)) { g_screen = SCR_DASH; dirty = true; return; }   // Back
     int row = (y >= y0) ? (y - y0) / step : -1;
-    int col = (x >= 164) ? 1 : 0;
+    int col = (x >= colX[1]) ? 1 : 0;
     int idx = (row < 0) ? -1 : row * 2 + col;   // flat index, same order as drawSettings
     if (idx < 0 || idx >= n) return;            // empty grid cell or out of range
     // Confirm the tap is actually inside this button (not a row/column gap).
@@ -2894,8 +3261,8 @@ void handleTouch() {
   }
 
   if (g_screen == SCR_LOCATION) {
-    if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }  // Back
-    if (inRect(x, y, 240, 40, 312, 64)) {  // Set lat/lon
+    if (inRect(x, y, RX(265), 4, RX(315), 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }  // Back
+    if (inRect(x, y, RX(240), 40, RX(312), 64)) {  // Set lat/lon
       char ll[32];
       snprintf(ll, sizeof ll, "%.6f,%.6f", g_lat, g_lon);
       g_latLonStr = ll;
@@ -2904,7 +3271,7 @@ void handleTouch() {
       dirty = true;
       return;
     }
-    if (inRect(x, y, 10, 96, 310, 130)) {  // Search Address
+    if (inRect(x, y, 10, 96, DISP_W - 10, 130)) {  // Search Address
       // Keep g_addrSearch so a failed/previous search can be edited rather
       // than retyped from scratch.
       g_screen = SCR_WIFI;
@@ -2912,7 +3279,7 @@ void handleTouch() {
       dirty = true;
       return;
     }
-    if (inRect(x, y, 10, 140, 310, 174)) {  // Find by IP
+    if (inRect(x, y, 10, 140, DISP_W - 10, 174)) {  // Find by IP
       fetchIpLocation();
       saveFloat("lat", g_lat);
       saveFloat("lon", g_lon);
@@ -2934,11 +3301,16 @@ void handleTouch() {
     // tapping the header credits opens the OpenSky Credits screen (three
     // buckets). Only active when flight tracking is on (the indicator is only
     // drawn then). Zone avoids the flight Back button.
-    if (g_trackEnabled && inRect(x, y, 194, 0, 264, 33)) { g_creditsReturn = SCR_DASH; g_screen = SCR_CREDITS; dirty = true; return; }
+    if (g_trackEnabled && inRect(x, y, RX(194), 0, RX(264), 33)) { g_creditsReturn = SCR_DASH; g_screen = SCR_CREDITS; dirty = true; return; }
+
+    // tapping the header date/clock (or the AM/PM/alarm-bell marker) opens the
+    // Alarms screen. On the 4" the clock is centred, so the zone widens to
+    // cover it (RX keeps it clear of the credits zone at RX(194)).
+    if (inRect(x, y, 0, 0, RX(190), HEADER_H - 1)) { g_screen = SCR_ALARMS; g_alarmIdx = constrain(g_alarmIdx, 0, g_alarmCount - 1); dirty = true; return; }
 
     // settings cog -> settings. Generous tap zone so it's easy to hit even with
     // a small touch-calibration offset (the cog itself is only ~28x24).
-    if (inRect(x, y, 278, 184, 320, 234)) { g_screen = SCR_SETTINGS; dirty = true; return; }
+    if (inRect(x, y, RX(278), 184, DISP_W, 234)) { g_screen = SCR_SETTINGS; dirty = true; return; }
 
     // Back button (upper-right) or the countdown bar dismisses the overhead
     // flight back to idle. Gate on g_radarShown (is the overhead flight view
@@ -2949,7 +3321,7 @@ void handleTouch() {
     // while the timer is shown (so there is no invisible region when hidden).
     if (g_radarShown &&
         ((x >= 265 && y >= 4 && x <= 315 && y <= 24) ||  // Back button
-         (g_showTimer && x >= 296 && y >= HEADER_H + 2 && y <= 200))) {  // countdown bar
+         (g_showTimer && x >= RX(296) && y >= HEADER_H + 2 && y <= 200))) {  // countdown bar
       g_suppressFlight = true;
       dirty = true;
       return;
@@ -2974,7 +3346,9 @@ void handleTouch() {
 
     // tapping the lower-left status line (e.g. "6 aircraft") while idle recalls
     // the last overhead flight's details (dashes if none has been seen yet).
-    if (!overhead && inRect(x, y, 4, 216, 170, 236)) {
+    // Disabled while a snooze countdown owns that line - the recall data would
+    // be stale (flight polls are suppressed) and the countdown is informational.
+    if (!overhead && !snoozePending() && inRect(x, y, 4, 216, 170, 236)) {
       g_screen = SCR_FLIGHTDETAIL;
       g_screenIdleUntil = millis() + SCREEN_IDLE_TIMEOUT_MS;
       dirty = true;
@@ -2987,8 +3361,9 @@ void handleTouch() {
     // Back button returns to the dashboard; tapping the header credits opens
     // the OpenSky Credits screen (returning back here).
     g_screenIdleUntil = millis() + SCREEN_IDLE_TIMEOUT_MS;
-    if (g_trackEnabled && inRect(x, y, 194, 0, 264, 33)) { g_creditsReturn = SCR_FLIGHTDETAIL; g_screen = SCR_CREDITS; dirty = true; return; }
-    if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_DASH; dirty = true; return; }
+    if (g_trackEnabled && inRect(x, y, RX(194), 0, RX(264), 33)) { g_creditsReturn = SCR_FLIGHTDETAIL; g_screen = SCR_CREDITS; dirty = true; return; }
+    if (inRect(x, y, 0, 0, RX(190), HEADER_H - 1)) { g_screen = SCR_ALARMS; g_alarmIdx = constrain(g_alarmIdx, 0, g_alarmCount - 1); dirty = true; return; }
+    if (inRect(x, y, RX(265), 4, RX(315), 24)) { g_screen = SCR_DASH; dirty = true; return; }
     return;
   }
 }
@@ -3013,8 +3388,16 @@ void setup() {
   loadNetCfg();   // ipdhcp/ipaddr/ipmask/ipgw/ipdns/hostname
   g_osClientId = prefs.getString("oscid", "");
   g_osClientSecret = prefs.getString("ocssec", "");
+  // Board model on every boot (not dev-gated): scripts/detect_boards.py uses
+  // it to map serial ports to board variants before OTA/flash updates.
+#ifdef CYD_E32R40T
+  Serial.println("[boot] board=e32r40t");
+#else
+  Serial.println("[boot] board=2432s028r");
+#endif
   if (isDevBuild()) {
     Serial.printf("[boot] version=%s build=%d\n", kVersion, (int)BUILD_NUM);
+    Serial.printf("[boot] %s\n", kBuildTag);
     Serial.printf("[boot] OpenSky credentials clientId=%s clientSecret=%s\n",
                   g_osClientId.length() ? "set" : "blank",
                   g_osClientSecret.length() ? "set" : "blank");
@@ -3043,7 +3426,9 @@ void setup() {
   }
   g_trackEnabled = prefs.getBool("track", true);
   g_blinkForFlight = prefs.getBool("blinkf", true);
-  g_metric = prefs.getBool("metric", false);
+  g_units = prefs.getInt("units", prefs.getBool("metric", false) ? UNITS_METRIC : UNITS_IMPERIAL);
+  if (prefs.isKey("metric")) prefs.remove("metric");   // migrated to "units"
+  g_clock24 = prefs.getBool("clock24", false);
   g_showTimer = prefs.getBool("timer", false);
   g_showIata = prefs.getBool("showiata", true);
   g_autoUpdate = prefs.getBool("autoupd", true);
@@ -3081,6 +3466,7 @@ void setup() {
   if (needCalib)      g_bootStage = BOOT_CALIB;
   else if (needWifi)  g_bootStage = BOOT_WIFI;
   else                g_bootStage = BOOT_DONE;
+  loadAlarms();   // reads the "alarms" blob while the namespace is still open
   prefs.end();
 
   poolfsInit();     // load persisted pool temp history from flash into RAM
@@ -3122,9 +3508,11 @@ void setup() {
   if (g_sleepOn && wakeCause == ESP_SLEEP_WAKEUP_TIMER) {
     alreadyAwake = sleeperRun();
   }
+  // A firing missed while asleep needs no special handling: the alarm's
+  // nextFire is a past epoch now, so the first loop() checkAlarms() fires it.
 
   tft.init();
-  tft.setRotation(1); // landscape 320x240
+  tft.setRotation(1); // landscape 320x240 (480x320 panel on CYD_E32R40T)
   tft.fillScreen(TFT_BLACK);
 
   // First-boot wizard: missing touch calibration starts calBegin() (driven by
@@ -3207,7 +3595,18 @@ void enterDeepSleep() {
   delay(10);
   esp_sleep_enable_ext0_wakeup((gpio_num_t)TOUCH_IRQ_PIN, 0);  // wake on LOW (touch)
 #endif
-  esp_sleep_enable_timer_wakeup(SLEEP_POOL_INTERVAL_US);
+  // Wake at the next alarm firing if it lands sooner than the pool-temp
+  // cadence, so an alarm (or matured snooze) goes off on time instead of up
+  // to ~5 min late. nextFire is already in NVS, so the refire survives this
+  // sleep too.
+  uint64_t wakeUs = SLEEP_POOL_INTERVAL_US;
+  time_t nextAlarm = nextAlarmAt();
+  time_t epochNow = time(nullptr);
+  if (nextAlarm > epochNow) {
+    uint64_t alarmUs = (uint64_t)(nextAlarm - epochNow) * 1000000ULL;
+    if (alarmUs < wakeUs) wakeUs = alarmUs;
+  }
+  esp_sleep_enable_timer_wakeup(wakeUs);
   saveRollupState();     // keep the in-progress pool hour/day rollups across this deep sleep
   saveWxRollupState();   // keep the in-progress weather hour/day rollups across this deep sleep
   esp_deep_sleep_start();
@@ -3255,6 +3654,9 @@ bool sleeperRun() {
 
   while (true) {
     if (!inSleepWindowNow()) return true;    // window ended -> boot normally
+    // An alarm whose time passed since the last 5-minute wake wins over the
+    // sleep schedule: boot normally and let loop()'s checkAlarms() fire it.
+    if (alarmDueNow()) return true;
     if (g_goveeKey.length() > 0 && g_poolDeviceId.length() > 0) {
       fetchGoveeTemp();                      // logs to flash via poolLog
     }
@@ -3312,13 +3714,23 @@ void loop() {
   }
 #endif
 
+  // Fire a due alarm (or a matured snooze) before anything else can sleep the
+  // device - firing switches to SCR_ALARMFIRE, which also keeps the
+  // screen==SCR_DASH checks below from applying.
+  checkAlarms();
+
   // --- Sleep Mode ---
-  // Only sleep while on the dashboard (so Settings stays interactive).
+  // Only sleep while on the dashboard (so Settings stays interactive). A
+  // pending snooze doesn't block sleep: its nextFire is in NVS and the
+  // deep-sleep timer wakes at it (see enterDeepSleep), so the refire still
+  // goes off on time. A ringing alarm can't be slept on - firing switched
+  // the screen to SCR_ALARMFIRE.
   bool asleep = false;
   if (g_screen == SCR_DASH) {
     // expire a user-triggered wake once the duration has elapsed
     if (wakeUntil != 0 && (long)(now - wakeUntil) >= 0) wakeUntil = 0;
-    asleep = !g_otaActive && !g_otaRunning && inSleepWindowNow() && (wakeUntil == 0);
+    asleep = !g_otaActive && !g_otaRunning
+             && inSleepWindowNow() && (wakeUntil == 0);
   }
 
   if (asleep) {
@@ -3351,6 +3763,7 @@ void loop() {
 
   handleTouch();
   calPoll();   // drive the touch-calibration state machine (no-op unless active)
+  pollWifiScan();   // harvests/finishes an in-flight async WiFi scan
 
   // --- WiFi availability / non-blocking reconnect ---
   bool wifiUp = (WiFi.status() == WL_CONNECTED);
@@ -3423,7 +3836,7 @@ void loop() {
     // OpenSky radar-polling credits are exhausted, back off to an infrequent
     // recovery check instead of the normal cadence, so we notice once credits
     // refill (OpenSky resets daily) without hammering the API.
-    if (g_trackEnabled) {
+    if (g_trackEnabled && !snoozePending()) {   // no flight polls during a snooze
       bool wantFlights = false;
       // Both an exhausted credit bucket and a run of rejected tokens park the
       // next attempt in g_nextRadarMs; honor it instead of the normal cadence.
@@ -3475,12 +3888,19 @@ void loop() {
   // OTA's result stays visible instead of timing back out to the dashboard.
   if (g_calState == CAL_NONE && g_bootStage == BOOT_DONE && !g_otaActive && !g_otaRunning &&
       !(g_screen == SCR_ABOUT && g_otaFromAbout)) {
-    if (g_screen != SCR_DASH) {
+    if (g_screen == SCR_ALARMFIRE) {
+      // An unanswered alarm auto-snoozes instead of idling back to the
+      // dashboard; the ALARM_MAX_SNOOZES cap inside alarmSnooze() turns the
+      // next timeout (or Snooze press) into a dismiss for the day.
+      if (g_screenIdleUntil == 0) g_screenIdleUntil = now + SCREEN_IDLE_TIMEOUT_MS;
+      if (g_screenIdleUntil != 0 && (long)(now - g_screenIdleUntil) >= 0) alarmSnooze();
+    } else if (g_screen != SCR_DASH) {
       if (g_screenIdleUntil == 0) g_screenIdleUntil = now + SCREEN_IDLE_TIMEOUT_MS;
       if (g_screenIdleUntil != 0 && (long)(now - g_screenIdleUntil) >= 0) {
         g_screen = SCR_DASH;
         g_helpScroll = 0;
         g_resetConfirm = 0;
+        g_alarmDelConfirm = false;
         g_ftPage = 0;
         g_addrSearch = "";
         g_wifiSub = 0;
@@ -3513,12 +3933,20 @@ void loop() {
     else if (g_screen == SCR_WXGRAPH) drawWxGraph();
     else if (g_screen == SCR_FLIGHTDETAIL) drawFlightDetailPage();
     else if (g_screen == SCR_CREDITS) drawCredits();
+    else if (g_screen == SCR_ALARMS) drawAlarms();
+    else if (g_screen == SCR_ALARMFIRE) drawAlarmFire();
+    else if (g_screen == SCR_COLORPICK) drawColorPick();
     else drawDashboard();
   }
+
+  // A firing alarm (or a notify-preset preview in the editor) owns the LED;
+  // the flight/status LED logic below is skipped while it runs.
+  updateAlarmLed(now);
 
   // Run a queued LED blink. The color was already decided in fetchFlights()
   // and re-checked on every poll, so we blink whenever the route state changes.
   BlinkColor blinked = BLINK_NONE;
+  if (!alarmLedBusy()) {
   if (g_pendingBlink) {
     g_pendingBlink = false;
     blinked = g_blinkColor;
@@ -3555,6 +3983,7 @@ void loop() {
       digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
     }
   }
+  }   // end !alarmLedBusy LED gate
 
   // Periodic heap/TLS/fetch diagnostic. No-op in release builds.
   static unsigned long lastHeapDiag = 0;

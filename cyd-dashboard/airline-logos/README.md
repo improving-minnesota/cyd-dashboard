@@ -14,7 +14,7 @@ To regenerate the logo files and flash them to the device after adding or
 changing a source image, run:
 
 ```bash
-cyd-dashboard/.venv/bin/python cyd-dashboard/provision_logos.py --port /dev/cu.usbserial-XXXX
+cyd-dashboard/.venv/bin/python scripts/provision_logos.py --port /dev/cu.usbserial-XXXX
 ```
 
 Add `--no-flash` to only write the `<ICAO>.bin` files + build the LittleFS

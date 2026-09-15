@@ -74,13 +74,103 @@ above.
 
 ## The sketch
 
-The `cyd-dashboard/` sketch targets the **ESP32-2432S028R "CYD"**
-(`esp32:esp32:jczn_2432s028r`). It uses a custom partition table (see
+The `cyd-dashboard/` sketch targets CYD-family boards via the
+`esp32:esp32:jczn_2432s028r` FQBN (it covers every supported variant — the
+board differences come from `-DCYD_*` flags, see "Board variants"). It uses a
+custom partition table (see
 "Partition table" below), so the FQBN must include `:PartitionScheme=custom`:
 
 ```bash
 arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.[\".\"]' .release-please-manifest.json)" cyd-dashboard
+```
+
+### Board variants
+
+One source tree serves every supported board; a `-DCYD_<MODEL>` compile flag
+selects the variant (display driver, pins, scaling, OTA asset name). The same
+`jczn_2432s028r` FQBN is used for all plain-ESP32 boards — the flag does the
+rest.
+
+| Flag | Board | Panel | OTA release asset | Build dir |
+|---|---|---|---|---|
+| *(none)* | 2.8" ESP32-2432S028R | ILI9341 320x240, touch on VSPI | `cyd-dashboard-2432s028r.ino.bin` (+ legacy `cyd-dashboard.ino.bin` copy) | `build/release` |
+| `-DCYD_E32R40T=1` | 4.0" E32R40T | ST7796 480x320, touch shares the TFT's HSPI, backlight GPIO 27, speaker amp enable GPIO 4 | `cyd-dashboard-e32r40t.ino.bin` | `build/release-e32r40t` |
+
+All layout code targets a logical DISP_W x 240 screen: 320x240 on the 2.8"
+board, 360x240 on the E32R40T. The `tft` object is a scaling wrapper that
+maps logical -> panel with a uniform x4/3 factor on the 4" board, so nothing
+distorts; the extra 40 logical columns are spent on spacing via `RX(x)`
+(right-edge anchored positions) and `CX` (screen centre) rather than
+stretching. On the 4" board, text uses smooth FreeFonts instead of scaling
+the classic bitmap fonts: F1 stays the classic 8px font (the only tier that
+fits the header's three credit rows), F2->FreeSans9, F4->FreeSansBold18
+(big values), and F6->FreeSansBold18 (header clock). `FONT_AUX` is the
+secondary-text tier (button captions, forecast cells, status lines): F1 on
+the 2.8", F2 on the 4". The wrapper compensates for FreeFonts' baseline
+origin so setCursor() keeps "top of text" semantics. `touchReadXY` maps panel
+coordinates back to logical space. Raw panel access (init/rotation) uses
+`lcd`.
+
+Build + push the 4" variant:
+
+```bash
+arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
+  --build-property "compiler.cpp.extra_flags=-DCYD_E32R40T=1 -DAPP_VERSION=...-dev -DBUILD_NUM=N -DENABLE_LOCAL_OTA=1 -DENABLE_SERIAL_PROVISION=1" \
+  --output-dir build/release-e32r40t cyd-dashboard
+cyd-dashboard/.venv/bin/python scripts/ota_push.py --dir build/release-e32r40t
+```
+
+> The E32R40T's CH340 also fails at 921600 baud but tolerates 460800, so a
+> first USB flash uses `--upload-property upload.speed=460800`.
+
+Release assets are named per board (`OTA_ASSET` in `ota.ino`); `release.yml`
+builds each variant and `build-firmware.yml` compiles all of them on every
+PR. The bare `cyd-dashboard.ino.bin` name is kept (a copy of the 2432s028r
+build) only for firmware old enough to poll for it — retire it once those
+devices are gone.
+
+#### Identifying boards on serial ports
+
+Every build prints `[boot] board=<model>` (not dev-gated) right after reset.
+`scripts/detect_boards.py` resets every `/dev/cu.usbserial-*` port in
+parallel and reports which board each holds (plus version/build, and IP with
+`--wait-ip`):
+
+```bash
+cyd-dashboard/.venv/bin/python scripts/detect_boards.py [--wait-ip] [--json]
+```
+
+Both update scripts use it:
+
+- `ota_push.py --board e32r40t` (or inferred from `--dir build/release-e32r40t`)
+  picks the matching port when several boards are plugged in.
+- `scripts/flash.py --board e32r40t` does the USB upload with the correct
+  per-board baud (115200 for 2432s028r, 460800 for the E32R40T's CH340).
+
+Firmware older than the marker reports `unknown` — pass `--port` once to get
+a self-identifying build onto it.
+
+### Getting the image onto the device: OTA by default, USB only for the first flash
+
+Pick by **device state**, not by habit:
+
+| Device state | How to flash |
+|---|---|
+| Dev build with the OTA flags already running (board on WiFi) | **`cyd-dashboard/.venv/bin/python scripts/ota_push.py`** — serves `build/release`, resets the board, waits for `[net] ip=`, sends `OTA_URL`, and streams `[OTA]` progress to reboot. ~5 s over WiFi. `--all` updates **every** detected board in parallel, each with its variant's binary from `build/release*` (serial output is prefixed per-board). |
+| Fresh board, or first flash after changing the OTA flags | `arduino-cli upload` (below) **once** — then switch to `ota_push.py` |
+| Device can't reach WiFi / serial OTA path | `arduino-cli upload` (below) |
+
+> **Do NOT use `arduino-cli upload` for routine dev iteration.** It is ~80 s
+> at 115200 baud, monopolizes the serial port, and — when the FQBN is dropped
+> or the cache is stale — can flash the wrong partition table or image.
+> `ota_push.py` exists precisely so OTA is less effort than USB. Agents:
+> if you reach for `arduino-cli upload` while a flagged dev build is running,
+> stop and use `ota_push.py` instead.
+
+First flash over USB (only the cases in the table above):
+
+```bash
 arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 cyd-dashboard
 ```
 
@@ -150,13 +240,21 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > **Iteration: after the first USB flash, use triggered local OTA for every
 > later dev update.** The USB flash above is only needed to get a dev build
 > with these flags onto the device. Once it's running, rebuild into the same
-> `build/release` and trigger a local OTA (below) — it's much faster than serial
+> `build/release` and trigger a local OTA — it's much faster than serial
 > flashing and keeps the USB port free for a monitor. Keep the three flags on
 > every iteration so each new image can still accept the next OTA trigger.
 >
-> Then serve the `.bin` over HTTP from a machine the board can reach. The
-> simplest option is a static server at the build directory's root, then pass
-> the full URL to the device:
+> The easy way is **`scripts/ota_push.py`** — one command that serves
+> `build/release/` over HTTP, resets the board, waits for the `[net] ip=`
+> line (so WiFi is up before triggering — avoiding the `code=-1` race noted
+> below), sends `OTA_URL`, and streams `[OTA]` progress until reboot:
+> ```bash
+> cyd-dashboard/.venv/bin/python scripts/ota_push.py   # --board e32r40t or --port /dev/cu.usbserial-XXXX if ambiguous
+> ```
+>
+> Manual alternative: serve the `.bin` over HTTP from a machine the board can
+> reach (a static server at the build directory's root), then pass the full
+> URL to the device:
 > ```bash
 > python3 -m http.server 8080 --directory build/release
 > ```
@@ -172,6 +270,13 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > OTA_FILE=cyd-dashboard.ino.bin
 > OTA_GO
 > ```
+>
+> `OTA_VER=<label>` (e.g. `OTA_VER=1.18.0-dev, Build 25`) sets the version
+> label the OTA progress screen shows after "Updating to v" — send it before
+> the trigger command. `ota_push.py` does this automatically: it extracts the
+> `CYD_TAG=...` string the firmware embeds in the binary (`kBuildTag` in
+> `cyd-dashboard.ino`, built from the same `APP_VERSION`/`BUILD_NUM` flags)
+> and sends it ahead of `OTA_URL`. Without it the screen falls back to "dev".
 >
 > **Avoid a reset before sending the command.** Many serial terminals and
 > programming tools pulse DTR/RTS on open, which resets the ESP32 into a fresh
@@ -194,6 +299,8 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > actual USB-serial port the board is on; on macOS this is typically
 > `/dev/cu.usbserial-XXXX`, on Linux `/dev/ttyUSB0` or `/dev/ttyACM0`:
 > ```bash
+> cyd-dashboard/.venv/bin/python scripts/serial_monitor.py   # --reset for a clean boot log
+> # or:
 > arduino-cli monitor -p /dev/cu.usbserial-XXXX --config baudrate=115200
 > ```
 > Or use any 115200 terminal such as `screen /dev/cu.usbserial-XXXX 115200`,
@@ -566,7 +673,7 @@ shown above.
    they live in the dedicated LittleFS **logos** partition and are read at
    runtime. The OTA app is therefore logo-less and small. If you add a logo,
    it counts against the 512 KB logos partition's headroom, not the app slots.
-   The logo box size (`BOX_W`/`BOX_H` in `convert_logos.py`) still trades
+   The logo box size (`BOX_W`/`BOX_H` in `scripts/convert_logos.py`) still trades
    detail for flash directly (each doubling of width and height quadruples the
    per-logo byte count), which matters for fitting logos in the partition.
 
@@ -629,7 +736,8 @@ shares that same mounted partition. If the partition is moved or erased
 history is dropped.
 
 Data collection runs both while awake and while asleep. While asleep the
-deep-sleep timer wakes every ~5 min; the **same single wake** connects, logs
+deep-sleep timer wakes every ~5 min (sooner if an alarm's `nextFire` lands
+first — see "Alarms"); the **same single wake** connects, logs
 the pool temp and the weather temp, and goes back to sleep — weather logging
 adds **no additional wake-ups**, only one extra HTTPS call within the wake the
 pool already needs.
@@ -660,7 +768,7 @@ provisioned this way (`WIFI_MODE=static`, `WIFI_IP`, `WIFI_SUBNET`,
 Network → IP setup** on the device:
 
 ```bash
-cyd-dashboard/.venv/bin/python cyd-dashboard/provision_config.py --port /dev/cu.usbserial-XXXX
+cyd-dashboard/.venv/bin/python scripts/provision_config.py --port /dev/cu.usbserial-XXXX
 ```
 
 First-time setup: `python3 -m venv cyd-dashboard/.venv && cyd-dashboard/.venv/bin/pip install pyserial`
@@ -696,10 +804,10 @@ brand color. Two separate lookups drive this:
   still compiled in; it's just text/color, not bitmap data).
 
 The PNG source icons in `airline-logos/` are **git-ignored** and kept local,
-because we're not sure we can redistribute the brand logos. `convert_logos.py`
+because we're not sure we can redistribute the brand logos. `scripts/convert_logos.py`
 turns them into per-airline `<ICAO>.bin` files (a 12-byte header + raw RGB565
 pixels, stored at their on-screen 72x48 size, transparent color `0xF81F`), and
-`provision_logos.py` packs those into a LittleFS image and flashes it to the
+`scripts/provision_logos.py` packs those into a LittleFS image and flashes it to the
 logos partition once per device.
 
 At boot, `logosInit()` (in `logos.ino`) mounts the logos partition (an
@@ -723,7 +831,7 @@ never embeds logos.
 
 1. **Add a PNG icon** — drop the logo into `cyd-dashboard/airline-logos/`,
    e.g. `FedEx Icon.png`.
-2. **Map it in `convert_logos.py`** — add an entry to the `AIRLINES` list:
+2. **Map it in `scripts/convert_logos.py`** — add an entry to the `AIRLINES` list:
    `("FedEx", "FDX", "FedEx Express")`. The first item is a keyword matched
    (case-insensitively) against the filename, and must match **exactly one**
    file. If the filename could match another keyword, use a more specific
@@ -737,11 +845,13 @@ never embeds logos.
 4. **Generate the logo files and provision them** (no firmware recompile):
    ```bash
    # writes <ICAO>.bin files, packs a LittleFS image, and flashes it to the
-   # logos partition. Add --no-flash to only build the image.
-   cyd-dashboard/.venv/bin/python cyd-dashboard/provision_logos.py --port /dev/cu.usbserial-XXXX
+   # logos partition of every board detect_boards.py finds (use --port to
+   # target just one; --no-flash only builds the image).
+   cyd-dashboard/.venv/bin/python scripts/provision_logos.py
    ```
    The script fails loudly if any `AIRLINES` keyword matches zero or more than
-   one source file. Repeat for each device that should carry logos. Logos count
+   one source file. The logos partition layout is identical on every board
+   variant, so one image serves them all. Logos count
    against the logos partition's ~148 KB of free headroom (see the partition
    table), not the app slots.
 
@@ -755,9 +865,11 @@ Settings are stored in NVS under the `"flight"` namespace (see `setup()` in
 |---|---|---|---|
 | `timer` | bool | `false` | Show the dashboard countdown/timer bar (Flight Tracker → Enable timer). |
 | `showiata` | bool | `true` | Display route airports as `ICAO | IATA` when ADSB.lol provides an IATA code (Flight Tracker → Show IATA). |
-| `clkcol` | uint32 | `TFT_BLUE` | Dashboard clock-bar color (General → Clock Color). |
+| `clkcol` | uint32 | `TFT_BLUE` | RGB565 theme color from the General → Clock Color picker — tap-target swatch rows for hue, shade, and greyscale (`hsv565()`/`colorPickEnter()`). Drives the header band and every ordinary button; `btnFg()` picks black text on light colors, white on dark, and `btnCol()` nudges buttons a shade darker on light themes / toward white on dark ones. Header Back buttons are ordinary buttons (`backBtn()`); destructive buttons use `dangerCol()` — red, or yellow when the theme is near-red. History graphs draw on the button color (`graphBgCol()`), the data line is the theme pushed 75% toward white/black (`graphLineCol()`), and the avg line is the theme's complement at the same blend (`graphAvgCol()`). Semantic controls keep their own colors. |
+| `units` | int | `0` | Device units (General → Units): 0 = Imperial (ft/mph/mi), 1 = Metric (m/kts/km), 2 = Aviation (ft/kts/nm). Radius and ceiling are still stored in miles/feet; the selected unit only changes what's displayed and what the sliders edit — switching units keeps the displayed number and reinterprets it in the new unit. Temperatures are fetched/logged in °F and converted at display (`tempDisp()`), so Metric and Aviation show °C. Migrates the old `metric` bool on first boot. |
+| `clock24` | bool | `false` | 24-hour clock (General → Clock). Affects the header clock, time editors, alarm times, and sunrise/sunset; `false` shows 12-hour times with AM/PM markers. |
 | `homeap` | string | `""` | Home airport (ICAO). Used for the LED blink: red when origin matches, green when destination matches. Leave empty to disable. |
-|| `watchcs` | string | `""` | Watched callsign. Blinks white repeatedly while that flight's details are shown on the dashboard. Leave empty to disable. |
+| `watchcs` | string | `""` | Watched callsign. Blinks white repeatedly while that flight's details are shown on the dashboard. Leave empty to disable. |
 | `ipdhcp` | bool | `true` | Network addressing mode (Network → IP setup). `true` = DHCP; `false` = static using the keys below. |
 | `ipaddr` / `ipmask` / `ipgw` / `ipdns` | string | `""` | Static IP, subnet mask, gateway, DNS. Applied via `WiFi.config()`; blank DNS falls back to the gateway, and an incomplete/invalid set falls back to DHCP. |
 | `hostname` | string | `"cyd-dashboard"` | STA hostname via `WiFi.setHostname()`; applies in both DHCP and static modes. |
@@ -814,6 +926,19 @@ state (`drawAuthBorder` / `drawStatusBorder` in `cyd-dashboard.ino`):
 `dashboardCriticalLabel()` and `dashboardWarningLabel()` decide the two cases;
 the clock bar color is `g_clockCol` (persisted `clkcol`) except when a critical
 issue overrides it with maroon.
+
+## Network screen & WiFi scanning
+
+Opening **Settings → Network** switches to `SCR_WIFI` immediately and starts a
+non-blocking scan — `scanWifi()` calls `WiFi.scanNetworks(true)` (async) and
+returns; `pollWifiScan()` runs from `loop()` while `g_scanning` and reads
+`WiFi.scanComplete()`. Until results arrive the results area shows an animated
+"Scanning" placeholder (redrawn in place so it doesn't flicker); on completion
+the list is deduplicated/sorted and `dirty` triggers the redraw. `g_netCount`
+is cleared at scan start so row taps during the scan can't select phantom
+entries, and all the screen's other controls stay live. The same path serves
+the bottom **Scan** re-scan button and the first-boot setup wizard (which
+forces `WIFI_STA` mode first, since there are no credentials yet).
 
 ## OpenSky Credits screen & header readout
 
@@ -880,14 +1005,78 @@ plain ICAO code is shown. All comparisons — the home-airport LED logic, the
 OpenSky-vs-adsb.lol route diff, and the ICAO-keyed city lookup — always use the
 ICAO codes.
 
+## Alarms
+
+Implemented in `alarms.ino` (`SCR_ALARMS` editor + `SCR_ALARMFIRE` alert
+screen). Reached by tapping the header's date/clock region; the header also
+shows a small bell beside the clock (top slot, above the AM/PM marker) while
+any alarm is enabled.
+
+- **Storage** — one NVS blob (`alarms` in the `flight` namespace, versioned
+  by `ALARM_STORE_VER`) holding `count` + a packed `Alarm` array (`en`, `h`,
+  `m`, weekday bitmask, `preset`, `snoozes`, `nextFire`). Max `MAX_ALARMS`
+  (6). Settings/Factory reset wipes it like any other setting.
+- **Firing** — each alarm carries `nextFire`, the persisted epoch of its
+  next firing. `checkAlarms()` runs every `loop()` tick: an alarm is due iff
+  `now >= nextFire`, so a firing missed while asleep or powered off goes off
+  on the next run with no grace-window bookkeeping. `nextFire` is rewritten
+  whenever the situation changes: any editor write or a Dismiss rearms it to
+  the next matching weekday (`nextScheduled()`, strictly future), and a
+  Snooze parks it at `now + 5 min`. `nextFire == 0` means "recompute once
+  the clock is synced" (e.g. an alarm edited before NTP). A snoozed alarm
+  needs no flag — `isSnoozed()` is just `nextFire` earlier than the next
+  scheduled occurrence — and each alarm tracks its own `nextFire`, so
+  multiple alarms can be snoozed at once.
+  Firing switches to `SCR_ALARMFIRE` from any screen and runs the alarm's
+  notification pattern until handled. Presets
+  (`kAlarmPresets`: Blink, Rapid, Double, Colors, Pulse) drive both the RGB
+  LED (`ledPattern`) and an external speaker on the JST header at GPIO 26
+  (`tonePattern`, via `tone()`/`noTone()`); each beep pattern mirrors its
+  LED cadence. The board has no built-in speaker — audio needs a speaker
+  plugged into that header, otherwise alarms are LED-only. Picking a
+  preset in the editor previews both for ~3 s.
+- **Dismiss** rearms `nextFire` to the next scheduled weekday and returns to
+  the dashboard.
+- **Snooze** sets `nextFire = now + 5 min`, increments `a.snoozes`, and
+  returns to the dashboard; the alarm refires when `nextFire` passes —
+  surviving deep sleep and power loss since it's in NVS. The dashboard's
+  bottom-left status line counts down ("Snoozing for N minutes...") and
+  flight polls pause while any snooze is pending (`snoozePending()`).
+- **Snooze cap** — an episode allows `ALARM_MAX_SNOOZES` (3) snoozes; the
+  next snooze request — idle timeout or button — dismisses for the day
+  (the cap lives inside `alarmSnooze()`).
+- **Deep sleep** — `enterDeepSleep()` wakes at `min(5-min pool cadence,
+  nextAlarmAt())`, so an alarm (or matured snooze) goes off on time even
+  mid-sleep-window rather than up to ~5 min late. A pending snooze does not
+  block sleep entry; a ringing alarm can't be slept on because firing
+  switched the screen to `SCR_ALARMFIRE` (sleep only engages from
+  `SCR_DASH`). `sleeperRun()` also calls `alarmDueNow()` on each wake as a
+  fallback.
+- **Time editing** — the shared `drawTimeAdj`/`timeAdjHit` widget (a
+  horizontal `[▼][▲]` hour pair left of the time, a minute pair right; the
+  hour wraps through AM/PM on its own; tap the time for the manual HHMM
+  keyboard, `g_wifiSub == 8`) is also used for Sleep Mode start/end. Wake min
+  reuses the same `adjPair`/`adjPairHit` arrow pair (±1, range 1–120).
+- **Deleting** — `Del` sets `g_alarmDelConfirm` and the editor body swaps to
+  a Yes/No prompt (same pattern as the Reset confirmation); only Yes shifts
+  the array and saves.
+
 ## Printable user guide
 
 [`docs/user-guide/DEVELOPER-USERGUIDE.md`](docs/user-guide/DEVELOPER-USERGUIDE.md)
 is the markdown source for `DEVELOPER-USERGUIDE.pdf` in the same folder — a
-two-page printable guide for new users (front = setup, back = reference;
-duplex-print one Letter sheet). It condenses the README's user-facing content
-— keep it in sync with `README.md` and the on-device Help screen whenever
-user-facing behavior changes, then regenerate the PDF:
+tri-fold printable guide for new users (Letter landscape, duplex flip on long
+edge, fold along the dashed lines). It condenses the README's user-facing
+content — keep it in sync with `README.md` and the on-device Help screen
+whenever user-facing behavior changes, then regenerate the PDF:
+
+The six panels follow standard letter-fold order —
+`OUTSIDE = [inside flap | back cover | front cover]`,
+`INSIDE = [setup | daily use | reference]` — marked in the markdown with
+`<!-- SIDE:... -->` and `<!-- PANEL -->` comments (panels listed in printed
+left-to-right order). The cover shows the firmware version, injected from
+`.release-please-manifest.json` via a `{{VERSION}}` token. The flap panel is
+~1/16" narrower so it tucks inside the fold cleanly.
 
 ```bash
 # needs the `markdown` package once: cyd-dashboard/.venv/bin/python -m pip install markdown
@@ -908,17 +1097,31 @@ draws four simulated screens as SVG → PNG via CairoSVG, all populated with
   (Day) plotted from the last 24 h of real Open-Meteo temps.
 - `DEVELOPER-USERGUIDE-ftracker.png` — the Settings > Flight Tracker screen
   (page 1) with the device's default values.
+- `DEVELOPER-USERGUIDE-alarms.png` — the Alarms > N editor (hour/minute
+  steppers flanking the time, weekday toggles, LED preset, < / Del / New
+  footer) showing a second alarm so all three footer buttons render.
 
 Data sources: OpenSky `/states/all` + `/tracks/all` and the adsb.lol callsign
 route using `cyd-dashboard/.env` creds, Open-Meteo weather, the Govee device
 state API, and a fixed header date/time (`MOCK_DT`) so the screenshots stay
-stable between renders. The mock scans nearby planes until one has a usable
-track (`--monitor SECONDS` extends the window; `--once` for a single pass).
-All inputs are optional: with no creds/network it still renders with
-placeholders. The images are then converted with the markdown to styled HTML
-and printed via headless Chrome (`--print-to-pdf`); a `<!-- PAGEBREAK -->`
-comment in the markdown marks the front/back split (the back page renders at
-a slightly smaller type scale via a `.back` wrapper). It reports the rendered
+stable between renders. Fetched data is cached in `mock_data.json` (same
+folder) — renders reuse it, so the PDF doesn't hit the APIs each time; pass
+`--refresh` to re-pull live data and re-save the cache. On a refresh the mock
+scans nearby planes until one has a usable track (`--monitor SECONDS` extends
+the window; `--once` for a single pass). All inputs are optional: with no
+creds/network it still renders with placeholders.
+
+**Page backgrounds** — each side is a full-bleed `.sheet` flex row
+(`@page size: Letter landscape; margin: 0`) carrying a saved background
+image (`bg-lines.png` outside, `bg-leaf.png` inside) with dashed fold guides
+between panels; the cover panel layers `bg-blur.png` on top for contrast.
+The images were generated once via Pollinations.ai by
+`fetch_backgrounds.py`, which crops the watermark strip, then blurs + washes
+each toward white so they stay low-contrast under text. They're checked in —
+normal PDF renders never hit the network; re-run
+`fetch_backgrounds.py --refresh [--seed N]` only to try a new look. The images are then converted with the markdown to styled HTML
+and printed via headless Chrome (`--print-to-pdf`). It reports the rendered
 page count — if it ever exceeds 2, trim the guide or tighten the CSS in the
-script.
+script (panels clip with `overflow: hidden`, so a quiet overflow shows up as
+missing content at a panel's bottom edge — eyeball the PDF after editing).
 

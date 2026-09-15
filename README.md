@@ -4,14 +4,15 @@
 [![PR - Lint & Build](https://github.com/improving-minnesota/cyd-dashboard/actions/workflows/pr.yml/badge.svg)](https://github.com/improving-minnesota/cyd-dashboard/actions/workflows/pr.yml)
 [![Release](https://img.shields.io/github/v/release/improving-minnesota/cyd-dashboard)](https://github.com/improving-minnesota/cyd-dashboard/releases)
 
-A self-contained, AI Vibe-coded, **ESP32 touchscreen dashboard** for the **Cheap Yellow Display
-(CYD)** — the common ESP32-2432S028R board with a built-in 2.8" 320x240
-touchscreen. It turns that little display into a live weather station, flight
+A self-contained, AI Vibe-coded, **ESP32 touchscreen dashboard** for **Cheap
+Yellow Display (CYD)-family boards** — ESP32 boards with a built-in color
+touchscreen, like the 2.8" 2432S028R and the 4" E32R40T. It turns that little display into a live weather station, flight
 tracker, and Govee pool temp monitor. Once it's set up it runs on its own over your WiFi —
 no computer needed.
 
-> **New here?** Grab the printable two-page [User Guide (PDF)](docs/user-guide/DEVELOPER-USERGUIDE.pdf)
-> — front page is setup, back page is everyday reference.
+> **Giving a device to a non-techie friend?** Grab the printable two-page
+> [User Guide (PDF)](docs/user-guide/DEVELOPER-USERGUIDE.pdf) — written for
+> non-technical users; front page is setup, back page is everyday reference.
 
 <table>
   <tr>
@@ -24,7 +25,7 @@ no computer needed.
 
 ## What it does
 
-- **Clock** — a big time and date in the header.
+- **Clock** — a big time and date in the header, with a small AM/PM marker.
 - **Weather** — current temperature, "feels like", humidity, sunrise/sunset, and
   a 7-day forecast, refreshed every 10 minutes. The current temperature is also
   logged to flash (always on) and graphed over Day / Week / Month / Year with the
@@ -49,19 +50,35 @@ no computer needed.
   water temperature from a Govee thermometer, with a history graph
   (Day / Week / Month / Year) showing the low, average, and high.
 - **Sleep mode** — deep-sleeps overnight and wakes on touch.
+- **Alarms** — up to 6 time-of-day alarms, each with its own days-of-week mask
+  and notification pattern (Blink, Rapid, Double, Colors, Pulse — each plays a
+  matching LED + speaker alert). Sound requires an **external speaker**
+  plugged into the board's JST speaker header (GPIO 26) — the CYD has no
+  built-in speaker, so without one alarms flash the LED only. When one
+  fires, big **Dismiss** and **Snooze** (5 min) buttons appear; up to 3
+  snoozes, then it dismisses itself for the day. A small
+  bell icon appears next to the header clock while any alarm is enabled.
+  Alarms fire on time even during Sleep Mode — the device wakes at the alarm
+  time — and a snoozed or missed alarm still fires after a power loss.
 - **Firmware updates** — updates itself over WiFi from GitHub, either
   automatically once a day or manually from the About screen.
 
 ## Hardware
 
-This firmware is built for the **Cheap Yellow Display (CYD)** — specifically the
-**ESP32-2432S028R** board. It combines an ESP32 microcontroller, a 2.8"
-(320x240) color display, and a resistive touchscreen in a single ready-to-run
-unit, so no separate wiring or external display is needed.
+This firmware is built for the **Cheap Yellow Display (CYD)** family. Two
+boards are supported:
 
-The code is tailored to this board's exact wiring (TFT on HSPI, touch on VSPI,
-touch IRQ on GPIO 36), so **it won't work on other ESP32 boards or displays
-without modification**. Developers can find the wiring and flashing details in
+- **ESP32-2432S028R** — the common 2.8" (320x240) board.
+- **E32R40T** — the 4.0" (480x320) variant; the same UI is scaled up with
+  smoother fonts.
+
+Each combines an ESP32, a color display, and a resistive touchscreen in a
+single ready-to-run unit, so no separate wiring or external display is needed.
+
+The code is tailored to these boards' exact wiring, so **it won't work on
+other ESP32 boards or displays without modification** — new variants get their
+own `-DCYD_<MODEL>` build flag (see [DEVELOPER.md](DEVELOPER.md) → "Board
+variants"). Developers can find the wiring and flashing details in
 [DEVELOPER.md](DEVELOPER.md).
 
 ## Getting started
@@ -94,7 +111,8 @@ Where to get each credential is explained below.
 - **OpenSky (optional, for flights)** — flights work out of the box, but you can
   raise the rate limit by making a free account at
   [opensky-network.org](https://opensky-network.org) and creating an API client
-  under **My OpenSky → Account** to get a client ID and secret.
+  under **My OpenSky → Account** — that downloads a file containing your
+  **client ID** and **client secret**.
 - **Govee (optional, for the pool temp monitor)** — create a free developer
   account at [developer.govee.com](https://developer.govee.com) and generate an
   API key.
@@ -102,6 +120,12 @@ Where to get each credential is explained below.
 ## Using the device
 
 - Tap the **Settings** cog to open the settings menu.
+- Tap the **clock/date** in the header to open **Alarms**. Set the time with
+  the **▼**/**▲** arrows beside it — hour on the left, minute on the right
+  (the hour wraps through AM/PM on its own) — or tap the time itself to type
+  it, toggle the weekdays it applies to, and pick a notification pattern. Use
+  **New**/**<**/**>** to manage multiple alarms; **Del** asks for
+  confirmation before removing one.
 - With **Flight Tracker** on, the header shows your remaining **OpenSky
   credits** as three small readouts — **CRP** (radar polling), **CRL** (route
   lookup), and **CFT** (flight tracking). A value is **grey** when healthy,
@@ -125,24 +149,35 @@ Where to get each credential is explained below.
 
 Defaults for a freshly reset device are shown with each setting.
 
-- **General** — set the **Clock Color** (the dashboard's clock/header bar) and
-  toggle **Auto-Update** (whether the device checks for and installs firmware
-  updates). Defaults: clock color **blue**, auto-update **on** (for release
-  builds).
+- **General** — set the **Clock Color** (the dashboard's clock/header bar) on
+  a swatch picker (tap a hue, then a shade or grey), toggle **Auto-Update** (whether the device
+  checks for and installs firmware updates), pick the **Units**
+  (**Imperial** ft/mph/mi, **Metric** m/kts/km, or **Aviation** ft/kts/nm —
+  also sets weather and pool temps to °F or °C), and choose a **12 or
+  24-hour clock** (24-hour hides the AM/PM marker). The picked color also
+  themes the
+  ordinary screen buttons (black text on light colors, white on dark).
+  Defaults: color **blue**, auto-update **on** (for release builds), units
+  **imperial**, clock **12-hour**.
 - **Location** — set your coordinates so weather and flights are accurate. Use
   **Set** to type them, **Search Address**, or **Find by IP**. Default: none —
   on first boot it's guessed from your IP, otherwise your saved location.
   **Search Address** keeps your last search so you can fix it, and shows a clear
   message if the address can't be found.
-- **Network** — your WiFi network (scan or enter it manually), plus **IP
+- **Network** — your WiFi network (it scans in the background — pick from the
+  list once "Scanning" finishes, or enter it manually), plus **IP
   setup**: addressing can stay on **DHCP** (the default, works as before) or be
   switched to **Static** with an IP address, subnet mask, gateway, and DNS
   server, and you can set a device **hostname** (default `cyd-dashboard`) in
   either mode. A blank DNS
   uses the gateway; incomplete static fields fall back to DHCP. Changes apply
   on the next connect.
-- **Flight Tracker** — on/off, units (mi or km), radar radius, altitude ceiling,
-  poll interval, the countdown/timer bar on the dashboard, your home airport (ICAO),
+- **Flight Tracker** — on/off, radar radius (how far away to look,
+  shown in mi/km/nm), altitude ceiling (planes above it are ignored, shown in
+  ft/m — radius and ceiling follow the Units setting under General, and
+  switching units keeps the same number and re-reads it in the new
+  unit), poll interval, the countdown/timer bar on the dashboard, your home
+  airport (ICAO),
   a watched callsign (blinks white while its flight details are shown), and
   whether to blink the LED for an overhead flight. Also where you enter your
   OpenSky credentials. The LED blinks blue for every overhead flight, yellow when
@@ -156,7 +191,7 @@ Defaults for a freshly reset device are shown with each setting.
   pool temp. Any
   settings or graph screen automatically returns to the main dashboard after 2
   minutes of inactivity.
-  Defaults: **on**, imperial units,
+  Defaults: **on**,
   **3.5 mi** radius, **15,000 ft** ceiling, **30 s** poll, timer **off**, no home
   airport set, no watched callsign, blinking **on**. If your OpenSky **radar-polling** credits run
   out, the poll backs off to a slower 15-minute recovery check until they refill
@@ -173,9 +208,10 @@ Defaults for a freshly reset device are shown with each setting.
 - **Reset** — confirms before wiping and shows a message saying exactly what's
   being reset. **Factory Reset** clears settings *and* all files (including
   pool and weather temperature history and airline logos) and touch
-  calibration, so the next boot asks you to recalibrate — if the device came
-  pre-loaded with airline logos, restoring them requires reloading them from a
-  computer; **Settings** clears settings and credentials; **Graph Data**
+  calibration, so the next boot asks you to recalibrate — ⚠️ if the device
+  came pre-loaded with airline logos, restoring logos requires regenerating
+  and reloading them from a development computer; **Settings** clears settings and
+  credentials; **Graph Data**
   clears pool and weather temperature history. All three reboot the device.
   **Restart** reboots without clearing anything; **Cancel** changes nothing.
 

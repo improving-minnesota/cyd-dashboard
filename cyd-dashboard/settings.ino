@@ -9,17 +9,14 @@
 
 void drawSettings() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
   tft.print("Settings");
 
   // Back button (top-right)
-  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
-  tft.setCursor(274, 7);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
-  tft.print("Back");
+  backBtn("Back");
 
   // 2-column grid, alphabetical: About, Calibrate Touch, Flight Tracker,
   // General, Help, Location, Network, Pool Temp, Reset, Sleep Mode. Reset is
@@ -29,15 +26,16 @@ void drawSettings() {
                           "Help", "Location", "Network", "Pool Temp",
                           "Reset", "Sleep Mode" };
   const int n = 10, rowH = 34, step = 38;
-  const int colX[2] = { 10, 164 };   // left / right column x
-  const int colW = 146;              // button width
+  const int colW = (DISP_W - 30) / 2;        // 10px margins + 10px column gap
+  const int colX[2] = { 10, 10 + colW + 10 };
   const int y0 = 42;                 // first row y
   for (int i = 0; i < n; i++) {
     int row = i / 2, col = i % 2;
     int y = y0 + row * step;
-    uint16_t c = (strcmp(items[i], "Reset") == 0) ? TFT_MAROON : TFT_NAVY;   // Reset -> red
-    tft.fillRoundRect(colX[col], y, colW, rowH, 6, c);
-    tft.setTextColor(TFT_WHITE, c);
+    bool rst = strcmp(items[i], "Reset") == 0;   // Reset -> danger color
+    if (rst) tft.fillRoundRect(colX[col], y, colW, rowH, 6, dangerCol());
+    else     themeBtn(colX[col], y, colW, rowH, 6);
+    tft.setTextColor(rst ? btnFg(dangerCol()) : btnFg(btnCol()), rst ? dangerCol() : btnCol());
     tft.setTextFont(2);
     tft.setCursor(colX[col] + 8, y + (rowH - 16) / 2);
     tft.print(items[i]);
@@ -47,16 +45,13 @@ void drawSettings() {
 // ---- About page ----
 void drawAbout() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
   tft.print("Settings > About");
 
-  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
-  tft.setCursor(274, 7);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
-  tft.print("Back");
+  backBtn("Back");
 
   // Body (compact, to leave room for the upgrade section below)
   tft.setTextFont(2);
@@ -86,7 +81,7 @@ void drawAbout() {
 #endif
 
   // Divider above the upgrade section
-  tft.drawFastHLine(8, 130, 304, TFT_DARKGREY);
+  tft.drawFastHLine(8, 130, DISP_W - 16, TFT_DARKGREY);
 
   // Upgrade section
   tft.setTextFont(2);
@@ -100,9 +95,9 @@ void drawAbout() {
     tft.print(g_updateLatest);
     tft.print(")");
     // Install button (right)
-    tft.fillRoundRect(218, 140, 76, 26, 5, TFT_GREEN);
-    tft.setTextColor(TFT_BLACK, TFT_GREEN);
-    tft.setCursor(236, 147);
+    themeBtn(RX(218), 140, 76, 26, 5);
+    tft.setTextColor(btnFg(btnCol()), btnCol());
+    tft.setCursor(RX(236), 147);
     tft.print("Install");
   } else if (g_updateState == 3) {
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -120,9 +115,9 @@ void drawAbout() {
 }
 
 void handleAboutTouch(uint16_t x, uint16_t y) {
-  if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_SETTINGS; g_otaFromAbout = false; dirty = true; return; }
+  if (inRect(x, y, RX(265), 4, RX(315), 24)) { g_screen = SCR_SETTINGS; g_otaFromAbout = false; dirty = true; return; }
   // Install button (only shown when an update is available)
-  if (g_updateState == 2 && inRect(x, y, 218, 140, 294, 166)) {
+  if (g_updateState == 2 && inRect(x, y, RX(218), 140, RX(294), 166)) {
     g_otaVersion = g_updateLatest;
     g_otaUrl = g_updateAsset;
     g_otaSha256 = g_updateDigest;
@@ -138,8 +133,8 @@ void handleAboutTouch(uint16_t x, uint16_t y) {
 #define HELP_TOP    36
 #define HELP_BOT    222
 #define HELP_X      8
-#define HELP_W      286
-#define HELP_SB_X   304
+#define HELP_W      (DISP_W - 34)
+#define HELP_SB_X   (DISP_W - 16)
 #define HELP_SB_W   10
 #define HELP_LINEH  9
 
@@ -148,9 +143,10 @@ static const char* const kHelpLines[] = {
   "---------------",
   "ESP32 touchscreen dashboard",
   "for the Cheap Yellow Display",
-  "(CYD): the ESP32-2432S028R",
-  "board with a built-in 2.8\"",
-  "320x240 color touchscreen.",
+  "(CYD) boards with a built-in",
+  "color touchscreen - like the",
+  "2.8\" 2432S028R and the 4\"",
+  "E32R40T.",
   "Live weather, flight tracker,",
   "and Govee pool temp monitor.",
   "Once set up, it runs on its",
@@ -225,6 +221,21 @@ static const char* const kHelpLines[] = {
   "  the idle screen to open it.",
   "Sleep: deep-sleeps overnight",
   "and wakes on touch.",
+  "Alarms: tap the header clock.",
+  "  Up to 6 alarms with weekday",
+  "  masks and an LED + sound",
+  "  alert pattern. Sound needs",
+  "  an external speaker on the",
+  "  JST port; without one the",
+  "  LED flashes only. A bell icon",
+  "  shows beside the clock when",
+  "  any alarm is on.",
+  "  On fire: Dismiss or Snooze",
+  "  (5 min). An alarm snoozes",
+  "  up to 3x then dismisses",
+  "  for the day. Alarms fire",
+  "  on time during Sleep Mode",
+  "  and survive power loss.",
   "",
   "GETTING STARTED",
   "Upload a compiled image to",
@@ -263,10 +274,11 @@ static const char* const kHelpLines[] = {
   "   network name and password.",
   "OpenSky (flights, optional):",
   "   free account at",
-  "   opensky-network.org; create",
-  "   an API client under My",
-  "   OpenSky for a client ID and",
-  "   secret.",
+  "   opensky-network.org -> My",
+  "   OpenSky -> Account; making",
+  "   an API client downloads a",
+  "   file with your client ID",
+  "   and secret.",
   "Govee (pool, optional): free",
   "   developer account at",
   "   developer.govee.com;",
@@ -274,7 +286,11 @@ static const char* const kHelpLines[] = {
   "",
   "SETTINGS GUIDE (defaults)",
   "General: auto-update (on),",
-  "   clock color (blue).",
+  "   theme color picker (blue)",
+  "   - also colors buttons;",
+  "   units Imperial/Metric/",
+  "   Aviation (also weather F/C);",
+  "   clock 12h or 24h.",
   "Location: your coordinates;",
   "   IP guess on first boot.",
   "   Search Address keeps your",
@@ -282,10 +298,14 @@ static const char* const kHelpLines[] = {
   "Network: WiFi network plus",
   "   IP setup - DHCP or a",
   "   static IP, mask, gateway,",
-  "   DNS and hostname.",
-  "Flight Tracker (on): units",
-  "   (imperial), radius 3.5 mi,",
-  "   ceiling 15000 ft, poll 30s,",
+  "   DNS and hostname. The",
+  "   list shows 'Scanning'",
+  "   while it searches.",
+  "Flight Tracker (on): radius",
+  "   3.5 (mi/km/nm: how far",
+  "   away to look), ceiling",
+  "   15000 (ft/m: ignore planes",
+  "   above this), poll 30s,",
   "   timer bar on/off (off),",
   "   home airport (ICAO),",
   "   watch callsign (white blink),",
@@ -306,9 +326,10 @@ static const char* const kHelpLines[] = {
   "   weather temp history.",
   "   Factory Reset clears ALL",
   "   incl. touch cal - airline",
-  "   logos must be reloaded",
-  "   from a computer. Restart",
-  "   reboots; Cancel keeps all.",
+  "   logos must be regenerated",
+  "   & reloaded from a dev",
+  "   computer. Restart reboots;",
+  "   Cancel keeps all.",
   "",
   "TROUBLESHOOTING",
   "Screen not accurate? Press and",
@@ -334,15 +355,12 @@ static const int kNumHelpLines = sizeof(kHelpLines) / sizeof(kHelpLines[0]);
 
 void drawHelp() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
   tft.print("Settings > Help");
-  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
-  tft.setCursor(274, 7);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
-  tft.print("Back");
+  backBtn("Back");
 
   const int viewH = HELP_BOT - HELP_TOP;
   const int contentH = kNumHelpLines * HELP_LINEH;
@@ -378,7 +396,7 @@ void drawHelp() {
 }
 
 void handleHelpTouch(uint16_t x, uint16_t y) {
-  if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }  // Back
+  if (inRect(x, y, RX(265), 4, RX(315), 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }  // Back
 
   const int viewH = HELP_BOT - HELP_TOP;
   const int contentH = kNumHelpLines * HELP_LINEH;
@@ -400,72 +418,235 @@ void handleHelpTouch(uint16_t x, uint16_t y) {
 }
 
 // ---- General page ----
-// Preset clock-bar colors shown as tappable swatches (see "Clock Color").
-// White/light-gray are intentionally excluded: the clock text is white, so a
-// near-white bar would be unreadable. The two added colors are dark enough for
-// white text.
-static const uint16_t kClockColors[] = {
-  TFT_BLUE, TFT_NAVY, TFT_CYAN, TFT_GREEN, TFT_DARKGREEN, TFT_DARKCYAN,
-  TFT_YELLOW, TFT_ORANGE, TFT_RED, TFT_MAROON, TFT_PURPLE, TFT_MAGENTA,
-};
-static const int kNumClockColors = sizeof(kClockColors) / sizeof(kClockColors[0]);
-static const int kClockSw = 46, kClockSh = 22, kClockGap = 4;
-static const int kClockX0 = 8, kClockY0 = 44;
-static const int kClockPerRow = 6;
+// ---- Clock Color picker (SCR_COLORPICK) ----
+// Swatch palette built for tap-only resistive touch: three rows of large
+// cells - hue, shades of the picked hue (pale -> pure -> dark), and a
+// greyscale ramp. Any color lands in at most two taps and a live
+// header-band preview shows the result. The pick is stored as the RGB565
+// hex value in NVS ("clkcol") and also drives every theme-colored button.
+int g_pickH = 210;    // 0-359
+int g_pickS = 255;    // 0-255
+int g_pickV = 220;    // 0-255
+
+// HSV -> RGB565.
+uint16_t hsv565(int h, int s, int v) {
+  h = ((h % 360) + 360) % 360;
+  int reg = h / 60;
+  int f = (h % 60) * 255 / 60;
+  int p = v * (255 - s) / 255;
+  int q = v * (255 - s * f / 255) / 255;
+  int t = v * (255 - s * (255 - f) / 255) / 255;
+  int r, g, b;
+  switch (reg) {
+    case 0:  r = v; g = t; b = p; break;
+    case 1:  r = q; g = v; b = p; break;
+    case 2:  r = p; g = v; b = t; break;
+    case 3:  r = p; g = q; b = v; break;
+    case 4:  r = t; g = p; b = v; break;
+    default: r = v; g = p; b = q; break;
+  }
+  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+}
+
+// Seed the picker's axes from the current RGB565 theme color. A pure grey
+// has no hue — keep the last one so the hue row's marker doesn't jump to
+// red.
+void colorPickEnter() {
+  int h, s; colorHS(g_clockCol, h, s);
+  if (s) g_pickH = h;
+  g_pickS = s;
+  g_pickV = max(((g_clockCol >> 11) & 31) * 255 / 31,
+             max(((g_clockCol >> 5) & 63) * 255 / 63,
+                 (g_clockCol & 31) * 255 / 31));
+}
+
+#define PICK_X0 16
+#define PICK_W (DISP_W - 32)
+#define PICK_COLS 12
+#define PICK_CW (PICK_W / PICK_COLS)   // 24 px cells
+#define PICK_RH 30
+#define PICK_GAP 8
+#define PICK_HUE_Y 84
+#define PICK_SHADE_Y (PICK_HUE_Y + PICK_RH + PICK_GAP)
+#define PICK_GREY_Y (PICK_SHADE_Y + PICK_RH + PICK_GAP)
+
+// Shade swatch i of the picked hue: first half ramps pale -> pure,
+// second half pure -> near black.
+uint16_t pickShade(int i) {
+  int s = i < PICK_COLS / 2 ? 40 + i * 43 : 255;
+  int v = i < PICK_COLS / 2 ? 255 : 255 - (i - PICK_COLS / 2 + 1) * 37;
+  return hsv565(g_pickH, s, v);
+}
+
+// Greyscale swatch i: white -> black.
+uint16_t pickGrey(int i) {
+  return hsv565(0, 0, 255 - i * 255 / (PICK_COLS - 1));
+}
+
+// Selection ring: black outer + white inner reads on any swatch color.
+void pickMark(int i, int y) {
+  tft.drawRect(PICK_X0 + i * PICK_CW - 2, y - 2, PICK_CW + 2, PICK_RH + 4, TFT_BLACK);
+  tft.drawRect(PICK_X0 + i * PICK_CW - 1, y - 1, PICK_CW,     PICK_RH + 2, TFT_WHITE);
+}
+
+void drawColorPick() {
+  tft.fillScreen(TFT_BLACK);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol);
+  tft.setTextFont(2);
+  tft.setCursor(8, 6);
+  tft.print("Settings > Clock Color");
+
+  backBtn("Back");
+
+  // Live preview: the picked color drawn as the dashboard header band, with
+  // text in the same adaptive color the real header uses.
+  uint16_t pc = hsv565(g_pickH, g_pickS, g_pickV);
+  uint16_t pfg = btnFg(pc);
+  tft.fillRect(8, 36, DISP_W - 16, 34, pc);
+  tft.setTextColor(pfg, pc);
+  tft.setTextFont(2);
+  tft.setCursor(14, 47);
+  tft.print("Sun Sep 13");
+#ifdef CYD_E32R40T
+  tft.setTextFont(6);          // preview the real header clock font
+  tft.setCursor(150, 40);
+#else
+  tft.setTextSize(2);
+  tft.setCursor(150, 38);
+#endif
+  tft.print("04:23");
+  tft.setTextSize(1);
+  tft.setTextFont(1);
+  tft.setCursor(RX(236), 42);
+  tft.print("PM");
+
+  // Hue row: 12 full-saturation hues; the picked hue's cell is ringed.
+  for (int i = 0; i < PICK_COLS; i++)
+    tft.fillRect(PICK_X0 + i * PICK_CW, PICK_HUE_Y, PICK_CW - 2, PICK_RH,
+                 hsv565(i * 360 / PICK_COLS, 255, 255));
+  pickMark(constrain(g_pickH * PICK_COLS / 360, 0, PICK_COLS - 1), PICK_HUE_Y);
+
+  // Shade row (of the picked hue) and greyscale row; the cell matching the
+  // current pick gets the ring.
+  for (int i = 0; i < PICK_COLS; i++) {
+    uint16_t sc = pickShade(i), gc = pickGrey(i);
+    tft.fillRect(PICK_X0 + i * PICK_CW, PICK_SHADE_Y, PICK_CW - 2, PICK_RH, sc);
+    tft.fillRect(PICK_X0 + i * PICK_CW, PICK_GREY_Y,  PICK_CW - 2, PICK_RH, gc);
+    if (sc == pc) pickMark(i, PICK_SHADE_Y);
+    if (gc == pc) pickMark(i, PICK_GREY_Y);
+  }
+
+  // Hex readout + hint.
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.setCursor(PICK_X0, PICK_GREY_Y + PICK_RH + 10);
+  tft.printf("0x%04X  rgb(%d,%d,%d)", pc,
+             (pc >> 11 & 31) * 255 / 31, (pc >> 5 & 63) * 255 / 63, (pc & 31) * 255 / 31);
+  tft.setCursor(PICK_X0, PICK_GREY_Y + PICK_RH + 24);
+  tft.print("Tap a hue, then a shade or grey.");
+}
+
+void handleColorPickTouch(uint16_t x, uint16_t y) {
+  if (inRect(x, y, RX(265), 4, RX(315), 24)) { g_screen = SCR_GENERAL; dirty = true; return; }
+  if (!inRect(x, y, PICK_X0, PICK_HUE_Y - 4, PICK_X0 + PICK_W - 1, PICK_GREY_Y + PICK_RH + 4)) return;
+  int i = constrain((int)(x - PICK_X0) * PICK_COLS / PICK_W, 0, PICK_COLS - 1);
+  if (inRect(x, y, PICK_X0, PICK_HUE_Y - 4, PICK_X0 + PICK_W - 1, PICK_HUE_Y + PICK_RH + 4)) {
+    g_pickH = i * 360 / PICK_COLS;
+    if (!g_pickS) { g_pickS = 255; g_pickV = 255; }   // grey has no hue - jump to full color
+  } else if (inRect(x, y, PICK_X0, PICK_SHADE_Y - 4, PICK_X0 + PICK_W - 1, PICK_SHADE_Y + PICK_RH + 4)) {
+    if (i < PICK_COLS / 2) { g_pickS = 40 + i * 43; g_pickV = 255; }
+    else                   { g_pickS = 255; g_pickV = 255 - (i - PICK_COLS / 2 + 1) * 37; }
+  } else if (inRect(x, y, PICK_X0, PICK_GREY_Y - 4, PICK_X0 + PICK_W - 1, PICK_GREY_Y + PICK_RH + 4)) {
+    g_pickS = 0;
+    g_pickV = 255 - i * 255 / (PICK_COLS - 1);
+  } else return;
+  g_clockCol = hsv565(g_pickH, g_pickS, g_pickV);
+  prefs.begin("flight", false); prefs.putUInt("clkcol", g_clockCol); prefs.end();
+  dirty = true;
+}
 
 void drawGeneral() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
   tft.print("Settings > General");
 
-  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
-  tft.setCursor(274, 7);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
-  tft.print("Back");
+  backBtn("Back");
 
-  // Clock Color: label + swatches (tap to change)
+  // Clock Color: label + a swatch of the current color; tapping the swatch
+  // opens the swatch-row color picker. The picked color is also the theme
+  // color for ordinary buttons across the UI.
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextFont(2);
-  tft.setCursor(8, 40);
+  tft.setCursor(8, 44);
   tft.print("Clock Color");
-  for (int i = 0; i < kNumClockColors; i++) {
-    int row = i / kClockPerRow, col = i % kClockPerRow;
-    int x = kClockX0 + col * (kClockSw + kClockGap);
-    int y = kClockY0 + row * (kClockSh + kClockGap);
-    tft.fillRoundRect(x, y, kClockSw, kClockSh, 4, kClockColors[i]);
-    if (g_clockCol == kClockColors[i]) {   // highlight the selected one
-      tft.drawRect(x - 1, y - 1, kClockSw + 2, kClockSh + 2, TFT_WHITE);
-    }
-  }
+  uint16_t cc = g_clockCol;   // raw picked color (not the button-adjusted one)
+  tft.fillRoundRect(RX(190), 40, 122, 24, 5, cc);
+  tft.drawRoundRect(RX(189), 39, 124, 26, 5, TFT_WHITE);
 
   // Auto-Update toggle
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextFont(2);
-  tft.setCursor(8, 112);
+  tft.setCursor(8, 80);
   tft.print("Auto-Update");
   tft.setTextColor(g_autoUpdate ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
-  tft.setCursor(150, 112);
+  tft.setCursor(150, 80);
   tft.print(g_autoUpdate ? "ON" : "OFF");
-  tft.fillRoundRect(230, 108, 82, 24, 5, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.setTextFont(1);
-  tft.setCursor(250, 115);
+  themeBtn(RX(230), 76, 82, 24, 5);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
+  tft.setTextFont(FONT_AUX);
+  tft.setCursor(RX(250), 83);
   tft.print("Toggle");
 
   tft.setTextFont(1);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.setCursor(8, 140);
+  tft.setCursor(8, 108);
   tft.print("Checks for new firmware once");
-  tft.setCursor(8, 152);
+  tft.setCursor(8, 120);
   tft.print("a day and installs it.");
+
+  // Units cycle: Imperial / Metric / Aviation. Drives flight distances,
+  // speeds and altitudes plus weather/pool temperatures (F or C).
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextFont(2);
+  tft.setCursor(8, 140);
+  tft.print("Units");
+  tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
+  tft.setCursor(150, 140);
+  tft.print(unitsName());
+  themeBtn(RX(230), 136, 82, 24, 5);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
+  tft.setTextFont(FONT_AUX);
+  tft.setCursor(RX(250), 143);
+  tft.print("Toggle");
+
+  // Clock format: 12h (AM/PM marker) or 24h.
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextFont(2);
+  tft.setCursor(8, 176);
+  tft.print("Clock");
+  tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
+  tft.setCursor(150, 176);
+  tft.print(g_clock24 ? "24h" : "12h");
+  themeBtn(RX(230), 172, 82, 24, 5);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
+  tft.setTextFont(FONT_AUX);
+  tft.setCursor(RX(250), 179);
+  tft.print("Toggle");
+
+  tft.setTextFont(1);
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.setCursor(8, 204);
+  tft.print("Units also set weather/pool F or C.");
+  tft.setCursor(8, 216);
+  tft.print("24h clock hides the AM/PM marker.");
 }
 
 void handleGeneralTouch(uint16_t x, uint16_t y) {
-  if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }
-  if (inRect(x, y, 230, 108, 312, 132)) {  // Auto-Update toggle
+  if (inRect(x, y, RX(265), 4, RX(315), 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }
+  if (inRect(x, y, RX(230), 76, RX(312), 100)) {  // Auto-Update toggle
     g_autoUpdate = !g_autoUpdate;
     prefs.begin("flight", false); prefs.putBool("autoupd", g_autoUpdate); prefs.end();
     // Turning auto-update ON clears the last-scan date so it can try again today.
@@ -476,33 +657,47 @@ void handleGeneralTouch(uint16_t x, uint16_t y) {
     dirty = true;
     return;
   }
-  // Clock Color swatch taps
-  for (int i = 0; i < kNumClockColors; i++) {
-    int row = i / kClockPerRow, col = i % kClockPerRow;
-    int x0 = kClockX0 + col * (kClockSw + kClockGap);
-    int y0 = kClockY0 + row * (kClockSh + kClockGap);
-    if (inRect(x, y, x0, y0, x0 + kClockSw, y0 + kClockSh)) {
-      g_clockCol = kClockColors[i];
-      prefs.begin("flight", false); prefs.putUInt("clkcol", g_clockCol); prefs.end();
-      dirty = true;
-      return;
-    }
+  // Clock Color: tap the swatch -> swatch-row color picker
+  if (inRect(x, y, RX(180), 36, RX(316), 68)) {
+    colorPickEnter();
+    g_screen = SCR_COLORPICK;
+    dirty = true;
+    return;
+  }
+  if (inRect(x, y, RX(230), 136, RX(312), 160)) {  // Units cycle: Imperial/Metric/Aviation
+    // Keep the displayed numbers and reinterpret them in the new unit
+    // (3.5 mi -> 3.5 km), re-storing them in miles / feet.
+    float rDisp = g_radiusMi * distConv();
+    float cDisp = g_ceilingFt * altConv();
+    g_units = (g_units + 1) % 3;
+    g_radiusMi  = constrain(rDisp, 1.0f, 10.0f) / distConv();
+    g_ceilingFt = (int)roundf(constrain(cDisp, 3000.0f, 30000.0f) / altConv());
+    prefs.begin("flight", false);
+    prefs.putInt("units", g_units);
+    prefs.putFloat("radius", g_radiusMi);
+    prefs.putInt("ceiling", g_ceilingFt);
+    prefs.end();
+    dirty = true;
+    return;
+  }
+  if (inRect(x, y, RX(230), 172, RX(312), 196)) {  // Clock 12h/24h toggle
+    g_clock24 = !g_clock24;
+    prefs.begin("flight", false); prefs.putBool("clock24", g_clock24); prefs.end();
+    dirty = true;
+    return;
   }
 }
 
 // ---- Location page ----
 void drawLocation() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
   tft.print("Settings > Location");
 
-  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
-  tft.setCursor(274, 7);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
-  tft.print("Back");
+  backBtn("Back");
 
   // current coordinates + edit button
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -513,22 +708,22 @@ void drawLocation() {
   tft.setTextFont(1);
   tft.setCursor(8, 62);
   tft.printf("%.4f, %.4f", g_lat, g_lon);
-  tft.fillRoundRect(240, 40, 72, 24, 5, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.setTextFont(1);
-  tft.setCursor(254, 47);
+  themeBtn(RX(240), 40, 72, 24, 5);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
+  tft.setTextFont(FONT_AUX);
+  tft.setCursor(RX(254), 47);
   tft.print("Set");
 
   // Search by address
-  tft.fillRoundRect(10, 96, 300, 34, 6, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  themeBtn(10, 96, DISP_W - 20, 34, 6);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
   tft.setTextFont(2);
   tft.setCursor(20, 104);
   tft.print("Search Address");
 
   // Find by IP
-  tft.fillRoundRect(10, 140, 300, 34, 6, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  themeBtn(10, 140, DISP_W - 20, 34, 6);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
   tft.setCursor(20, 148);
   tft.print("Find by IP");
 
@@ -560,19 +755,16 @@ void drawLocation() {
 // Flight Tracker settings screen
 void drawFtracker() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
   tft.print("Settings > Flight Tracker");
 
-  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
-  tft.setCursor(274, 7);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
-  tft.print("Back");
+  backBtn("Back");
 
   if (g_ftPage == 0) {
-    // Page 1: Enabled, Units, sliders
+    // Page 1: Enabled + sliders (Units moved to General)
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextFont(2);
     tft.setCursor(8, 40);
@@ -580,30 +772,27 @@ void drawFtracker() {
     tft.setTextColor(g_trackEnabled ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(150, 40);
     tft.print(g_trackEnabled ? "ON" : "OFF");
-    tft.fillRoundRect(230, 36, 82, 24, 5, TFT_NAVY);
-    tft.setTextColor(TFT_WHITE, TFT_NAVY);
-    tft.setTextFont(1);
-    tft.setCursor(250, 43);
+    themeBtn(RX(230), 36, 82, 24, 5);
+    tft.setTextColor(btnFg(btnCol()), btnCol());
+    tft.setTextFont(FONT_AUX);
+    tft.setCursor(RX(250), 43);
     tft.print("Toggle");
 
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.setTextFont(2);
-    tft.setCursor(8, 76);
-    tft.print("Units");
-    tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
-    tft.setCursor(150, 76);
-    tft.print(g_metric ? "Metric" : "Imperial");
-    tft.fillRoundRect(230, 72, 82, 24, 5, TFT_NAVY);
-    tft.setTextColor(TFT_WHITE, TFT_NAVY);
+    // Radius and ceiling are shown and edited in the selected unit
+    // (mi/km/nm, ft/m) but stored in miles / feet. Units live under General.
+    char rlbl[20], clbl[20];
+    snprintf(rlbl, sizeof rlbl, "Radius (%s)", distUnit());
+    snprintf(clbl, sizeof clbl, "Ceiling (%s)", altUnit());
+    drawSlider(76, rlbl, g_radiusMi * distConv(), 1.0f, 10.0f, 0.5f, 1);
+    drawSlider(124, clbl, g_ceilingFt * altConv(), 3000, 30000, 1000, 0);
+    drawSlider(172, "Poll (s)", (float)g_pollSec, 10, 300, 10, 0);
     tft.setTextFont(1);
-    tft.setCursor(250, 79);
-    tft.print("Toggle");
-
-    drawSlider(104, "Radius", g_radiusMi, 1.0f, 10.0f, 0.5f, 1);
-    drawSlider(142, "Ceiling", (float)g_ceilingFt, 3000, 30000, 1000, 0);
-    drawSlider(180, "Poll (s)", (float)g_pollSec, 10, 300, 10, 0);
+    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    tft.setCursor(8, 102); tft.print("how far away to look");
+    tft.setCursor(8, 150); tft.print("ignore planes above this");
+    tft.setCursor(8, 198); tft.print("how often to check for planes");
   } else if (g_ftPage == 1) {
-    // Page 2: toggles + Home-airport route setting + Watch callsign
+    // Page 2: toggles + OpenSky credentials button
     // Blink for Flight toggle
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextFont(2);
@@ -612,10 +801,10 @@ void drawFtracker() {
     tft.setTextColor(g_blinkForFlight ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(150, 40);
     tft.print(g_blinkForFlight ? "ON" : "OFF");
-    tft.fillRoundRect(230, 36, 82, 24, 5, TFT_NAVY);
-    tft.setTextColor(TFT_WHITE, TFT_NAVY);
-    tft.setTextFont(1);
-    tft.setCursor(250, 43);
+    themeBtn(RX(230), 36, 82, 24, 5);
+    tft.setTextColor(btnFg(btnCol()), btnCol());
+    tft.setTextFont(FONT_AUX);
+    tft.setCursor(RX(250), 43);
     tft.print("Toggle");
 
     // Enable timer toggle
@@ -626,10 +815,10 @@ void drawFtracker() {
     tft.setTextColor(g_showTimer ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(150, 76);
     tft.print(g_showTimer ? "ON" : "OFF");
-    tft.fillRoundRect(230, 72, 82, 24, 5, TFT_NAVY);
-    tft.setTextColor(TFT_WHITE, TFT_NAVY);
-    tft.setTextFont(1);
-    tft.setCursor(250, 79);
+    themeBtn(RX(230), 72, 82, 24, 5);
+    tft.setTextColor(btnFg(btnCol()), btnCol());
+    tft.setTextFont(FONT_AUX);
+    tft.setCursor(RX(250), 79);
     tft.print("Toggle");
 
     // Show IATA toggle
@@ -640,126 +829,126 @@ void drawFtracker() {
     tft.setTextColor(g_showIata ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(150, 112);
     tft.print(g_showIata ? "ON" : "OFF");
-    tft.fillRoundRect(230, 108, 82, 24, 5, TFT_NAVY);
-    tft.setTextColor(TFT_WHITE, TFT_NAVY);
-    tft.setTextFont(1);
-    tft.setCursor(250, 115);
+    themeBtn(RX(230), 108, 82, 24, 5);
+    tft.setTextColor(btnFg(btnCol()), btnCol());
+    tft.setTextFont(FONT_AUX);
+    tft.setCursor(RX(250), 115);
     tft.print("Toggle");
 
-    drawEditRow(140, "Home airport (ICAO)", g_homeAirport.length() ? g_homeAirport : "--");
+    // OpenSky credentials entry
+    themeBtn(10, 150, DISP_W - 20, 24, 6);
+    tft.setTextColor(btnFg(btnCol()), btnCol());
+    tft.setTextFont(FONT_AUX);
+    tft.drawCentreString("OpenSky Credentials", CX, 155, FONT_AUX);
     tft.setTextFont(1);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-    tft.setCursor(8, 166);
-    tft.print("Used to blink red/green for");
-    tft.setCursor(8, 178);
-    tft.print("departures/arrivals. Empty = off.");
-
-    drawEditRow(190, "Watch callsign", g_watchCallsign.length() ? g_watchCallsign : "--");
+    tft.setCursor(8, 184);
+    tft.print("Client ID/secret for a higher");
+    tft.setCursor(8, 195);
+    tft.print("OpenSky rate limit.");
   } else {
-    // Page 3: OpenSky credentials
-    tft.fillRoundRect(10, 40, 300, 24, 6, TFT_NAVY);
-    tft.setTextColor(TFT_WHITE, TFT_NAVY);
-    tft.setTextFont(2);
-    tft.setCursor(20, 46);
-    tft.print("OpenSky Credentials");
-
+    // Page 3: Home-airport route setting + Watch callsign
+    drawEditRow(48, "Home airport (ICAO)", g_homeAirport.length() ? g_homeAirport : "--");
     tft.setTextFont(1);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(8, 76);
-    tft.print("Client ID/secret for a higher");
-    tft.setCursor(8, 88);
-    tft.print("OpenSky rate limit.");
+    tft.print("Used to blink red/green for");
+    tft.setCursor(8, 87);
+    tft.print("departures/arrivals. Empty = off.");
+
+    drawEditRow(124, "Watch callsign", g_watchCallsign.length() ? g_watchCallsign : "--");
+    tft.setTextFont(1);
+    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    tft.setCursor(8, 152);
+    tft.print("Flights with this callsign blink");
+    tft.setCursor(8, 163);
+    tft.print("white on the header. Empty = off.");
   }
 
   // Pager (bottom): left/right arrows + page indicator
   tft.setTextFont(1);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.setCursor(140, 222);
+  tft.setCursor(CX - 20, 222);
   tft.printf("Page %d/3", g_ftPage + 1);
   if (g_ftPage > 0) {
-    tft.fillRoundRect(12, 214, 44, 26, 6, TFT_DARKGREY);
-    tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
+    themeBtn(12, 214, 44, 26, 6);
+    tft.setTextColor(btnFg(btnCol()), btnCol());
     tft.setTextFont(2);
     tft.setCursor(27, 220);
     tft.print("<");
   }
   if (g_ftPage < 2) {
-    tft.fillRoundRect(264, 214, 44, 26, 6, TFT_DARKGREY);
-    tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
+    themeBtn(RX(264), 214, 44, 26, 6);
+    tft.setTextColor(btnFg(btnCol()), btnCol());
     tft.setTextFont(2);
-    tft.setCursor(279, 220);
+    tft.setCursor(RX(279), 220);
     tft.print(">");
   }
 }
 
 void handleFtrackerTouch(uint16_t x, uint16_t y) {
-  if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }
+  if (inRect(x, y, RX(265), 4, RX(315), 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }
   // Pager arrows
   if (inRect(x, y, 12, 214, 56, 240)) { if (g_ftPage > 0) { g_ftPage--; dirty = true; } return; }
-  if (inRect(x, y, 264, 214, 308, 240)) { if (g_ftPage < 2) { g_ftPage++; dirty = true; } return; }
+  if (inRect(x, y, RX(264), 214, RX(308), 240)) { if (g_ftPage < 2) { g_ftPage++; dirty = true; } return; }
 
   if (g_ftPage == 0) {
-    if (inRect(x, y, 230, 36, 312, 60)) {  // Enabled toggle
+    if (inRect(x, y, RX(230), 36, RX(312), 60)) {  // Enabled toggle
       g_trackEnabled = !g_trackEnabled;
       prefs.begin("flight", false); prefs.putBool("track", g_trackEnabled); prefs.end();
       dirty = true;
       return;
     }
-    if (inRect(x, y, 230, 72, 312, 96)) {  // Units toggle
-      g_metric = !g_metric;
-      prefs.begin("flight", false); prefs.putBool("metric", g_metric); prefs.end();
-      dirty = true;
-      return;
-    }
-    // Radius / Ceiling / Poll sliders
-    if      (rowMinus(x, y, 104)) { g_radiusMi  = constrain(g_radiusMi - 0.5f, 1.0f, 10.0f);  saveFloat("radius", g_radiusMi); }
-    else if (rowPlus(x, y, 104))  { g_radiusMi  = constrain(g_radiusMi + 0.5f, 1.0f, 10.0f);  saveFloat("radius", g_radiusMi); }
-    else if (rowMinus(x, y, 142)) { g_ceilingFt = constrain(g_ceilingFt - 1000, 3000, 30000); saveInt("ceiling", g_ceilingFt); }
-    else if (rowPlus(x, y, 142))  { g_ceilingFt = constrain(g_ceilingFt + 1000, 3000, 30000); saveInt("ceiling", g_ceilingFt); }
-    else if (rowMinus(x, y, 180)) { g_pollSec   = constrain(g_pollSec - 10, 10, 300);         saveInt("poll", g_pollSec); }
-    else if (rowPlus(x, y, 180))  { g_pollSec   = constrain(g_pollSec + 10, 10, 300);         saveInt("poll", g_pollSec); }
+    // Radius / Ceiling / Poll sliders. Radius and ceiling step in the
+    // displayed unit and are stored in miles / feet.
+    if      (rowMinus(x, y, 76))  { g_radiusMi  = constrain(g_radiusMi * distConv() - 0.5f, 1.0f, 10.0f) / distConv(); saveFloat("radius", g_radiusMi); }
+    else if (rowPlus(x, y, 76))   { g_radiusMi  = constrain(g_radiusMi * distConv() + 0.5f, 1.0f, 10.0f) / distConv(); saveFloat("radius", g_radiusMi); }
+    else if (rowMinus(x, y, 124)) { g_ceilingFt = (int)roundf(constrain(g_ceilingFt * altConv() - 1000.0f, 3000.0f, 30000.0f) / altConv()); saveInt("ceiling", g_ceilingFt); }
+    else if (rowPlus(x, y, 124))  { g_ceilingFt = (int)roundf(constrain(g_ceilingFt * altConv() + 1000.0f, 3000.0f, 30000.0f) / altConv()); saveInt("ceiling", g_ceilingFt); }
+    else if (rowMinus(x, y, 172)) { g_pollSec   = constrain(g_pollSec - 10, 10, 300);         saveInt("poll", g_pollSec); }
+    else if (rowPlus(x, y, 172))  { g_pollSec   = constrain(g_pollSec + 10, 10, 300);         saveInt("poll", g_pollSec); }
     return;
   }
 
   if (g_ftPage == 1) {
-    // Page 2: toggles + edit rows
-    if (inRect(x, y, 230, 36, 312, 60)) {  // Blink for Flight toggle
+    // Page 2: toggles + OpenSky credentials button
+    if (inRect(x, y, RX(230), 36, RX(312), 60)) {  // Blink for Flight toggle
       g_blinkForFlight = !g_blinkForFlight;
       prefs.begin("flight", false); prefs.putBool("blinkf", g_blinkForFlight); prefs.end();
       dirty = true;
       return;
     }
-    if (inRect(x, y, 230, 72, 312, 96)) {  // Enable timer toggle
+    if (inRect(x, y, RX(230), 72, RX(312), 96)) {  // Enable timer toggle
       g_showTimer = !g_showTimer;
       prefs.begin("flight", false); prefs.putBool("timer", g_showTimer); prefs.end();
       dirty = true;
       return;
     }
-    if (inRect(x, y, 230, 108, 312, 132)) {  // Show IATA toggle
+    if (inRect(x, y, RX(230), 108, RX(312), 132)) {  // Show IATA toggle
       g_showIata = !g_showIata;
       prefs.begin("flight", false); prefs.putBool("showiata", g_showIata); prefs.end();
       dirty = true;
       return;
     }
-    if (inRect(x, y, 270, 140, 312, 164)) {  // Edit home airport
+    if (inRect(x, y, 10, 150, DISP_W - 10, 174)) {  // OpenSky credentials
       g_screen = SCR_WIFI;
-      g_wifiSub = 11;
-      dirty = true;
-      return;
-    }
-    if (inRect(x, y, 270, 190, 312, 214)) {  // Edit watch callsign
-      g_screen = SCR_WIFI;
-      g_wifiSub = 13;
+      g_wifiSub = 3;
       dirty = true;
       return;
     }
     return;
   }
 
-  // Page 3
-  if (inRect(x, y, 10, 40, 310, 64)) {  // OpenSky credentials
+  // Page 3: edit rows
+  if (inRect(x, y, RX(270), 48, RX(312), 72)) {  // Edit home airport
     g_screen = SCR_WIFI;
-    g_wifiSub = 3;
+    g_wifiSub = 11;
+    dirty = true;
+    return;
+  }
+  if (inRect(x, y, RX(270), 124, RX(312), 148)) {  // Edit watch callsign
+    g_screen = SCR_WIFI;
+    g_wifiSub = 13;
     dirty = true;
     return;
   }
@@ -769,7 +958,7 @@ void handleFtrackerTouch(uint16_t x, uint16_t y) {
 // then a confirmation prompt before anything is wiped and the device reboots.
 void drawReset() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_MAROON);
+  tft.fillRect(0, 0, DISP_W, 28, TFT_MAROON);
   tft.setTextColor(TFT_WHITE, TFT_MAROON);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
@@ -808,14 +997,14 @@ void drawReset() {
     tft.setTextColor(TFT_RED, TFT_BLACK);
     tft.print("This cannot be undone.");
     // Yes / No
-    tft.fillRoundRect(30, 180, 110, 34, 6, TFT_MAROON);
-    tft.setTextColor(TFT_WHITE, TFT_MAROON);
+    tft.fillRoundRect(30, 180, 110, 34, 6, dangerCol());
+    tft.setTextColor(btnFg(dangerCol()), dangerCol());
     tft.setTextFont(2);
     tft.setCursor(70, 189);
     tft.print("Yes");
-    tft.fillRoundRect(180, 180, 110, 34, 6, TFT_NAVY);
-    tft.setTextColor(TFT_WHITE, TFT_NAVY);
-    tft.setCursor(222, 189);
+    themeBtn(CX + 20, 180, 110, 34, 6);
+    tft.setTextColor(btnFg(btnCol()), btnCol());
+    tft.setCursor(CX + 62, 189);
     tft.print("No");
     return;
   }
@@ -844,40 +1033,37 @@ void drawReset() {
   // Right column: Factory Reset / Graph Data / Settings stacked top-right and
   // spaced apart.  Bottom row has Restart (left) and Cancel (right).
   tft.setTextFont(2);
-  tft.fillRoundRect(172, 36, 140, 30, 6, TFT_MAROON);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
-  tft.drawCentreString("Factory Reset", 242, 43, 2);
+  tft.fillRoundRect(RX(172), 36, 140, 30, 6, dangerCol());
+  tft.setTextColor(btnFg(dangerCol()), dangerCol());
+  tft.drawCentreString("Factory Reset", RX(242), 43, 2);
 
-  tft.fillRoundRect(172, 80, 140, 30, 6, TFT_OLIVE);
+  tft.fillRoundRect(RX(172), 80, 140, 30, 6, TFT_OLIVE);
   tft.setTextColor(TFT_WHITE, TFT_OLIVE);
-  tft.drawCentreString("Graph Data", 242, 87, 2);
+  tft.drawCentreString("Graph Data", RX(242), 87, 2);
 
-  tft.fillRoundRect(172, 124, 140, 30, 6, TFT_ORANGE);
+  tft.fillRoundRect(RX(172), 124, 140, 30, 6, TFT_ORANGE);
   tft.setTextColor(TFT_WHITE, TFT_ORANGE);
-  tft.drawCentreString("Settings", 242, 131, 2);
+  tft.drawCentreString("Settings", RX(242), 131, 2);
 
   tft.fillRoundRect(10, 210, 140, 26, 6, TFT_DARKGREEN);
   tft.setTextColor(TFT_WHITE, TFT_DARKGREEN);
   tft.drawCentreString("Restart", 80, 216, 2);
 
-  tft.fillRoundRect(172, 210, 140, 26, 6, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.drawCentreString("Cancel", 242, 216, 2);
+  themeBtn(RX(172), 210, 140, 26, 6);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
+  tft.drawCentreString("Cancel", RX(242), 216, 2);
 }
 
 // Sleep Mode settings screen
 void drawSleep() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
   tft.print("Settings > Sleep Mode");
 
-  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
-  tft.setCursor(274, 7);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
-  tft.print("Back");
+  backBtn("Back");
 
   // Enabled toggle
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -887,15 +1073,25 @@ void drawSleep() {
   tft.setTextColor(g_sleepOn ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
   tft.setCursor(150, 44);
   tft.print(g_sleepOn ? "ON" : "OFF");
-  tft.fillRoundRect(230, 40, 82, 24, 5, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.setTextFont(1);
-  tft.setCursor(250, 47);
+  themeBtn(RX(230), 40, 82, 24, 5);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
+  tft.setTextFont(FONT_AUX);
+  tft.setCursor(RX(250), 47);
   tft.print("Toggle");
 
-  drawEditRow(84, "Start (HHMM)", g_sleepStartStr);
-  drawEditRow(124, "End (HHMM)", g_sleepEndStr);
-  drawSlider(164, "Wake min", (float)g_wakeMin, 1, 120, 1, 0);
+  drawTimeAdj(84, "Start", g_sleepStartH, g_sleepStartM);
+  drawTimeAdj(124, "End", g_sleepEndH, g_sleepEndM);
+
+  // Wake min: label + value + [▼][▲] stepper (±1, range 1-120)
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextFont(2);
+  tft.setCursor(8, 172);
+  tft.print("Wake min");
+  char wb[8];
+  snprintf(wb, sizeof wb, "%d", g_wakeMin);
+  tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
+  tft.drawCentreString(wb, RX(200), 172, 2);
+  adjPair(TADJ_MX, 164);
 
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setTextFont(1);
@@ -917,27 +1113,118 @@ void drawEditRow(int y, const char* label, const String& value) {
   tft.setCursor(8, y);
   tft.print(label);
   tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
-  tft.setCursor(210, y + 5);
+  tft.setCursor(RX(210), y + 5);
   tft.print(value);
-  tft.fillRoundRect(270, y, 42, 24, 5, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.setTextFont(1);
-  tft.setCursor(280, y + 6);
+  themeBtn(RX(270), y, 42, 24, 5);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
+  tft.setTextFont(FONT_AUX);
+  tft.setCursor(RX(280), y + 6);
   tft.print("Edit");
 }
 
+// ---- shared time-of-day editor ----
+// One compact row: label, a [▲][▼] hour stepper, a large tappable
+// "H:MM AM/PM" (opens the HHMM keyboard), then a [▲][▼] minute stepper.
+// Stepping the hour wraps through AM/PM, so there's no separate meridiem
+// control. Used by the Alarms editor and the Sleep Mode start/end times. The
+// row is ~30px tall; give it ~40px of vertical space.
+// TADJ_* column geometry is #defined in cyd-dashboard.ino (alarms.ino is
+// concatenated before this file, so shared defines must live there).
+
+// One horizontal [▼][▲] stepper pair in the theme color: ▼ (decrement) at
+// (x, y), ▲ (increment) TADJ_BW+4 to its right. 24px-tall horizontal targets
+// are easier to hit than small stacked arrows.
+void adjPair(int x, int y) {
+  uint16_t fg = btnFg(btnCol());
+  themeBtn(x, y, TADJ_BW, 24, 5);
+  int c1 = x + TADJ_BW / 2;
+  tft.fillTriangle(c1, y + 15, c1 - 4, y + 9, c1 + 4, y + 9, fg);
+  themeBtn(x + TADJ_BW + 4, y, TADJ_BW, 24, 5);
+  int c2 = x + TADJ_BW + 4 + TADJ_BW / 2;
+  tft.fillTriangle(c2, y + 9, c2 - 4, y + 15, c2 + 4, y + 15, fg);
+}
+
+// -1 for [▼] (left), +1 for [▲] (right), 0 for a miss.
+int adjPairHit(uint16_t x, uint16_t y, int colX, int rowY) {
+  if (inRect(x, y, colX, rowY, colX + TADJ_BW - 1, rowY + 23)) return -1;
+  if (inRect(x, y, colX + TADJ_BW + 4, rowY, colX + 2 * TADJ_BW + 3, rowY + 23)) return 1;
+  return 0;
+}
+
+void drawTimeAdj(int y, const char* label, int h24, int m) {
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextFont(2);
+  tft.setCursor(8, y + 6);
+  tft.print(label);
+  adjPair(TADJ_HX, y);                  // hour stepper, left of the time
+  int hDisp = g_clock24 ? h24 : (h24 % 12 ? h24 % 12 : 12);
+  char tb[8];
+  snprintf(tb, sizeof tb, "%d:%02d", hDisp, m);
+  tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
+  tft.drawCentreString(tb, (TADJ_HX + 2 * TADJ_BW + 4 + TADJ_MX - 4) / 2, y + 3, 4);
+  // Stacked AM/PM indicator like the header's (12-hour mode only): the active
+  // meridiem is drawn bright in its slot (AM top, PM bottom) and the other
+  // dimmed, so the position itself shows which is active. Flips automatically
+  // at hour wrap.
+  if (!g_clock24) {
+    tft.setTextFont(1);
+    tft.setTextColor(h24 < 12 ? TFT_GREENYELLOW : TFT_DARKGREY, TFT_BLACK);
+    tft.setCursor(RX(230), y + 2);
+    tft.print("AM");
+    tft.setTextColor(h24 < 12 ? TFT_DARKGREY : TFT_GREENYELLOW, TFT_BLACK);
+    tft.setCursor(RX(230), y + 18);
+    tft.print("PM");
+  }
+  adjPair(TADJ_MX, y);                  // minute stepper, right of the time
+}
+
+// Hit-test a drawTimeAdj row: 1=hour+ 2=hour- 3=min+ 4=min-, 7=the time text
+// itself (opens the manual HHMM keyboard), 0=miss.
+int timeAdjHit(uint16_t x, uint16_t y, int rowY) {
+  int h = adjPairHit(x, y, TADJ_HX, rowY);
+  if (h) return h > 0 ? 1 : 2;
+  int m = adjPairHit(x, y, TADJ_MX, rowY);
+  if (m) return m > 0 ? 3 : 4;
+  if (inRect(x, y, TADJ_HX + 2 * TADJ_BW + 6, rowY, TADJ_MX - 4, rowY + 28)) return 7;
+  return 0;
+}
+
+// Apply a timeAdjHit to the sleep start (which=0) or end (which=1) time:
+// hour/minute steps wrap in 12h display, AM/PM flips the 24h value, and the
+// time-text tap opens the manual HHMM keyboard (subs 6/7).
+void applySleepTimeAdj(int which, int hit) {
+  int& H = which ? g_sleepEndH : g_sleepStartH;
+  int& M = which ? g_sleepEndM : g_sleepStartM;
+  switch (hit) {
+    case 1: H = (H + 1) % 24; break;    // hour wrap flips AM/PM on its own
+    case 2: H = (H + 23) % 24; break;
+    case 3: M = (M + 1) % 60; break;
+    case 4: M = (M + 59) % 60; break;
+    case 7: g_wifiSub = which ? 7 : 6; g_screen = SCR_WIFI; return;
+  }
+  // Keep the HHMM edit buffers in sync and persist.
+  char b[8];
+  snprintf(b, sizeof b, "%02d%02d", H, M);
+  prefs.begin("flight", false);
+  if (which == 0) { g_sleepStartStr = b; prefs.putInt("sleepsH", H); prefs.putInt("sleepsM", M); }
+  else            { g_sleepEndStr   = b; prefs.putInt("sleepeH", H); prefs.putInt("sleepeM", M); }
+  prefs.end();
+}
+
 void handleSleepTouch(uint16_t x, uint16_t y) {
-  if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }
-  if (inRect(x, y, 230, 40, 312, 64)) {  // Toggle
+  if (inRect(x, y, RX(265), 4, RX(315), 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }
+  if (inRect(x, y, RX(230), 40, RX(312), 64)) {  // Toggle
     g_sleepOn = !g_sleepOn;
     prefs.begin("flight", false); prefs.putBool("sleepon", g_sleepOn); prefs.end();
     dirty = true;
     return;
   }
-  if (inRect(x, y, 270, 84, 312, 108)) { g_screen = SCR_WIFI; g_wifiSub = 6; dirty = true; return; }  // start
-  if (inRect(x, y, 270, 124, 312, 148)) { g_screen = SCR_WIFI; g_wifiSub = 7; dirty = true; return; }  // end
-  if      (rowMinus(x, y, 164)) { g_wakeMin = constrain(g_wakeMin - 1, 1, 120); saveInt("wake", g_wakeMin); }
-  else if (rowPlus(x, y, 164))  { g_wakeMin = constrain(g_wakeMin + 1, 1, 120); saveInt("wake", g_wakeMin); }
+  int hit = timeAdjHit(x, y, 84);
+  int which = 0;
+  if (!hit) { hit = timeAdjHit(x, y, 124); which = 1; }
+  if (hit) { applySleepTimeAdj(which, hit); dirty = true; return; }
+  int wh = adjPairHit(x, y, TADJ_MX, 164);
+  if (wh) { g_wakeMin = constrain(g_wakeMin + wh, 1, 120); saveInt("wake", g_wakeMin); dirty = true; return; }
 }
 
 // type 1 = float step, type 0 = int
@@ -947,18 +1234,12 @@ void drawSlider(int y, const char* label, float val, float vmin, float vmax, flo
   tft.setCursor(8, y);
   tft.print(label);
 
-  // [-] value [+]
-  tft.fillRoundRect(170, y, 34, 24, 5, TFT_DARKGREY);
-  tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
-  tft.setCursor(181, y + 5);
-  tft.print("-");
-  tft.fillRoundRect(238, y, 34, 24, 5, TFT_DARKGREY);
-  tft.setCursor(249, y + 5);
-  tft.print("+");
+  // label value [▼][▲]   (value follows the label so unit suffixes fit)
+  adjPair(RX(246), y);
   tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
   tft.setTextFont(2);
-  tft.setCursor(118, y + 5);
+  tft.setCursor(8 + tft.textWidth(label, 2) + 14, y + 5);
   if (type) tft.printf("%.1f", val);
-  else      tft.print((int)val);
+  else      tft.print((int)roundf(val));
   (void)vmin; (void)vmax; (void)step;
 }

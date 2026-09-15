@@ -9,6 +9,9 @@ Outputs three 960x720 screenshots:
 - DEVELOPER-USERGUIDE-idle.png — the idle weather view with pool temperature.
 - DEVELOPER-USERGUIDE-wxgraph.png — the Weather Temperature History graph
   (Day view) plotted from the last 24h of real temps.
+- DEVELOPER-USERGUIDE-ftracker.png — Settings > Flight Tracker, page 1.
+- DEVELOPER-USERGUIDE-alarms.png — the Alarms > N editor (time steppers,
+  weekday toggles, LED preset, footer buttons).
 
 Fetches real data so the mock looks like the real thing:
 
@@ -25,8 +28,12 @@ Fetches real data so the mock looks like the real thing:
 Every fetch is optional: missing data just degrades the mock, it never fails
 the render. PNGs via cairosvg.
 
+By default the fetched data is read from / written to mock_data.json in this
+folder, so re-rendering the PDF doesn't hit the APIs every time. Pass
+--refresh to pull fresh data (which re-saves the cache).
+
 Usage:
-    cyd-dashboard/.venv/bin/python docs/user-guide/render_dash_mock.py [--monitor SECONDS]
+    cyd-dashboard/.venv/bin/python docs/user-guide/render_dash_mock.py [--monitor SECONDS] [--refresh]
 """
 
 import json
@@ -43,11 +50,24 @@ OUT_DASH = ROOT / "DEVELOPER-USERGUIDE-dashboard.png"
 OUT_IDLE = ROOT / "DEVELOPER-USERGUIDE-idle.png"
 OUT_GRAPH = ROOT / "DEVELOPER-USERGUIDE-wxgraph.png"
 OUT_FTRK = ROOT / "DEVELOPER-USERGUIDE-ftracker.png"
+OUT_ALRM = ROOT / "DEVELOPER-USERGUIDE-alarms.png"
+OUT_DATA = ROOT / "mock_data.json"
 ENV = REPO / "cyd-dashboard" / ".env"
 
 UA = {"User-Agent": "cyd-dashboard-userguide/1.0"}
 RADIUS_MI = 3.5          # device default radar radius
 RADAR_CX, RADAR_CY, RADAR_R = 235, 155, 48
+
+# Screen palette approximating the device's themed colors (default blue
+# theme): header bands take the theme color; ordinary + Back buttons are the
+# theme nudged lighter (btnCol); destructive buttons are red; the history
+# graphs draw on the button color with a 75%-to-white theme line and a
+# complementary (yellow) average line.
+TH   = "#000080"   # theme / header band
+BTN  = "#4040a0"   # btnCol() — theme +25% toward white
+DGR  = "#c80000"   # dangerCol() — destructive buttons
+GLN  = "#bfbfe0"   # graphLineCol() — theme +75% toward white
+GAVG = "#ffffa0"   # graphAvgCol() — theme complement (yellow) +75% to white
 
 # Fixed clock/date shown in the header of every screenshot — a real flight/
 # weather snapshot, but a stable timestamp for the printed guide.
@@ -346,8 +366,8 @@ def line(x0, y0, x1, y1, stroke, sw=1, dash=None):
 
 def tri(p0, p1, p2, fill, stroke="#000"):
     pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in (p0, p1, p2))
-    svg.append(f'<polygon points="{pts}" fill="{fill}"'
-               f' stroke="{stroke}" stroke-width="0.75"/>')
+    st = f' stroke="{stroke}" stroke-width="0.75"' if stroke else ""
+    svg.append(f'<polygon points="{pts}" fill="{fill}"{st}/>')
 
 
 def dashed(x0, y0, x1, y1, col, dash, gap, keepouts=()):
@@ -395,11 +415,18 @@ KO_LOGO = (211, 23, 331, 104)
 def header(d):
     clock = MOCK_DT.strftime("%I:%M")       # matches fmtClock() on the device
     date = MOCK_DT.strftime("%a %b ") + str(MOCK_DT.day)
-    rect(0, 0, W, 36, "#0012b8")
+    rect(0, 0, W, 36, TH)
     txt(4, 16, 11, "#fff", date)
     txt(96, 24, 22, "#fff", clock)
     # AM/PM marker stacked right of the time: AM top slot, PM bottom slot.
-    txt(170, 30 if MOCK_DT.hour >= 12 else 13, 8, "#fff", MOCK_DT.strftime("%p"))
+    pm = MOCK_DT.hour >= 12
+    txt(170, 30 if pm else 13, 8, "#fff", MOCK_DT.strftime("%p"))
+    # Alarm bell in the inactive slot, like the device draws when an alarm is
+    # enabled (bell glyph: triangle body, rim, clapper).
+    bx, by = 170, 5 if pm else 23
+    tri((bx + 4, by), (bx, by + 6), (bx + 8, by + 6), "#fd0")
+    rect(bx, by + 6, 9, 2, "#fd0")
+    rect(bx + 3, by + 8, 3, 2, "#fd0")
     for i, (lbl, v) in enumerate((("CRP:", d["crp"]), ("CRL:", d["crl"]),
                                   ("CFT:", d["cft"]))):
         # Same tiers as the device: grey healthy, yellow <500 (or "?"), pink <50
@@ -471,6 +498,25 @@ def radar(d):
     pts = [(cx + dx * scale, cy - dy * scale) for dx, dy in d["track"]]
     for i in range(1, len(pts)):
         dashed(*pts[i - 1], *pts[i], "#0ff", 3, 3, ko_track)
+    # Extend the track's oldest leg to the top of the black area so the path
+    # visibly enters from the screen edge instead of stopping mid-screen.
+    if len(pts) >= 2:
+        ux, uy = pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]
+        n = math.hypot(ux, uy)
+        if n > 1e-6:
+            ux, uy = ux / n, uy / n
+            t = 1e9
+            if uy < -1e-4:
+                t = min(t, (37 - pts[0][1]) / uy)   # top of the black area
+            elif uy > 1e-4:
+                t = min(t, (239 - pts[0][1]) / uy)
+            if ux > 1e-4:
+                t = min(t, (319 - pts[0][0]) / ux)
+            elif ux < -1e-4:
+                t = min(t, -pts[0][0] / ux)
+            if 0 < t < 1e9:
+                dashed(pts[0][0], pts[0][1], pts[0][0] + ux * t,
+                       pts[0][1] + uy * t, "#0ff", 3, 3, ko_track)
 
     # Projection ray: light-grey dots from the track end (or the plane's
     # position + heading) to the screen edge, clipped against all UI zones.
@@ -538,6 +584,9 @@ def draw_flight(d):
     rect(0, 0, W, H, "#000", "#333", 1)
     header(d)
     cog()
+    # Back button top-right, drawn over the header like drawFlightBackButton()
+    rect(265, 4, 50, 20, BTN, rx=5)
+    txt(290, 18, 11, "#fff", "Back", anchor="middle")
     txt(8, 62, 24, "#fff", feat["cs"] or feat["icao24"].upper())
     name = AIRLINES.get((feat["cs"] or "")[:3].upper(), "")
     if name:
@@ -638,23 +687,24 @@ def draw_idle(d):
 
 def draw_wxgraph(d):
     """Weather Temperature History screen (Day view) — same layout as
-    drawWxGraph(): navy header + X, timeframe buttons, navy plot box, cyan
-    series, orange dotted avg, corner scale labels, Lo/now/Hi footer."""
+    drawWxGraph(): theme header + Back, timeframe buttons, button-color plot
+    box, pale theme-blend series, complementary dotted avg, corner scale
+    labels, Lo/now/Hi footer."""
     rect(0, 0, W, H, "#000", "#333", 1)
-    rect(0, 0, 320, 28, "#000080")
+    rect(0, 0, 320, 28, TH)
     txt(8, 19, 11, "#fff", "History > Weather Temperature")
-    rect(265, 4, 50, 20, "#800000", rx=5)
-    txt(290, 18, 11, "#fff", "X", anchor="middle")
+    rect(265, 4, 50, 20, BTN, rx=5)
+    txt(290, 18, 11, "#fff", "Back", anchor="middle")
 
     bx = 8
     for i, lbl in enumerate(("Day", "Week", "Month", "Year")):
-        col = "#006400" if i == 0 else "#444"
+        col = BTN if i == 0 else "#444"   # selected = button color
         rect(bx, 34, 70, 22, col, rx=5)
         txt(bx + 35, 49, 9, "#fff", lbl, anchor="middle")
         bx += 76
 
     gx, gy, gw, gh = 10, 66, 300, 140
-    rect(gx, gy, gw, gh, "#000080", stroke="#fff", sw=1)
+    rect(gx, gy, gw, gh, BTN, stroke="#fff", sw=1)
 
     now = int(time.time())
     win, t0 = 86400, now - 86400
@@ -677,18 +727,18 @@ def draw_wxgraph(d):
         px = min(max(px, gx), gx + gw)
         py = min(max(py, gy), gy + gh)
         if prev:
-            line(prev[0], prev[1], px, py, "#0ff", 1)
+            line(prev[0], prev[1], px, py, GLN, 1)
         prev = (px, py)
 
     avg = sum(vals) / len(vals)
     avgy = min(max(gy + gh - (avg - vmin) * gh / span, gy), gy + gh)
     x = gx
     while x <= gx + gw:
-        line(x, avgy, min(x + 3, gx + gw), avgy, "#f80", 1)
+        line(x, avgy, min(x + 3, gx + gw), avgy, GAVG, 1)
         x += 6
-    txt(gx + 2, avgy - 3, 8, "#f80", f"avg {avg:.1f}")
-    txt(gx + gw - 2, gy + 10, 8, "#0ff", f"{vmax:.0f}", anchor="end")
-    txt(gx + gw - 2, gy + gh - 2, 8, "#0ff", f"{vmin:.0f}", anchor="end")
+    txt(gx + 2, avgy - 3, 8, GAVG, f"avg {avg:.1f}")
+    txt(gx + gw - 2, gy + 10, 8, "#fff", f"{vmax:.0f}", anchor="end")
+    txt(gx + gw - 2, gy + gh - 2, 8, "#fff", f"{vmin:.0f}", anchor="end")
 
     cur = (d["wx"] or {}).get("current", {})
     txt(gx, gy + gh + 18, 11, "#0ff", f"Lo {lo:.1f}")
@@ -701,43 +751,101 @@ GY = "#adff2e"   # TFT_GREENYELLOW
 
 
 def toggle_row(y, label, value, on=True):
-    """label (font2 white) + value + navy Toggle pill — the shared row
+    """label (font2 white) + value + theme Toggle pill — the shared row
     pattern used by the settings screens."""
     txt(8, y + 13, 11, "#fff", label)
     txt(150, y + 13, 11, GY if on else "#ccc", value)
-    rect(230, y - 4, 82, 24, "#000080", rx=5)
+    rect(230, y - 4, 82, 24, BTN, rx=5)
     txt(271, y + 11, 9, "#fff", "Toggle", anchor="middle")
 
 
 def slider_row(y, label, value):
-    """drawSlider(): label + [−] value [+] stepper."""
+    """drawSlider(): label + value + [▼][▲] stepper (buttons at x=246; the
+    value follows the label so unit suffixes fit)."""
     txt(8, y + 13, 11, "#fff", label)
-    rect(170, y, 34, 24, "#444", rx=5)
-    txt(187, y + 17, 11, "#fff", "-", anchor="middle")
-    txt(118, y + 17, 11, GY, value)
-    rect(238, y, 34, 24, "#444", rx=5)
-    txt(255, y + 17, 11, "#fff", "+", anchor="middle")
+    vx = 8 + len(label) * 12 + 14   # approx tft.textWidth(label, font2)
+    txt(vx, y + 17, 11, GY, value)
+    adj_pair(246, y)
 
 
 def draw_ftracker(d):
-    """Flight Tracker settings, page 1/3 — Enabled/Units toggles and the
-    Radius/Ceiling/Poll steppers, with the device's defaults."""
+    """Flight Tracker settings, page 1/3 — Enabled toggle and the
+    Radius/Ceiling/Poll steppers, with the device's defaults. (Units moved
+    to the General page.)"""
     rect(0, 0, W, H, "#000", "#333", 1)
-    rect(0, 0, 320, 28, "#000080")
+    rect(0, 0, 320, 28, TH)
     txt(8, 19, 11, "#fff", "Settings > Flight Tracker")
-    rect(265, 4, 50, 20, "#800000", rx=5)
+    rect(265, 4, 50, 20, BTN, rx=5)
     txt(290, 18, 11, "#fff", "Back", anchor="middle")
 
     toggle_row(40, "Enabled", "ON")
-    toggle_row(76, "Units", "Imperial")
 
-    slider_row(104, "Radius", "3.5")
-    slider_row(142, "Ceiling", "15000")
-    slider_row(180, "Poll (s)", "30")
+    slider_row(76, "Radius (mi)", "3.5")
+    txt(8, 106, 8, "#ccc", "how far away to look")
+    slider_row(124, "Ceiling (ft)", "15000")
+    txt(8, 154, 8, "#ccc", "ignore planes above this")
+    slider_row(172, "Poll (s)", "30")
+    txt(8, 202, 8, "#ccc", "how often to check for planes")
 
     txt(160, 230, 9, "#ccc", "Page 1/3", anchor="middle")
-    rect(264, 214, 44, 26, "#444", rx=6)
+    rect(264, 214, 44, 26, BTN, rx=6)
     txt(286, 233, 11, "#fff", ">", anchor="middle")
+
+
+def adj_pair(x, y):
+    """adjPair(): horizontal [▼][▲] stepper buttons in the theme color —
+    down (decrement) left, up (increment) right (30px each, 24px tall).
+    Triangles are ~text-sized (8x6), not button-filling."""
+    rect(x, y, 30, 24, BTN, rx=5)
+    tri((x + 15, y + 15), (x + 11, y + 9), (x + 19, y + 9), "#fff", "#fff")
+    rect(x + 34, y, 30, 24, BTN, rx=5)
+    tri((x + 34 + 15, y + 9), (x + 34 + 11, y + 15), (x + 34 + 19, y + 15),
+        "#fff", "#fff")
+
+
+def draw_alarms(d):
+    """Alarms > 2 editor — Enabled toggle, hour [▼▲]/time/minute [▼▲] row,
+    weekday toggles, Notify preset stepper, and the < | Del | New footer
+    (alarm 2 of 2 so all three buttons show)."""
+    rect(0, 0, W, H, "#000", "#333", 1)
+    rect(0, 0, 320, 28, TH)
+    txt(8, 19, 11, "#fff", "Alarms > 2")
+    rect(265, 4, 50, 20, BTN, rx=5)
+    txt(290, 18, 11, "#fff", "Back", anchor="middle")
+
+    txt(8, 57, 11, "#fff", "Enabled")
+    txt(150, 57, 11, GY, "ON")
+    rect(230, 40, 82, 24, BTN, rx=5)
+    txt(271, 55, 9, "#fff", "Toggle", anchor="middle")
+
+    # drawTimeAdj row: hour [▼▲] left, big time, stacked AM/PM indicator
+    # (active bright on top/bottom like the header), minute [▼▲] right
+    txt(8, 93, 11, "#fff", "Time")
+    adj_pair(80, 80)
+    txt(190, 104, 22, GY, "7:30", anchor="middle")
+    txt(230, 89, 9, GY, "AM")
+    txt(230, 105, 9, "#444", "PM")
+    adj_pair(252, 80)
+
+    # Weekday toggles (Mon-Fri selected for a workday alarm)
+    txt(8, 146, 11, "#fff", "Days")
+    for i, dch in enumerate("SMTWTFS"):
+        sel = i in (1, 2, 3, 4, 5)
+        bx = 64 + i * 36
+        rect(bx, 128, 32, 26, BTN if sel else "#444", rx=4)
+        txt(bx + 16, 146, 11, "#fff", dch, anchor="middle")
+
+    txt(8, 185, 11, "#fff", "Notify")
+    txt(200, 185, 11, GY, "Blink", anchor="middle")
+    adj_pair(252, 166)
+
+    # Footer: < prev | Del (center) | New (right, on the last alarm)
+    rect(8, 206, 44, 26, BTN, rx=5)
+    txt(30, 224, 11, "#fff", "&lt;", anchor="middle")
+    rect(126, 206, 68, 26, DGR, rx=5)
+    txt(160, 224, 11, "#fff", "Del", anchor="middle")
+    rect(228, 206, 84, 26, BTN, rx=5)
+    txt(270, 224, 11, "#fff", "New", anchor="middle")
 
 
 def emit_png(path):
@@ -756,7 +864,18 @@ def main():
     elif "--once" in sys.argv:
         monitor = 0
 
-    d = fetch_all(load_env(), monitor)
+    # Static data cache: render from mock_data.json unless --refresh (or the
+    # cache doesn't exist yet), so PDF regeneration doesn't hit the APIs.
+    if "--refresh" not in sys.argv and OUT_DATA.exists():
+        d = json.loads(OUT_DATA.read_text())
+        print("data: cached mock_data.json (use --refresh to re-pull)")
+    else:
+        d = fetch_all(load_env(), monitor)
+        try:
+            OUT_DATA.write_text(json.dumps(d))
+            print("data: live fetch -> mock_data.json")
+        except Exception:
+            print("data: live fetch (cache save failed)")
 
     if d["feat"]:
         draw_flight(d)
@@ -772,11 +891,14 @@ def main():
     emit_png(OUT_GRAPH)
     draw_ftracker(d)
     emit_png(OUT_FTRK)
+    draw_alarms(d)
+    emit_png(OUT_ALRM)
 
     print(f"wrote {OUT_DASH.name} ({view})")
     print(f"wrote {OUT_IDLE.name} (pool={d['pool']})")
     print(f"wrote {OUT_GRAPH.name} ({len(d['wx_hist'])} hourly pts)")
     print(f"wrote {OUT_FTRK.name}")
+    print(f"wrote {OUT_ALRM.name}")
     print(f"  planes={len(d['planes'])} crp={d['crp']} crl={d['crl']} "
           f"cft={d['cft']}")
 

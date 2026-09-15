@@ -20,10 +20,10 @@ uint32_t g_calCollectStart = 0;
 struct CalPt { int x, y; const char* label; };
 static const CalPt g_calTargets[5] = {
   { 20,  20, "TOP-LEFT" },
-  {300,  20, "TOP-RIGHT"},
+  {DISP_W - 20,  20, "TOP-RIGHT"},
   { 20, 220, "BOTTOM-LEFT"},
-  {300, 220, "BOTTOM-RIGHT"},
-  {160, 120, "CENTER"   },
+  {DISP_W - 20, 220, "BOTTOM-RIGHT"},
+  {CX, 120, "CENTER"   },
 };
 
 // Raw readings captured at each target.
@@ -138,17 +138,21 @@ void calCompute() {
     ryMin = min(ryMin, g_calRaw[i][1]); ryMax = max(ryMax, g_calRaw[i][1]);
   }
 
-  // dispX spans 20..300 (280 wide) from rawY min..max.
-  // dispY spans 20..220 (200 tall) from rawX min..max.
+  // Targets are drawn in logical coords and land at scaled panel positions
+  // through the tft wrapper, so the fit maps raw -> panel coords (SCALEX/Y
+  // span); touchReadXY() then converts panel -> logical. On the 2.8" board
+  // the scale is the identity and this is unchanged.
+  long spanX = SCALEX(DISP_W - 20) - SCALEX(20);
+  long spanY = SCALEY(220) - SCALEY(20);
   if (ryMax - ryMin > 100) {
-    long scale = ((long)(ryMax - ryMin)) * 1000L / 280L;  // raw per display unit
+    long scale = ((long)(ryMax - ryMin)) * 1000L / spanX;  // raw per panel unit
     g_calScaleX = (int)scale;
-    g_calOffX = (long)ryMin - (long)(20 * scale) / 1000L;
+    g_calOffX = (long)ryMin - (long)(SCALEX(20) * scale) / 1000L;
   }
   if (rxMax - rxMin > 100) {
-    long scale = ((long)(rxMax - rxMin)) * 1000L / 200L;
+    long scale = ((long)(rxMax - rxMin)) * 1000L / spanY;
     g_calScaleY = (int)scale;
-    g_calOffY = (long)rxMin - (long)(20 * scale) / 1000L;
+    g_calOffY = (long)rxMin - (long)(SCALEY(20) * scale) / 1000L;
   }
 
   prefs.begin("flight", false);
