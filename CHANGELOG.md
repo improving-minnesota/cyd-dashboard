@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.18.0...v2.0.0) (2026-09-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* release assets are now named per board. The legacy cyd-dashboard.ino.bin name remains as a copy of the 2432S028R build but is deprecated.
+
+### Features
+
+* add 4.0 in E32R40T variant, per-board OTA assets, and user guide refresh ([8214c66](https://github.com/improving-minnesota/cyd-dashboard/commit/8214c661cac41ebd25ee6a898f97577c13c8d21e))
+
 ## [1.18.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.17.2...v1.18.0) (2026-09-11)
 
 
