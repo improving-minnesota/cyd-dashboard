@@ -116,19 +116,22 @@ bool fetchGoveeTemp() {
   return true;
 }
 
+// Pool temps are stored in the unit Govee reported (g_poolUnit, normally F);
+// normalize to F before converting to the display unit (see tempDisp()).
+float poolDisp(float v) {
+  return tempDisp(g_poolUnit == 'C' ? v * 9.0f / 5.0f + 32.0f : v);
+}
+
 // ---- Pool Temp settings screen ----
 void drawPool() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("Pool Temp");
+  tft.print("Settings > Pool Temp");
 
-  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
-  tft.setCursor(274, 7);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
-  tft.print("Back");
+  backBtn("Back");
 
   // Enabled toggle
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -138,10 +141,10 @@ void drawPool() {
   tft.setTextColor(g_poolEnabled ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
   tft.setCursor(150, 40);
   tft.print(g_poolEnabled ? "ON" : "OFF");
-  tft.fillRoundRect(230, 36, 82, 24, 5, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.setTextFont(1);
-  tft.setCursor(250, 43);
+  themeBtn(RX(230), 36, 82, 24, 5);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
+  tft.setTextFont(FONT_AUX);
+  tft.setCursor(RX(250), 43);
   tft.print("Toggle");
 
   // Govee API key
@@ -153,15 +156,15 @@ void drawPool() {
   tft.setTextFont(1);
   tft.setCursor(8, 94);
   tft.print(g_goveeKey.length() ? g_goveeKey.substring(0, 34) : "(none)");
-  tft.fillRoundRect(250, 72, 62, 24, 5, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.setTextFont(1);
-  tft.setCursor(256, 79);
+  themeBtn(RX(250), 72, 62, 24, 5);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
+  tft.setTextFont(FONT_AUX);
+  tft.setCursor(RX(256), 79);
   tft.print("Edit");
 
   // Fetch devices
-  tft.fillRoundRect(10, 116, 300, 28, 6, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  themeBtn(10, 116, DISP_W - 20, 28, 6);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
   tft.setTextFont(2);
   tft.setCursor(20, 123);
   tft.print("Fetch Devices");
@@ -178,11 +181,11 @@ void drawPool() {
   else if (g_poolName.length() > 0) tft.print(g_poolName);
   else tft.print("none");
   if (g_goveeCount > 1) {
-    tft.fillRoundRect(250, 156, 28, 24, 5, TFT_DARKGREY);
-    tft.setTextColor(TFT_WHITE, TFT_DARKGREY); tft.setTextFont(2);
-    tft.setCursor(258, 163); tft.print("<");
-    tft.fillRoundRect(284, 156, 28, 24, 5, TFT_DARKGREY);
-    tft.setCursor(292, 163); tft.print(">");
+    themeBtn(RX(250), 156, 28, 24, 5);
+    tft.setTextColor(btnFg(btnCol()), btnCol()); tft.setTextFont(2);
+    tft.setCursor(RX(258), 163); tft.print("<");
+    themeBtn(RX(284), 156, 28, 24, 5);
+    tft.setCursor(RX(292), 163); tft.print(">");
   }
 
   // current temperature
@@ -193,8 +196,9 @@ void drawPool() {
   tft.setTextColor(g_poolValid ? TFT_GREEN : TFT_LIGHTGREY, TFT_BLACK);
   tft.setTextFont(4);   // font 3 is unused in TFT_eSPI and renders nothing
   tft.setCursor(90, 196);
-  if (g_poolValid) tft.printf("%.1f%c", g_poolTemp, g_poolUnit);
+  if (g_poolValid) tft.printf("%.1f%c", poolDisp(g_poolTemp), tempUnit());
   else tft.print("--");
+  tft.setTextSize(1);
 
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setTextFont(1);
@@ -203,18 +207,18 @@ void drawPool() {
 }
 
 void handlePoolTouch(uint16_t x, uint16_t y) {
-  if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }
-  if (inRect(x, y, 230, 36, 312, 60)) {  // Enabled toggle
+  if (inRect(x, y, RX(265), 4, RX(315), 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }
+  if (inRect(x, y, RX(230), 36, RX(312), 60)) {  // Enabled toggle
     g_poolEnabled = !g_poolEnabled;
     prefs.begin("flight", false); prefs.putBool("poolen", g_poolEnabled); prefs.end();
     dirty = true;
     return;
   }
-  if (inRect(x, y, 250, 72, 312, 96)) { g_screen = SCR_WIFI; g_wifiSub = 9; dirty = true; return; }  // edit key
-  if (inRect(x, y, 10, 116, 310, 144)) { netWantPoolDevices = true; dirty = true; return; }  // fetch devices
+  if (inRect(x, y, RX(250), 72, RX(312), 96)) { g_screen = SCR_WIFI; g_wifiSub = 9; dirty = true; return; }  // edit key
+  if (inRect(x, y, 10, 116, DISP_W - 10, 144)) { netWantPoolDevices = true; dirty = true; return; }  // fetch devices
   if (g_goveeCount > 1) {
-    if (inRect(x, y, 250, 156, 278, 180)) { g_goveeSel = (g_goveeSel - 1 + g_goveeCount) % g_goveeCount; selectGoveeDevice(); dirty = true; return; }
-    if (inRect(x, y, 284, 156, 312, 180)) { g_goveeSel = (g_goveeSel + 1) % g_goveeCount; selectGoveeDevice(); dirty = true; return; }
+    if (inRect(x, y, RX(250), 156, RX(278), 180)) { g_goveeSel = (g_goveeSel - 1 + g_goveeCount) % g_goveeCount; selectGoveeDevice(); dirty = true; return; }
+    if (inRect(x, y, RX(284), 156, RX(312), 180)) { g_goveeSel = (g_goveeSel + 1) % g_goveeCount; selectGoveeDevice(); dirty = true; return; }
   }
 }
 
@@ -245,11 +249,15 @@ void poolSeriesForTF(unsigned long** times, float** temps, int* count) {
 // inside the [t0, nowSec] window. Outputs the actual data low/high for the
 // window via dataMin/dataMax (before any y-axis padding). Also draws the padded
 // y-axis scale labels (max/min in the chart corners) and a dotted average line
-// with an "avg" label.
+// with an "avg" label. Colors come from graphBgCol/graphLineCol/graphAvgCol.
+// toDisp converts stored temps to the display unit for labels (tempDisp for
+// weather, poolDisp for pool). The plotted curve is scale-invariant, so the
+// data points are plotted in stored units and only labels are converted.
 bool plotSeries(unsigned long* times, float* temps, int count,
                 unsigned long t0, unsigned long nowSec, unsigned long win,
                 int gx, int gy, int gw, int gh,
-                float& dataMin, float& dataMax, uint16_t lineColor) {
+                float& dataMin, float& dataMax,
+                float (*toDisp)(float)) {
   float vmin = 1e9f, vmax = -1e9f;
   float sum = 0.0f;
   int cnt = 0;
@@ -264,8 +272,8 @@ bool plotSeries(unsigned long* times, float* temps, int count,
   }
   if (cnt == 0) return false;
 
-  dataMin = vmin;   // actual data low for this timeframe
-  dataMax = vmax;   // actual data high for this timeframe
+  dataMin = toDisp(vmin);   // actual data low for this timeframe, display units
+  dataMax = toDisp(vmax);   // actual data high for this timeframe, display units
   float avg = sum / cnt;   // average temp for this timeframe
 
   if (vmax - vmin < 1.0f) { vmin -= 1.0f; vmax += 1.0f; }   // pad only for y-scale
@@ -278,7 +286,7 @@ bool plotSeries(unsigned long* times, float* temps, int count,
     int py = gy + gh - (int)((v - vmin) * gh / (vmax - vmin));
     px = constrain(px, gx, gx + gw);
     py = constrain(py, gy, gy + gh);
-    if (prevX >= 0) tft.drawLine(prevX, prevY, px, py, lineColor);
+    if (prevX >= 0) tft.drawLine(prevX, prevY, px, py, graphLineCol());
     prevX = px; prevY = py;
   }
 
@@ -288,11 +296,11 @@ bool plotSeries(unsigned long* times, float* temps, int count,
   avgY = constrain(avgY, gy, gy + gh);
   for (int x = gx; x <= gx + gw; x += 6) {
     int w = (x + 3 <= gx + gw) ? 3 : (gx + gw - x);
-    if (w > 0) tft.drawFastHLine(x, avgY, w, TFT_ORANGE);
+    if (w > 0) tft.drawFastHLine(x, avgY, w, graphAvgCol());
   }
   char abuf[16];
-  snprintf(abuf, sizeof abuf, "avg %.1f", avg);
-  tft.setTextColor(TFT_ORANGE, TFT_NAVY);
+  snprintf(abuf, sizeof abuf, "avg %.1f", toDisp(avg));
+  tft.setTextColor(graphAvgCol(), graphBgCol());
   tft.setTextFont(1);
   tft.setCursor(gx + 2, avgY - 8);
   tft.print(abuf);
@@ -301,55 +309,55 @@ bool plotSeries(unsigned long* times, float* temps, int count,
   // min bottom-right), so the vertical range of the graph is readable. Drawn
   // inside the chart corners - there is no room above the graph (timeframe
   // buttons sit right above it).
-  tft.setTextColor(TFT_CYAN, TFT_NAVY);
+  tft.setTextColor(btnFg(graphBgCol()), graphBgCol());
   char sbuf[16];
-  snprintf(sbuf, sizeof sbuf, "%.0f", vmax);
+  snprintf(sbuf, sizeof sbuf, "%.0f", toDisp(vmax));
   tft.drawRightString(sbuf, gx + gw, gy + 2, 1);        // padded max
-  snprintf(sbuf, sizeof sbuf, "%.0f", vmin);
+  snprintf(sbuf, sizeof sbuf, "%.0f", toDisp(vmin));
   tft.drawRightString(sbuf, gx + gw, gy + gh - 9, 1);   // padded min
   return true;
 }
 
-// Pool temp series wrapper (green line). Weather uses plotWeatherSeries below.
+// Pool temp series wrapper. Weather uses plotWeatherSeries below.
 bool plotPoolSeries(unsigned long* times, float* temps, int count,
                     unsigned long t0, unsigned long nowSec, unsigned long win,
                     int gx, int gy, int gw, int gh,
                     float& dataMin, float& dataMax) {
   return plotSeries(times, temps, count, t0, nowSec, win, gx, gy, gw, gh,
-                    dataMin, dataMax, TFT_GREENYELLOW);
+                    dataMin, dataMax, poolDisp);
 }
 
 // Pool temp history graph. Plots the samples we have logged for the selected
 // timeframe. Auto-dismisses after 30s; any touch keeps it alive.
 void drawPoolGraph() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("Pool Temp History");
-  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
-  tft.setCursor(274, 7);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
-  tft.print("X");
+  tft.print("History > Pool Temperature");
+  backBtn("Back");
 
   // timeframe selector
   const char* labels[4] = {"Day", "Week", "Month", "Year"};
   int bx = 8;
   for (int i = 0; i < 4; i++) {
-    uint16_t col = (i == g_poolTF) ? TFT_DARKGREEN : TFT_DARKGREY;
-    tft.fillRoundRect(bx, 34, 70, 22, 5, col);
-    tft.setTextColor(TFT_WHITE, col);
-    tft.setTextFont(1);
-    tft.setCursor(bx + 18, 40);
-    tft.print(labels[i]);
-    bx += 76;
+    bool sel = i == g_poolTF;
+    uint16_t col = sel ? btnCol() : disabledCol();
+    if (sel) themeBtn(bx, 34, 70, 22, 5);
+    else tft.fillRoundRect(bx, 34, 70, 22, 5, col);
+    tft.setTextColor(btnFg(col), col);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(labels[i], bx + 35, 45, FONT_AUX);
+    tft.setTextDatum(TL_DATUM);
+    bx += 76 + (DISP_W - 320) / 4;
   }
 
   // graph area
-  int gx = 10, gy = 66, gw = 300, gh = 140;
-  tft.fillRect(gx, gy, gw, gh, TFT_NAVY);
-  tft.drawRect(gx - 1, gy - 1, gw + 2, gh + 2, TFT_WHITE);
+  int gx = 10, gy = 66, gw = DISP_W - 20, gh = 140;
+  uint16_t gbg = graphBgCol();
+  tft.fillRect(gx, gy, gw, gh, gbg);
+  tft.drawRect(gx - 1, gy - 1, gw + 2, gh + 2, btnFg(gbg));
 
   unsigned long nowSec = (unsigned long)time(nullptr);
 
@@ -357,7 +365,7 @@ void drawPoolGraph() {
   // would compare every real sample against nowSec==0 and wrongly reject them
   // all, so show an explicit "waiting" message instead of "No data".
   if (nowSec < 1600000000UL) {
-    tft.setTextColor(TFT_LIGHTGREY, TFT_NAVY);
+    tft.setTextColor(btnFg(gbg), gbg);
     tft.setTextFont(1);
     tft.setCursor(gx + 20, gy + gh / 2);
     tft.print("Waiting for time sync...");
@@ -373,20 +381,21 @@ void drawPoolGraph() {
   bool plotted = plotPoolSeries(times, temps, count, t0, nowSec, win, gx, gy, gw, gh, lo, hi);
 
   if (!plotted) {
-    tft.setTextColor(TFT_LIGHTGREY, TFT_NAVY);
+    tft.setTextColor(btnFg(gbg), gbg);
     tft.setTextFont(1);
     tft.setCursor(gx + 20, gy + gh / 2);
     tft.print("No data in this period yet");
   } else {
     // Bottom strip below the chart: actual data low (left), current temp
-    // (center), actual data high (right) for the timeframe shown.
-    tft.setTextColor(TFT_CYAN, TFT_NAVY);
+    // (center), actual data high (right) for the timeframe shown. Sits on the
+    // black screen, not on the graph fill.
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
     tft.setTextFont(2);
     tft.setCursor(gx, gy + gh + 6);
     tft.printf("Lo %.1f", lo);
-    tft.setTextColor(TFT_WHITE, TFT_NAVY);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setCursor(gx + 110, gy + gh + 6);
-    tft.printf("now %.1f%c", g_poolTemp, g_poolUnit);
+    tft.printf("now %.1f%c", poolDisp(g_poolTemp), tempUnit());
     char hbuf[16];
     snprintf(hbuf, sizeof hbuf, "Hi %.1f", hi);
     tft.drawRightString(hbuf, gx + gw, gy + gh + 6, 2);
@@ -397,14 +406,14 @@ void handlePoolGraphTouch(uint16_t x, uint16_t y) {
   // any touch keeps the screen alive for another 2 minutes
   g_screenIdleUntil = millis() + SCREEN_IDLE_TIMEOUT_MS;
 
-  if (inRect(x, y, 265, 4, 315, 24)) { g_screen = SCR_DASH; dirty = true; return; }  // close
+  if (inRect(x, y, RX(265), 4, RX(315), 24)) { g_screen = SCR_DASH; dirty = true; return; }  // close
   int bx = 8;
   for (int i = 0; i < 4; i++) {
     if (inRect(x, y, bx, 34, bx + 70, 56)) {
       if (g_poolTF != i) { g_poolTF = i; dirty = true; }
       return;
     }
-    bx += 76;
+    bx += 76 + (DISP_W - 320) / 4;
   }
   dirty = true;
 }

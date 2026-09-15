@@ -24,7 +24,16 @@
 // OTA_CA_EXPIRY) so a root rotation can't block updates.
 
 #define OTA_REPO    "improving-minnesota/cyd-dashboard"
-#define OTA_ASSET   "cyd-dashboard.ino.bin"
+// Release asset name per board variant: each board downloads only the binary
+// built for its hardware. The bare "cyd-dashboard.ino.bin" name is still
+// published (as a copy of the 2432s028r build) so devices running firmware
+// that predates board-named assets can keep updating; it can be retired once
+// those old builds are out of the field.
+#ifdef CYD_E32R40T
+#define OTA_ASSET   "cyd-dashboard-e32r40t.ino.bin"
+#else
+#define OTA_ASSET   "cyd-dashboard-2432s028r.ino.bin"
+#endif
 #define OTA_API_URL "https://api.github.com/repos/" OTA_REPO "/releases/latest"
 
 // ---- semver helpers -------------------------------------------------------
@@ -168,28 +177,28 @@ static int s_otaFill = 0;
 void drawOtaHeader(const String& version) {
   s_otaFill = 0;
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY); tft.setTextFont(2);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol); tft.setTextFont(2);
   tft.setCursor(8, 6); tft.print("Updating");
   tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK); tft.setTextFont(2);
   tft.setCursor(8, 52); tft.print("Updating to v" + version + "...");
   tft.setTextColor(TFT_RED, TFT_BLACK);
   tft.setCursor(8, 84); tft.print("Do not power off device");
-  tft.drawRect(10, 120, 300, 22, TFT_WHITE);
+  tft.drawRect(10, 120, DISP_W - 20, 22, TFT_WHITE);
 }
 
 void drawOtaProgress(int total, size_t got) {
   if (total <= 0) return;
-  int fill = (int)((long)got * 296 / total); if (fill > 296) fill = 296;
+  int fill = (int)((long)got * (DISP_W - 24) / total); if (fill > DISP_W - 24) fill = DISP_W - 24;
   if (fill < s_otaFill) fill = s_otaFill;
   if (fill > s_otaFill) {
     tft.fillRect(12 + s_otaFill, 122, fill - s_otaFill, 18, TFT_GREEN);
     s_otaFill = fill;
   }
   char pct[16]; snprintf(pct, sizeof pct, "%d%%", (int)((long)got * 100 / total));
-  tft.fillRect(80, 146, 160, 18, TFT_BLACK);
+  tft.fillRect(CX - 80, 146, 160, 18, TFT_BLACK);
   tft.setTextColor(TFT_WHITE, TFT_BLACK); tft.setTextFont(2);
-  tft.setCursor(120, 148); tft.print(pct);
+  tft.setCursor(CX - 40, 148); tft.print(pct);
 }
 
 void drawOtaRestart() {

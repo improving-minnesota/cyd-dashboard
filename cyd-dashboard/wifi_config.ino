@@ -20,26 +20,60 @@ String g_netChan[20];       // comma-joined channel list per SSID (e.g. "1,6")
 int   g_netAps[20];         // how many access points share that SSID
 int  g_netCount = 0;
 int  g_netScroll = 0;
+bool g_scanning = false;   // an async WiFi scan is in flight
 String g_ssid = "";
 String g_pass = "";
 // g_latLonStr is defined in cyd-dashboard.ino (concatenation order)
 
-// Scan for nearby networks and switch to the list screen.
+// Switch to the list screen and kick off an async scan - the list shows
+// "Scanning..." until pollWifiScan() harvests the results.
 void enterWifiScreen() {
   g_wifiSub = 0;
   g_ssid = "";
   g_pass = "";
   g_netScroll = 0;
-  scanWifi();
   g_screen = SCR_WIFI;
+  scanWifi();
   dirty = true;
 }
 
+// Kick off a non-blocking scan. scanNetworks(true) returns immediately, so
+// neither entering the screen nor tapping "Scan" freezes the UI for ~2 s.
 void scanWifi() {
   WiFi.scanDelete();
-  int n = WiFi.scanNetworks();
-  if (n < 0) n = 0;
+  WiFi.mode(WIFI_STA);            // scanning needs the STA radio even with no creds
+  WiFi.scanNetworks(true);
+  g_scanning = true;
   g_netCount = 0;
+  g_netScroll = 0;
+}
+
+// Called from loop() while a scan is in flight: collects results when the
+// scan completes and requests a redraw.
+void pollWifiScan() {
+  if (!g_scanning) return;
+  int n = WiFi.scanComplete();
+  if (n == WIFI_SCAN_RUNNING) {
+    // Animate the "Scanning" dots in place while the list is showing.
+    static unsigned long lastDot = 0;
+    unsigned long now = millis();
+    if (now - lastDot >= 350) {
+      lastDot = now;
+      if (g_screen == SCR_WIFI && g_wifiSub == 0) {
+        static int nd = 0;
+        nd = (nd + 1) % 4;
+        tft.fillRect(8, 52, 140, 20, TFT_BLACK);
+        tft.setTextColor(TFT_CYAN, TFT_BLACK);
+        tft.setTextFont(2);
+        tft.setCursor(8, 52);
+        tft.print("Scanning");
+        for (int i = 0; i < nd; i++) tft.print(".");
+      }
+    }
+    return;
+  }
+  g_scanning = false;
+  if (n < 0) n = 0;   // WIFI_SCAN_FAILED or zero results
   // Deduplicate by SSID, recording how many access points share it and the
   // 2.4GHz channels they use. The ESP32 only sees 2.4GHz, so duplicate SSIDs
   // are multiple APs of the same network, not different bands.
@@ -65,6 +99,8 @@ void scanWifi() {
       g_netCount++;
     }
   }
+  WiFi.scanDelete();   // free the driver's result list
+  dirty = true;
 }
 
 void drawWifiScreen() {
@@ -76,7 +112,7 @@ void drawWifiScreen() {
   else if (g_wifiSub == 5) drawKeyboard("Search address", g_addrSearch, false);
   else if (g_wifiSub == 6) drawKeyboard("Sleep start (HHMM)", g_sleepStartStr, false);
   else if (g_wifiSub == 7) drawKeyboard("Sleep end (HHMM)", g_sleepEndStr, false);
-  else if (g_wifiSub == 8) drawKeyboard("Wake duration (min)", g_wakeStr, false);
+  else if (g_wifiSub == 8) drawKeyboard("Alarm time (HHMM)", g_alarmTimeStr, false);
   else if (g_wifiSub == 10) drawKeyboard("Lat,Lon", g_latLonStr, false);
   else if (g_wifiSub == 11) drawKeyboard("Home airport (ICAO)", g_homeAirport, false);
   else if (g_wifiSub == 13) drawKeyboard("Watch callsign", g_watchCallsign, false);
@@ -100,24 +136,27 @@ void handleWifiTouch(uint16_t x, uint16_t y) {
 // ---- network list ----
 void drawWifiList() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("Network");
-  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
-  tft.setCursor(274, 7);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
-  tft.print("Back");
+  tft.print("Settings > Network");
+  backBtn("Back");
 
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setTextFont(1);
   tft.setCursor(8, 32);
-  tft.printf("%d networks", g_netCount);
-  tft.setCursor(200, 32);
+  if (!g_scanning) tft.printf("%d networks", g_netCount);
+  tft.setCursor(RX(200), 32);
   tft.print(g_ipDhcp ? "IP: DHCP" : "IP: static");
 
-  if (g_netCount == 0) {
+  if (g_scanning) {
+    // Async scan in flight - the dots animate from pollWifiScan().
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setTextFont(2);
+    tft.setCursor(8, 52);
+    tft.print("Scanning");
+  } else if (g_netCount == 0) {
     tft.setTextColor(TFT_CYAN, TFT_BLACK);
     tft.setTextFont(2);
     tft.setCursor(8, 52);
@@ -147,42 +186,41 @@ void drawWifiList() {
   // scroll indicators
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setTextFont(1);
-  tft.setCursor(308, 46);
+  tft.setCursor(RX(308), 46);
   tft.print("^");
-  tft.setCursor(308, 212);
+  tft.setCursor(RX(308), 212);
   tft.print("v");
 
   // bottom buttons: rescan | type SSID | DHCP/static addressing
   tft.setTextFont(2);
-  tft.fillRoundRect(10, 212, 92, 26, 6, TFT_DARKGREY);
-  tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
+  themeBtn(10, 212, 92, 26, 6);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
   tft.drawCentreString("Scan", 56, 218, 2);
-  tft.fillRoundRect(110, 212, 100, 26, 6, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.drawCentreString("Manual", 160, 218, 2);
-  tft.fillRoundRect(218, 212, 94, 26, 6, TFT_NAVY);
-  tft.drawCentreString("IP setup", 265, 218, 2);
+  themeBtn(CX - 50, 212, 100, 26, 6);
+  tft.drawCentreString("Manual", CX, 218, 2);
+  themeBtn(RX(218), 212, 94, 26, 6);
+  tft.drawCentreString("IP setup", RX(265), 218, 2);
 }
 
 void handleWifiListTouch(uint16_t x, uint16_t y) {
   // During the first-boot wizard, Back ends the flow on the dashboard (a
   // "skip" that still leaves the device usable); otherwise it returns to
   // Settings as before.
-  if (inRect(x, y, 265, 4, 315, 24)) {
+  if (inRect(x, y, RX(265), 4, RX(315), 24)) {
     if (g_bootStage == BOOT_WIFI) { g_bootStage = BOOT_DONE; g_screen = SCR_DASH; }
     else g_screen = SCR_SETTINGS;
     dirty = true;
     return;
   }
-  if (inRect(x, y, 300, 40, 319, 90)) { if (g_netScroll > 0) { g_netScroll--; dirty = true; } return; }
-  if (inRect(x, y, 300, 200, 319, 240)) {
+  if (inRect(x, y, RX(300), 40, DISP_W - 1, 90)) { if (g_netScroll > 0) { g_netScroll--; dirty = true; } return; }
+  if (inRect(x, y, RX(300), 200, DISP_W - 1, 240)) {
     int maxs = (g_netCount - 6 > 0) ? g_netCount - 6 : 0;
     if (g_netScroll < maxs) { g_netScroll++; dirty = true; }
     return;
   }
   if (inRect(x, y, 10, 212, 102, 238)) { scanWifi(); dirty = true; return; }
-  if (inRect(x, y, 110, 212, 210, 238)) { g_ssid = ""; g_wifiSub = 1; dirty = true; return; }
-  if (inRect(x, y, 218, 212, 312, 238)) { enterIpConfig(); return; }
+  if (inRect(x, y, CX - 50, 212, CX + 50, 238)) { g_ssid = ""; g_wifiSub = 1; dirty = true; return; }
+  if (inRect(x, y, RX(218), 212, RX(312), 238)) { enterIpConfig(); return; }
 
   // network row
   int row = (y - 40) / 26;
@@ -238,26 +276,23 @@ void drawIpRow(int y, const char* label, const String& value) {
   tft.print(label);
   tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
   tft.setTextDatum(TR_DATUM);
-  tft.drawString(value.length() ? value : "--", 262, y + 4, 2);
+  tft.drawString(value.length() ? value : "--", RX(262), y + 4, 2);
   tft.setTextDatum(TL_DATUM);
-  tft.fillRoundRect(270, y, 42, 24, 5, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.setTextFont(1);
-  tft.setCursor(280, y + 6);
+  themeBtn(RX(270), y, 42, 24, 5);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
+  tft.setTextFont(FONT_AUX);
+  tft.setCursor(RX(280), y + 6);
   tft.print("Edit");
 }
 
 void drawIpConfig() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  tft.print("IP Settings");
-  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
-  tft.setCursor(274, 7);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
-  tft.print("Back");
+  tft.print("Settings > IP Settings");
+  backBtn("Back");
 
   // DHCP / Static mode toggle
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -267,10 +302,10 @@ void drawIpConfig() {
   tft.setTextColor(g_ipDhcp ? TFT_LIGHTGREY : TFT_GREENYELLOW, TFT_BLACK);
   tft.setCursor(150, 44);
   tft.print(g_ipDhcp ? "DHCP" : "Static");
-  tft.fillRoundRect(230, 40, 82, 24, 5, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
-  tft.setTextFont(1);
-  tft.setCursor(250, 47);
+  themeBtn(RX(230), 40, 82, 24, 5);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
+  tft.setTextFont(FONT_AUX);
+  tft.setCursor(RX(250), 47);
   tft.print("Toggle");
 
   if (g_ipDhcp) {
@@ -303,7 +338,7 @@ void drawIpConfig() {
 }
 
 void handleIpConfigTouch(uint16_t x, uint16_t y) {
-  if (inRect(x, y, 265, 4, 315, 24)) {   // Back -> network list
+  if (inRect(x, y, RX(265), 4, RX(315), 24)) {   // Back -> network list
     g_wifiSub = 0;
     // If addressing settings changed while connected, drop the link so the
     // loop() reconnect path re-applies them via applyNetConfig().
@@ -312,7 +347,7 @@ void handleIpConfigTouch(uint16_t x, uint16_t y) {
     dirty = true;
     return;
   }
-  if (inRect(x, y, 230, 40, 312, 64)) {  // DHCP/Static toggle
+  if (inRect(x, y, RX(230), 40, RX(312), 64)) {  // DHCP/Static toggle
     g_ipDhcp = !g_ipDhcp;
     saveNetCfg();
     g_netCfgDirty = true;
@@ -322,14 +357,14 @@ void handleIpConfigTouch(uint16_t x, uint16_t y) {
   // Edit buttons (right edge of each row). DHCP shows only the hostname row;
   // static shows all five, matching drawIpConfig()'s layout.
   if (!g_ipDhcp) {
-    if      (inRect(x, y, 270,  76, 312, 100)) g_wifiSub = 21;
-    else if (inRect(x, y, 270, 104, 312, 128)) g_wifiSub = 22;
-    else if (inRect(x, y, 270, 132, 312, 156)) g_wifiSub = 23;
-    else if (inRect(x, y, 270, 160, 312, 184)) g_wifiSub = 24;
-    else if (inRect(x, y, 270, 188, 312, 212)) g_wifiSub = 25;
+    if      (inRect(x, y, RX(270),  76, RX(312), 100)) g_wifiSub = 21;
+    else if (inRect(x, y, RX(270), 104, RX(312), 128)) g_wifiSub = 22;
+    else if (inRect(x, y, RX(270), 132, RX(312), 156)) g_wifiSub = 23;
+    else if (inRect(x, y, RX(270), 160, RX(312), 184)) g_wifiSub = 24;
+    else if (inRect(x, y, RX(270), 188, RX(312), 212)) g_wifiSub = 25;
     else return;
   } else {
-    if (!inRect(x, y, 270, 76, 312, 100)) return;
+    if (!inRect(x, y, RX(270), 76, RX(312), 100)) return;
     g_wifiSub = 25;
   }
   dirty = true;
@@ -340,7 +375,7 @@ void handleIpConfigTouch(uint16_t x, uint16_t y) {
 char keyFromXY(int x, int y) {
   int row = (y - 60) / 28;
   if (row < 0 || row > 2) return 0;
-  int col = constrain(x / 32, 0, 9);
+  int col = constrain(x / (DISP_W / 10), 0, 9);
   char c;
   if (!g_kbSym) {
     if (row == 0) c = "QWERTYUIOP"[col];
@@ -394,7 +429,7 @@ int cursorIndexAt(const String& text, int textX) {
 // `avail` is the usable text width (narrower for password fields, which have a
 // View/Hide toggle on the right). Password fields are masked unless g_kbShow.
 void drawEditableField(const String& text, bool pw, int avail) {
-  tft.fillRoundRect(6, 34, 308, 22, 4, TFT_DARKGREY);
+  tft.fillRoundRect(6, 34, DISP_W - 14, 22, 4, TFT_DARKGREY);
   tft.setTextColor(TFT_GREENYELLOW, TFT_DARKGREY);
   tft.setTextFont(2);
 
@@ -424,28 +459,25 @@ void drawEditableField(const String& text, bool pw, int avail) {
 
 void drawKeyboard(const String& title, const String& text, bool pw) {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
   tft.print(title.substring(0, 24));
-  tft.fillRoundRect(265, 4, 50, 20, 5, TFT_MAROON);
-  tft.setCursor(274, 7);
-  tft.setTextColor(TFT_WHITE, TFT_MAROON);
-  tft.print("Back");
+  backBtn("Back");
 
   // Reset the edit cursor to the end whenever the active field changes.
   if (g_wifiSub != g_lastKbSub) { g_kbCursor = text.length(); g_lastKbSub = g_wifiSub; g_kbShow = false; }
   // Password fields leave room on the right for the View/Hide toggle.
-  drawEditableField(text, pw, pw ? 252 : 300);
+  drawEditableField(text, pw, pw ? RX(252) : RX(300));
 
   // View/Hide toggle for password fields (reveals the value in cleartext).
   if (pw) {
     uint16_t bg = g_kbShow ? TFT_DARKGREY : TFT_NAVY;
-    tft.fillRoundRect(264, 35, 48, 20, 4, bg);
+    tft.fillRoundRect(RX(264), 35, 48, 20, 4, bg);
     tft.setTextColor(TFT_WHITE, bg);
     tft.setTextFont(1);
-    tft.setCursor(273, 41);
+    tft.setCursor(RX(273), 41);
     tft.print(g_kbShow ? "Hide" : "View");
   }
 
@@ -458,22 +490,22 @@ void drawKeyboard(const String& title, const String& text, bool pw) {
   int yy = 60;
   for (int r = 0; r < 3; r++) {
     for (int c = 0; c < 10; c++) {
-      int x0 = c * 32;
-      tft.fillRect(x0 + 1, yy, 30, 24, TFT_DARKGREY);
+      int x0 = c * (DISP_W / 10);
+      tft.fillRect(x0 + 1, yy, DISP_W / 10 - 2, 24, TFT_DARKGREY);
       tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
       tft.setTextFont(2);
       char ch = rows[r][c];
       if (ch >= 'A' && ch <= 'Z' && !g_kbShift) ch = ch + 32;   // show lowercase unless shift
-      tft.setCursor(x0 + 9, yy + 4);
+      tft.setCursor(x0 + DISP_W / 30, yy + 4);
       tft.print(ch);
     }
     yy += 28;
   }
 
   // bottom control bar: Shift | ?123/abc | space | del | OK
-  const int ctrlY = 144, ctrlH = 75, ctrlW = 64;
+  const int ctrlY = 144, ctrlH = 75, ctrlW = DISP_W / 5;
   const char* labels[5] = { "Shift", g_kbSym ? "abc" : "?123", "space", "del", "OK" };
-  uint16_t cols[5] = { g_kbShift ? TFT_YELLOW : TFT_NAVY, TFT_NAVY, TFT_NAVY, TFT_MAROON, TFT_DARKGREEN };
+  uint16_t cols[5] = { g_kbShift ? TFT_YELLOW : TFT_NAVY, TFT_NAVY, TFT_NAVY, dangerCol(), TFT_DARKGREEN };
   for (int i = 0; i < 5; i++) {
     int x = i * ctrlW;
     uint16_t bg = cols[i];
@@ -490,19 +522,20 @@ void drawKeyboard(const String& title, const String& text, bool pw) {
   tft.setTextFont(2);
   tft.setCursor(72, 222);
   tft.print("<");
-  tft.fillRoundRect(164, 220, 148, 18, 4, TFT_DARKGREY);
-  tft.setCursor(228, 222);
+  tft.fillRoundRect(RX(164), 220, 148, 18, 4, TFT_DARKGREY);
+  tft.setCursor(RX(228), 222);
   tft.print(">");
 }
 
 void handleKeyboardTouch(uint16_t x, uint16_t y) {
-  if (inRect(x, y, 265, 4, 315, 24)) {  // Back
+  if (inRect(x, y, RX(265), 4, RX(315), 24)) {  // Back
     g_kbShift = false; g_kbSym = false; g_kbShow = false;
     g_lastKbSub = -1;   // next entry starts with the cursor at the end
     if (g_wifiSub == 3) { g_screen = SCR_FTRACKER; dirty = true; return; }   // OpenSky creds
     if (g_wifiSub == 4) { g_wifiSub = 3; dirty = true; return; }
     if (g_wifiSub == 5) { g_screen = SCR_LOCATION; dirty = true; return; }   // address search
-    if (g_wifiSub == 6 || g_wifiSub == 7 || g_wifiSub == 8) { g_screen = SCR_SLEEP; dirty = true; return; }
+    if (g_wifiSub == 6 || g_wifiSub == 7) { g_screen = SCR_SLEEP; dirty = true; return; }
+    if (g_wifiSub == 8) { g_screen = SCR_ALARMS; dirty = true; return; }
     if (g_wifiSub == 9) { g_screen = SCR_POOL; dirty = true; return; }       // Govee key
     if (g_wifiSub == 10) { g_screen = SCR_LOCATION; dirty = true; return; }  // lat/lon
     if (g_wifiSub == 11) { g_screen = SCR_FTRACKER; dirty = true; return; }   // home airport
@@ -519,7 +552,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
     case 4: bp = &g_osClientSecret; break;
     case 6: bp = &g_sleepStartStr; break;
     case 7: bp = &g_sleepEndStr; break;
-    case 8: bp = &g_wakeStr; break;
+    case 8: bp = &g_alarmTimeStr; break;
     case 9: bp = &g_goveeKey; break;
     case 10: bp = &g_latLonStr; break;
     case 11: bp = &g_homeAirport; break;
@@ -534,16 +567,16 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
   String& buf = *bp;
 
   // View/Hide toggle for password fields (right side of the text field).
-  if (kbFieldPw() && inRect(x, y, 264, 35, 312, 55)) {
+  if (kbFieldPw() && inRect(x, y, RX(264), 35, RX(312), 55)) {
     g_kbShow = !g_kbShow;
     dirty = true;
     return;
   }
 
   // Tap in the text field to place the edit cursor at that character.
-  if (x >= 6 && x <= 314 && y >= 34 && y <= 56) {
+  if (x >= 6 && x <= DISP_W - 6 && y >= 34 && y <= 56) {
     int start, startWidth;
-    kbVisibleRange(buf, start, startWidth, kbFieldPw() ? 252 : 300);
+    kbVisibleRange(buf, start, startWidth, kbFieldPw() ? RX(252) : RX(300));
     int fullX = (x - 10) + startWidth;
     g_kbCursor = cursorIndexAt(buf, fullX);
     dirty = true;
@@ -553,15 +586,14 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
   // Cursor navigation row (< / >) at the very bottom: move the cursor left/right.
   if (y >= 220) {
     if (inRect(x, y, 8, 220, 156, 239) && g_kbCursor > 0) { g_kbCursor--; dirty = true; }
-    else if (inRect(x, y, 164, 220, 312, 239) && g_kbCursor < (int)buf.length()) { g_kbCursor++; dirty = true; }
+    else if (inRect(x, y, RX(164), 220, RX(312), 239) && g_kbCursor < (int)buf.length()) { g_kbCursor++; dirty = true; }
     return;
   }
 
   int maxlen;
   switch (g_wifiSub) {
     case 1: maxlen = 32; break;
-    case 6: case 7: maxlen = 4; break;
-    case 8: maxlen = 3; break;
+    case 6: case 7: case 8: maxlen = 4; break;
     case 9: maxlen = 80; break;
     case 10: maxlen = 24; break;
     case 11: maxlen = 6; break;
@@ -573,7 +605,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
 
   // bottom control bar (y 144..219): Shift | ?123/abc | space | del | OK
   if (y >= 144 && y <= 219) {
-    int i = constrain(x / 64, 0, 4);
+    int i = constrain(x / (DISP_W / 5), 0, 4);
     if (i == 0) { g_kbShift = !g_kbShift; dirty = true; }
     else if (i == 1) { g_kbSym = !g_kbSym; g_kbShift = false; dirty = true; }
     else if (i == 2) {  // space (insert at cursor)
@@ -619,11 +651,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
       }
       else if (g_wifiSub == 6) { commitSleepTime(6); g_screen = SCR_SLEEP; dirty = true; }
       else if (g_wifiSub == 7) { commitSleepTime(7); g_screen = SCR_SLEEP; dirty = true; }
-      else if (g_wifiSub == 8) {
-        g_wakeMin = constrain(g_wakeStr.toInt(), 1, 120);
-        prefs.begin("flight", false); prefs.putInt("wake", g_wakeMin); prefs.end();
-        g_screen = SCR_SLEEP; dirty = true;
-      }
+      else if (g_wifiSub == 8) { commitAlarmTime(); g_screen = SCR_ALARMS; dirty = true; }
       else if (g_wifiSub == 9) {
         prefs.begin("flight", false); prefs.putString("govee", g_goveeKey); prefs.end();
         g_screen = SCR_POOL; dirty = true;
@@ -679,11 +707,25 @@ void commitSleepTime(int which) {
   prefs.end();
 }
 
+// Parse and persist the current alarm's time from the "HHMM" edit buffer.
+void commitAlarmTime() {
+  int h = constrain(g_alarmTimeStr.substring(0, 2).toInt(), 0, 23);
+  int m = constrain(g_alarmTimeStr.substring(2, 4).toInt(), 0, 59);
+  char buf[8];
+  snprintf(buf, sizeof buf, "%02d%02d", h, m);
+  g_alarmTimeStr = buf;
+  Alarm& a = g_alarms[g_alarmIdx];
+  a.h = h;
+  a.m = m;
+  rearmAlarm(g_alarmIdx);   // reschedule from the new time
+  saveAlarms();
+}
+
 // ---- Serial NVS provisioning ----
 // At boot, listens a few seconds for "KEY=VALUE" lines over USB serial and
 // writes each recognized key into NVS — provisions credentials without
 // compiling them into firmware or touching the filesystem. Host side:
-// provision_config.py. "@END" exits the window early.
+// scripts/provision_config.py. "@END" exits the window early.
 // Production strips this via ENABLE_SERIAL_PROVISION=0 (defined in
 // cyd-dashboard.ino so it's visible first in Arduino's alphabetical
 // concatenation); credentials stay in NVS, so the board keeps working.
@@ -693,6 +735,7 @@ void commitSleepTime(int which) {
 // OTA command state for building a URL from IP + filename (or direct URL)
 static String s_otaIp = "";
 static String s_otaFile = "";
+static String s_otaVer = "";   // label for the OTA screen (from OTA_VER=)
 
 static String buildOtaUrl(const String& ipOrUrl, const String& file) {
   // If a full URL was given (starts with http:// or https://), use it directly.
@@ -715,7 +758,7 @@ static bool scheduleOTA(const String& url) {
   extern String g_otaSha256;
   extern bool g_otaActive;
   g_otaUrl = url;
-  g_otaVersion = "dev";
+  g_otaVersion = s_otaVer.length() ? s_otaVer : "dev";
   g_otaSha256 = ""; // Local dev images have no release digest.
   g_otaActive = true;
   return true;
@@ -754,6 +797,7 @@ bool provisionKey(const String& key, const String& val) {
     return true;
   }
   else if (key == "OTA_FILE")        { s_otaFile = val; Serial.println("PROV: OTA_FILE=" + val); return true; }
+  else if (key == "OTA_VER")         { s_otaVer = val; Serial.println("PROV: OTA_VER=" + val); return true; }
   else if (key == "OTA_GO")          {
     String url = buildOtaUrl(s_otaIp, s_otaFile);
     if (url.length() < 10) { Serial.println("PROV: OTA_GO missing OTA_IP/OTA_FILE"); return false; }
@@ -802,6 +846,7 @@ done:
 //   OTA_URL=http://server:port/firmware.bin   (full URL, legacy)
 //   OTA_IP=192.168.x.x                        (server IP)
 //   OTA_FILE=cyd-dashboard.ino.bin            (firmware filename)
+//   OTA_VER=1.18.0-dev, Build 25              (label shown on the OTA screen)
 //   OTA_GO                                      (trigger with OTA_IP + OTA_FILE)
 void handleSerialCommands() {
   static String line;
@@ -845,6 +890,9 @@ void handleSerialCommands() {
     } else if (key == "OTA_FILE") {
       s_otaFile = val;
       Serial.println("CMD: OTA_FILE=" + val);
+    } else if (key == "OTA_VER") {
+      s_otaVer = val;
+      Serial.println("CMD: OTA_VER=" + val);
     } else if (key == "OTA_GO") {
       String url = buildOtaUrl(s_otaIp, s_otaFile);
       if (url.length() < 10) {
@@ -950,8 +998,8 @@ String friendlyGeoError(const char* code) {
 // address so the user can fix it rather than start over.
 void drawAddrStatus() {
   tft.fillScreen(TFT_BLACK);
-  tft.fillRect(0, 0, 320, 28, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.fillRect(0, 0, DISP_W, 28, g_clockCol);
+  tft.setTextColor(btnFg(g_clockCol), g_clockCol);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
   if (g_addrErr == "empty")            tft.print("Address search");
@@ -996,8 +1044,8 @@ void drawAddrStatus() {
     tft.print("connected to WiFi, then retry.");
   }
 
-  tft.fillRoundRect(10, 200, 300, 30, 6, TFT_NAVY);
-  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  themeBtn(10, 200, DISP_W - 20, 30, 6);
+  tft.setTextColor(btnFg(btnCol()), btnCol());
   tft.setTextFont(2);
   tft.setCursor(86, 207);
   tft.print("Fix address");

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Convert the airline logo images in ./airline-logos into RGB565 bitmaps.
+"""Convert the airline logo images in cyd-dashboard/airline-logos into
+RGB565 bitmaps.
 
 Two output modes:
   --out-dir DIR   Write one <ICAO>.bin file per logo (preferred; logos live in
@@ -17,8 +18,8 @@ RGB565.
   | w*h*2 bytes of RGB565
 
 Usage:
-    python convert_logos.py --out-dir build/logos
-    python convert_logos.py --header airline_logos.h
+    cyd-dashboard/.venv/bin/python scripts/convert_logos.py --out-dir build/logos
+    cyd-dashboard/.venv/bin/python scripts/convert_logos.py --header cyd-dashboard/airline_logos.h
 """
 import os
 import sys
@@ -26,8 +27,10 @@ import argparse
 import struct
 from PIL import Image
 
-SRC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "airline-logos")
-DEFAULT_HDR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "airline_logos.h")
+# The logo sources and generated header live with the sketch, one dir up.
+SKETCH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cyd-dashboard")
+SRC_DIR = os.path.join(SKETCH_DIR, "airline-logos")
+DEFAULT_HDR = os.path.join(SKETCH_DIR, "airline_logos.h")
 LOGO_MAGIC = b"LGO1"
 
 # Box matches the on-screen size (drawn 1:1, no runtime upscaling) so a single

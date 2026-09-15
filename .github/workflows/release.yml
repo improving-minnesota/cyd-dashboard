@@ -100,24 +100,41 @@ jobs:
 
       - name: Build firmware
         run: |
+          set -e
+          # One release, one asset per board variant; each device's firmware
+          # downloads only the asset named for its board (see OTA_ASSET).
           arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
             --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=${{ needs.version.outputs.version }}" \
             --output-dir build/release cyd-dashboard
+          arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
+            --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=${{ needs.version.outputs.version }} -DCYD_E32R40T=1" \
+            --output-dir build/release-e32r40t cyd-dashboard
+          mv build/release-e32r40t/cyd-dashboard.ino.bin \
+             build/release-e32r40t/cyd-dashboard-e32r40t.ino.bin
+          # Board-named alias for the 2.8" image (identical bytes) so every
+          # board has a model-named asset; the bare name stays for devices
+          # already deployed that poll for cyd-dashboard.ino.bin.
+          cp build/release/cyd-dashboard.ino.bin \
+             build/release/cyd-dashboard-2432s028r.ino.bin
 
       - name: Create draft release and attach .bin
         run: |
           VERSION="${{ needs.version.outputs.version }}"
           TAG="v${VERSION}"
+          ASSETS="build/release/cyd-dashboard.ino.bin \
+                  build/release/cyd-dashboard-2432s028r.ino.bin \
+                  build/release-e32r40t/cyd-dashboard-e32r40t.ino.bin"
           # create fails if a draft release already exists from a failed
-          # previous run; in that case just attach the asset to it.
-          gh release create "${TAG}" build/release/cyd-dashboard.ino.bin \
+          # previous run; in that case just attach the assets to it.
+          gh release create "${TAG}" ${ASSETS} \
             --repo "${{ github.repository }}" \
             --draft \
             --title "${TAG}" \
             --generate-notes \
-          || gh release upload "${TAG}" build/release/cyd-dashboard.ino.bin \
-            --repo "${{ github.repository }}" \
-            --clobber
+          || for a in ${ASSETS}; do \
+               gh release upload "${TAG}" "$a" \
+                 --repo "${{ github.repository }}" --clobber; \
+             done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

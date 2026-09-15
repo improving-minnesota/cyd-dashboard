@@ -17,7 +17,7 @@
 // allocates one buffer once during logosInit(), before WiFi/TLS/JSON have
 // fragmented the heap, and reuses it for the one logo that is drawn at a time.
 //
-// .bin file layout (little-endian), produced by convert_logos.py --out-dir:
+// .bin file layout (little-endian), produced by scripts/convert_logos.py --out-dir:
 //   "LGO1" (4) | w (u16) | h (u16) | transparent (u16) | reserved (2) | w*h*2
 
 #include <LittleFS.h>
@@ -25,7 +25,7 @@
 
 static const char LOGO_MAGIC[4] = {'L', 'G', 'O', '1'};
 
-// Logo size as produced by convert_logos.py (BOX_W x BOX_H). Pre-allocate one
+// Logo size as produced by scripts/convert_logos.py (BOX_W x BOX_H). Pre-allocate one
 // buffer of this size up front instead of caching many decoded logos lazily,
 // which fragments the internal heap on the PSRAM-less CYD.
 #define LOGO_MAX_W 72
