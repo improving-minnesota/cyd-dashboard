@@ -50,6 +50,9 @@ no computer needed.
   data, and an unavailable Govee pool temp. Note that route and ground-track
   data come from third-party feeds (ADSB.lol, OpenSky) and may not always be
   current or accurate — a route can be missing, stale, or just wrong.
+- **Flight recall** — tap the aircraft count on the idle screen (e.g. "6
+  aircraft") to bring the last overhead flight's details back up, even
+  after it's gone.
 - **Govee pool temp monitor** *(optional; off by default)* — current pool
   water temperature from a Govee thermometer, with a history graph
   (Day / Week / Month / Year) showing the low, average, and high.
@@ -72,6 +75,11 @@ no computer needed.
   bell icon appears next to the header clock while any alarm is enabled.
   Alarms fire on time even during Sleep Mode — the device wakes at the alarm
   time — and a snoozed or missed alarm still fires after a power loss.
+- **Startup chime** — a short rising chime (C5–E5–G5–C6) with an RGB LED
+  sweep plays on power-on; waking from deep sleep stays silent.
+- **Settings** — every option is configurable on the device itself: theme
+  color, units, clock, WiFi/network, location, flight tracking, alarms,
+  and more — see the [User guide](#user-guide) below.
 - **Firmware updates** — updates itself over WiFi from GitHub, either
   automatically once a day or manually from the About screen.
 
@@ -156,7 +164,8 @@ Where to get each credential is explained below.
   If no flight has been seen yet, it shows dashes.
 - On any on-screen keyboard, **tap into the text field to place the cursor**, so
   you can insert or delete characters in the middle of a value (handy for
-  lat/lon, an address, or a password).
+  lat/lon, an address, or a password). **Shift** cycles lowercase → one
+  capital letter → CAPS (capitals until tapped again) → lowercase.
 - Every setting is explained in **Settings → Help** on the device, and in the
   user guide below.
 
@@ -198,7 +207,9 @@ Defaults for a freshly reset device are shown with each setting.
   airport (ICAO),
   a watched callsign and its **Callsign Notify** pattern (LED + speaker
   alert while its flight details are shown — works even when LED blinking is
-  off — the same 49 presets as alarms), and whether to blink the LED for
+  off — the same 49 presets as alarms), **Show IATA** (display route
+  airports as `ICAO | IATA` when ADSB.lol provides an IATA code), and
+  whether to blink the LED for
   an overhead flight. Also where you
   enter your
   OpenSky credentials. The LED blinks blue for every overhead flight, yellow when
@@ -213,7 +224,7 @@ Defaults for a freshly reset device are shown with each setting.
   minutes of inactivity.
   Defaults: **on**,
   **3.5 mi** radius, **15,000 ft** ceiling, **30 s** poll, timer **off**, no home
-  airport set, no watched callsign, blinking **on**. If your OpenSky **radar-polling** credits run
+  airport set, no watched callsign, show IATA **on**, blinking **on**. If your OpenSky **radar-polling** credits run
   out, the poll backs off to a slower 15-minute recovery check until they refill
   (OpenSky resets daily).
 - **Sleep Mode** — enable it, set the start/end time, and the wake duration.
@@ -266,6 +277,17 @@ critical issue (no WiFi, bad OpenSky credentials, exhausted OpenSky
 radar-polling credits, or pool data unavailable). A **yellow** border means
 you're using OpenSky **anonymously** — not an error, flights still work, just at
 a lower rate limit.
+
+**The weather is wrong or no flights show up nearby.** Your location is
+probably off — fix it under **Settings → Location** (Search Address, Set,
+or Find by IP).
+
+**A flight's route or ground track looks wrong.** Route and track data come
+from third-party feeds (ADSB.lol, OpenSky) that may not have the latest
+data — a route can be missing, outdated, or inaccurate.
+
+**The device moved to a new WiFi network.** Re-enter the network under
+**Settings → Network**.
 
 
 ## License
