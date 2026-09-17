@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v2.1.0...v2.1.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* sync README and help screen with user guide PDF ([#123](https://github.com/improving-minnesota/cyd-dashboard/issues/123)) ([8eed154](https://github.com/improving-minnesota/cyd-dashboard/commit/8eed1543212c3061ccd5dc386ca4e0a8fa18435c))
+
 ## [2.1.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v2.0.0...v2.1.0) (2026-09-17)
 
 
