@@ -707,14 +707,29 @@ static const NtfStep kBootChime[] = {
   { 523, 110, 1 }, { 659, 110, 2 }, { 784, 110, 4 }, { 1047, 320, 7 },
 };
 
-void playBootChime() {
-  for (int i = 0; i < (int)(sizeof(kBootChime) / sizeof(kBootChime[0])); i++) {
-    ledWrite(kBootChime[i].rgb & 1, kBootChime[i].rgb & 2, kBootChime[i].rgb & 4);
-    toneWrite(kBootChime[i].freq);
-    delay(kBootChime[i].ms);
+// Play an NtfStep score once, blocking. Trailing all-rest steps are skipped:
+// presets pad their loop period with a final {0,...,0}, which only matters
+// when the pattern repeats.
+static void playSteps(const NtfStep* steps, int n) {
+  while (n > 0 && steps[n - 1].freq == 0 && steps[n - 1].rgb == 0) n--;
+  for (int i = 0; i < n; i++) {
+    ledWrite(steps[i].rgb & 1, steps[i].rgb & 2, steps[i].rgb & 4);
+    toneWrite(steps[i].freq);
+    delay(steps[i].ms);
   }
   ledWrite(0, 0, 0);
   toneWrite(0);
+}
+
+void playBootChime() {
+  playSteps(kBootChime, sizeof(kBootChime) / sizeof(kBootChime[0]));
+}
+
+// "Firmware updated" signature: the arcade 1-up run, played right after the
+// boot chime on the first cold boot of a new version (see "lastver" in setup()).
+void playUpgradeChime() {
+  delay(250);   // silence gap so it reads as a second, separate sound
+  playSteps(kPatOneUp, sizeof(kPatOneUp) / sizeof(kPatOneUp[0]));
 }
 
 // ---- drawing ----

@@ -448,6 +448,7 @@ TaskHandle_t g_otaTask = NULL;   // dedicated task running performOTA; created o
 TaskHandle_t g_netTask = NULL;     // net task, for stack high-water logging
 volatile bool g_otaRunning = false; // OTA task owns the display; loop() yields
 bool   g_otaFromAbout = false; // Install tapped on About — hold that page (no idle return)
+bool   g_upgraded = false;     // this boot runs a different version than last boot (NVS "lastver")
 
 #define NET_TASK_STACK_BYTES 12288
 // Auto-update status shown at the bottom-left of the dashboard (reuses the
@@ -3526,6 +3527,11 @@ void setup() {
   if (needCalib)      g_bootStage = BOOT_CALIB;
   else if (needWifi)  g_bootStage = BOOT_WIFI;
   else                g_bootStage = BOOT_DONE;
+  // First boot on a new version (or on firmware old enough that it never
+  // recorded one): flag it so the boot chime below is followed by the 1-up
+  // jingle, then stamp the running version so it only fires once.
+  g_upgraded = (prefs.getString("lastver", "") != kVersion);
+  if (g_upgraded) prefs.putString("lastver", kVersion);
   loadAlarms();   // reads the "alarms" blob while the namespace is still open
   prefs.end();
 
@@ -3642,8 +3648,12 @@ void setup() {
   // "Device is on" signature: short rising arpeggio + LED sweep, at the NVS
   // notification volume. Blocking (~0.7s); it finishes before loop()'s LED
   // logic takes over. Cold boots only - a deep-sleep wake (timer, touch, or
-  // window end) shouldn't announce itself like a fresh power-on.
-  if (!wokeFromDeepSleep) playBootChime();
+  // window end) shouldn't announce itself like a fresh power-on. A first boot
+  // on a new version appends the 1-up jingle.
+  if (!wokeFromDeepSleep) {
+    playBootChime();
+    if (g_upgraded) playUpgradeChime();
+  }
 
   dirty = true;
 }
