@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.2.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v3.1.1...v3.2.0) (2026-09-17)
+
+
+### Features
+
+* play 1-up jingle on first boot after a firmware upgrade ([10998d4](https://github.com/improving-minnesota/cyd-dashboard/commit/10998d4d56f14b0c7624b9691683dadc4a9a5fed))
+* play 1-up jingle on first boot after a firmware upgrade ([062bd70](https://github.com/improving-minnesota/cyd-dashboard/commit/062bd70c1fd81d46672ca2840da72cf981ec6ca3))
+
 ## [3.1.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v3.1.0...v3.1.1) (2026-09-17)
 
 
