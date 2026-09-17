@@ -765,7 +765,7 @@ in the git-ignored `cyd-dashboard/.env` file (`WIFI_SSID`, `WIFI_PASSWORD`,
 into the device's NVS over USB serial. Network addressing can also be
 provisioned this way (`WIFI_MODE=static`, `WIFI_IP`, `WIFI_SUBNET`,
 `WIFI_GATEWAY`, `WIFI_DNS`, `WIFI_HOSTNAME`) — the same values as **Settings →
-Network → IP setup** on the device:
+Network → IP Setup** on the device:
 
 ```bash
 cyd-dashboard/.venv/bin/python scripts/provision_config.py --port /dev/cu.usbserial-XXXX
@@ -863,14 +863,16 @@ Settings are stored in NVS under the `"flight"` namespace (see `setup()` in
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `timer` | bool | `false` | Show the dashboard countdown/timer bar (Flight Tracker → Enable timer). |
+| `timer` | bool | `false` | Show the dashboard countdown/timer bar (Flight Tracker → Enable Timer). |
 | `showiata` | bool | `true` | Display route airports as `ICAO | IATA` when ADSB.lol provides an IATA code (Flight Tracker → Show IATA). |
 | `clkcol` | uint32 | `TFT_BLUE` | RGB565 theme color from the General → Clock Color picker — tap-target swatch rows for hue, shade, and greyscale (`hsv565()`/`colorPickEnter()`). Drives the header band and every ordinary button; `btnFg()` picks black text on light colors, white on dark, and `btnCol()` nudges buttons a shade darker on light themes / toward white on dark ones. Header Back buttons are ordinary buttons (`backBtn()`); destructive buttons use `dangerCol()` — red, or yellow when the theme is near-red. History graphs draw on the button color (`graphBgCol()`), the data line is the theme pushed 75% toward white/black (`graphLineCol()`), and the avg line is the theme's complement at the same blend (`graphAvgCol()`). Semantic controls keep their own colors. |
 | `units` | int | `0` | Device units (General → Units): 0 = Imperial (ft/mph/mi), 1 = Metric (m/kts/km), 2 = Aviation (ft/kts/nm). Radius and ceiling are still stored in miles/feet; the selected unit only changes what's displayed and what the sliders edit — switching units keeps the displayed number and reinterprets it in the new unit. Temperatures are fetched/logged in °F and converted at display (`tempDisp()`), so Metric and Aviation show °C. Migrates the old `metric` bool on first boot. |
 | `clock24` | bool | `false` | 24-hour clock (General → Clock). Affects the header clock, time editors, alarm times, and sunrise/sunset; `false` shows 12-hour times with AM/PM markers. |
-| `homeap` | string | `""` | Home airport (ICAO). Used for the LED blink: red when origin matches, green when destination matches. Leave empty to disable. |
-| `watchcs` | string | `""` | Watched callsign. Blinks white repeatedly while that flight's details are shown on the dashboard. Leave empty to disable. |
-| `ipdhcp` | bool | `true` | Network addressing mode (Network → IP setup). `true` = DHCP; `false` = static using the keys below. |
+| `homeap` | string | `""` | Home Airport (ICAO). Used for the LED blink: red when origin matches, green when destination matches. Leave empty to disable. |
+| `watchcs` | string | `""` | Watched callsign. When it appears in a poll and its radar blip is inside the screen bounds it is promoted to the tracked flight; while shown it alerts with the `watchntf` pattern on the LED + speaker. Leave empty to disable. |
+| `watchntf` | int | index of "Radar" | Callsign Notify preset (Flight Tracker → Callsign Notify): index into `kNtfPresets` in `alarms.ino` (49 presets — blink styles, sirens, sweeps, Morse, chimes/bells, melodies). The default is looked up by name at boot so reordering can't change it; persisted indices must still never be reordered — append new presets at the end. Runs on the LED + speaker while the watched flight is shown; independent of `blinkf`. |
+| `ntfvol` | int | `100` | Notify Volume (General → Notify Volume): one of 5 levels — 5/25/50/75/100 percent (`kNtfVolLevels`; the 5% floor keeps notifications audible). Non-level values stored by older builds snap to the nearest level on load. Scales the LEDC duty cycle for every speaker sound — alarm/callsign patterns, the volume-test beep, and the boot chime (`playBootChime()` at the end of `setup()`). `tone()` can't be used for volume: it fixes duty at ~50%, so `toneWrite()` in `alarms.ino` drives `ledcWrite()` directly. |
+| `ipdhcp` | bool | `true` | Network addressing mode (Network → IP Setup). `true` = DHCP; `false` = static using the keys below. |
 | `ipaddr` / `ipmask` / `ipgw` / `ipdns` | string | `""` | Static IP, subnet mask, gateway, DNS. Applied via `WiFi.config()`; blank DNS falls back to the gateway, and an incomplete/invalid set falls back to DHCP. |
 | `hostname` | string | `"cyd-dashboard"` | STA hostname via `WiFi.setHostname()`; applies in both DHCP and static modes. |
 
@@ -880,7 +882,7 @@ the color on every poll and re-blinks whenever the route state changes, so a
 flight that first appears with no route data still gets the correct color once
 its route arrives. Color priority is:
 
-- **White** — a configured watched callsign (`watchcs`) is overhead and its flight details are being shown on the dashboard. Suppressed on the recall flight-detail page.
+- **Watched callsign** — a configured callsign (`watchcs`) promoted to the tracked flight runs its `watchntf` notification preset (same LED + speaker patterns as alarms) while its details are shown, plus a ~5 s speaker alert once per sighting. Independent of **Blink for Flight**; suppressed on the recall flight-detail page and while an alarm owns the LED/speaker.
 - **Yellow** — origin and destination are both `homeap` (same home airport).
 - **Green** — destination matches `homeap`.
 - **Red** — origin matches `homeap`.
@@ -891,8 +893,7 @@ falls back to the ADSB.lol planned route value when OpenSky is empty. Each color
 blinks 5 times at 240 ms on/off. Red, green, and yellow then stay lit while the live
 flight is displayed on the dashboard; they turn off when the flight leaves, the user
 dismisses it, or the screen switches to recalled flight details. Blue turns off after
-its blink. White is non-blocking and repeats while the watched callsign's flight
-details remain on screen. When no flight notification is active on the home screen,
+its blink. When no flight notification is active on the home screen,
 the LED mirrors the dashboard border: solid red for a critical issue (No WiFi, invalid
 OpenSky credentials, exhausted radar credits, unavailable OpenSky/weather/pool temp
 data) or solid yellow when OpenSky is running anonymously. The blink and status
@@ -1029,12 +1030,19 @@ any alarm is enabled.
   multiple alarms can be snoozed at once.
   Firing switches to `SCR_ALARMFIRE` from any screen and runs the alarm's
   notification pattern until handled. Presets
-  (`kAlarmPresets`: Blink, Rapid, Double, Colors, Pulse) drive both the RGB
-  LED (`ledPattern`) and an external speaker on the JST header at GPIO 26
-  (`tonePattern`, via `tone()`/`noTone()`); each beep pattern mirrors its
-  LED cadence. The board has no built-in speaker — audio needs a speaker
+  (`kNtfPresets` — 49 patterns from Blink/Simple through sirens, sweeps,
+  Morse, and melodies like Nokia/Tetris/Charge) are tables of `NtfStep`
+  (freq, ms, rgb) that drive both the RGB
+  LED and an external speaker on the JST header at GPIO 26 — one table keeps
+  light and sound in sync. `toneWrite()` pushes each step's frequency through
+  LEDC with a duty cycle scaled by Notify Volume (`ntfvol`); `tone()`
+  isn't used because it fixes duty at ~50%. The board has no built-in speaker
+  — audio needs a speaker
   plugged into that header, otherwise alarms are LED-only. Picking a
-  preset in the editor previews both for ~3 s.
+  preset in the editor previews both for ~3 s. A short rising C5–E5–G5–C6
+  chime + LED sweep (`playBootChime()`) plays on cold boots as the "device
+  is on" signature; `setup()` skips it when `esp_reset_reason()` reports a
+  deep-sleep wake.
 - **Dismiss** rearms `nextFire` to the next scheduled weekday and returns to
   the dashboard.
 - **Snooze** sets `nextFire = now + 5 min`, increments `a.snoozes`, and
@@ -1055,9 +1063,9 @@ any alarm is enabled.
 - **Time editing** — the shared `drawTimeAdj`/`timeAdjHit` widget (a
   horizontal `[▼][▲]` hour pair left of the time, a minute pair right; the
   hour wraps through AM/PM on its own; tap the time for the manual HHMM
-  keyboard, `g_wifiSub == 8`) is also used for Sleep Mode start/end. Wake min
+  keyboard, `g_wifiSub == 8`) is also used for Sleep Mode start/end. Wake Min
   reuses the same `adjPair`/`adjPairHit` arrow pair (±1, range 1–120).
-- **Deleting** — `Del` sets `g_alarmDelConfirm` and the editor body swaps to
+- **Deleting** — `Delete` sets `g_alarmDelConfirm` and the editor body swaps to
   a Yes/No prompt (same pattern as the Reset confirmation); only Yes shifts
   the array and saves.
 
@@ -1098,7 +1106,7 @@ draws four simulated screens as SVG → PNG via CairoSVG, all populated with
 - `DEVELOPER-USERGUIDE-ftracker.png` — the Settings > Flight Tracker screen
   (page 1) with the device's default values.
 - `DEVELOPER-USERGUIDE-alarms.png` — the Alarms > N editor (hour/minute
-  steppers flanking the time, weekday toggles, LED preset, < / Del / New
+  steppers flanking the time, weekday toggles, LED preset, < / Delete / New
   footer) showing a second alarm so all three footer buttons render.
 
 Data sources: OpenSky `/states/all` + `/tracks/all` and the adsb.lol callsign

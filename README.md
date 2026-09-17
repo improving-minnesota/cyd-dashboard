@@ -12,7 +12,7 @@ no computer needed.
 
 > **Giving a device to a non-techie friend?** Grab the printable two-page
 > [User Guide (PDF)](docs/user-guide/DEVELOPER-USERGUIDE.pdf) — written for
-> non-technical users; front page is setup, back page is everyday reference.
+> non-technical users.
 
 <table>
   <tr>
@@ -39,20 +39,32 @@ no computer needed.
   where the plane actually came from. The LED blinks blue for every overhead
   flight, red when departing your home airport (ICAO), green when arriving at
   your home airport (ICAO), yellow when both origin and destination are your
-  home airport, or white for a watched callsign while its flight details are
-  shown. Red, green, and yellow stay lit while the live flight is displayed;
-  white repeats while the watched callsign is live. On the home screen the LED
+  home airport. Red, green, and yellow stay lit while the live flight is
+  displayed. A watched callsign instead alerts with its **Callsign
+  Notify** pattern — the same 49 presets as alarms, from a soft **Simple**
+  beep to melodies like **Charge** and **Two Bits** — on the LED and speaker
+  while its flight details are shown. On the home screen the LED
   also glows red for a critical error or yellow when OpenSky is anonymous,
   matching the on-screen border. Critical errors include No WiFi, invalid
   OpenSky credentials, exhausted OpenSky credits, unavailable OpenSky/weather
-  data, and an unavailable Govee pool temp.
+  data, and an unavailable Govee pool temp. Note that route and ground-track
+  data come from third-party feeds (ADSB.lol, OpenSky) and may not always be
+  current or accurate — a route can be missing, stale, or just wrong.
 - **Govee pool temp monitor** *(optional; off by default)* — current pool
   water temperature from a Govee thermometer, with a history graph
   (Day / Week / Month / Year) showing the low, average, and high.
 - **Sleep mode** — deep-sleeps overnight and wakes on touch.
 - **Alarms** — up to 6 time-of-day alarms, each with its own days-of-week mask
-  and notification pattern (Blink, Rapid, Double, Colors, Pulse — each plays a
-  matching LED + speaker alert). Sound requires an **external speaker**
+  and notification pattern. Fifty synchronized LED + speaker presets — blink
+  styles (**Blink**, **Rapid**, **Strobe**, **Slow**), unobtrusive singles
+  (**Simple**, **Ding**, **Ping**, **Tick**), sirens and sweeps (**Siren**,
+  **Wail**, **Yelp**, **Hi-Lo**, **Sweep**, **Swoop**, **Warble**), effects
+  (**Heartbeat**, **Radar**, **Knight Rider**-style scanner, **Morse** "CYD",
+  phone/bell/buzzer sounds), and melodies (**Charge**, **Two
+  Bits**, **Nokia**, **Zelda**, **Tetris**, **Für Elise**, **Ode to Joy**,
+  Beethoven's **Fifth**, **Smoke on the Water**, **Dixie**, **Jingle Bells**,
+  arcade **Coin**/**1-Up**/**Pac-Man**, **Happy**/**Sad**, and more). Sound
+  requires an **external speaker**
   plugged into the board's JST speaker header (GPIO 26) — the CYD has no
   built-in speaker, so without one alarms flash the LED only. When one
   fires, big **Dismiss** and **Snooze** (5 min) buttons appear; up to 3
@@ -91,7 +103,7 @@ variants"). Developers can find the wiring and flashing details in
    your WiFi name and password. To change WiFi later, open **Settings →
    Network**.
 3. If the wizard is skipped or you need to redo a step: calibrate via
-   **Settings → General → Calibrate Touch** (or hold anywhere on the screen for
+   **Settings → Calibrate Touch** (or hold anywhere on the screen for
    10 s), and connect WiFi via **Settings → Network**.
 4. **Weather and flights work out of the box.** Optionally add your own OpenSky
    credentials to raise the flight-API rate limit and remove the yellow warning regarding anonymous usage.
@@ -119,12 +131,15 @@ Where to get each credential is explained below.
 
 ## Using the device
 
+- On power-on the device plays a short rising chime (C5–E5–G5–C6) with an
+  RGB LED sweep — the "device is on" signature, at your **Notify Volume**.
+  Waking from deep sleep stays silent.
 - Tap the **Settings** cog to open the settings menu.
 - Tap the **clock/date** in the header to open **Alarms**. Set the time with
   the **▼**/**▲** arrows beside it — hour on the left, minute on the right
   (the hour wraps through AM/PM on its own) — or tap the time itself to type
   it, toggle the weekdays it applies to, and pick a notification pattern. Use
-  **New**/**<**/**>** to manage multiple alarms; **Del** asks for
+  **New**/**<**/**>** to manage multiple alarms; **Delete** asks for
   confirmation before removing one.
 - With **Flight Tracker** on, the header shows your remaining **OpenSky
   credits** as three small readouts — **CRP** (radar polling), **CRL** (route
@@ -151,14 +166,17 @@ Defaults for a freshly reset device are shown with each setting.
 
 - **General** — set the **Clock Color** (the dashboard's clock/header bar) on
   a swatch picker (tap a hue, then a shade or grey), toggle **Auto-Update** (whether the device
-  checks for and installs firmware updates), pick the **Units**
+  checks for and installs firmware updates), adjust **Notify Volume**
+  (5 levels: 5%–100%, applies to every speaker sound — alarms, the callsign alert, and
+  the boot chime; each step plays a test beep at the new level), pick the
+  **Units**
   (**Imperial** ft/mph/mi, **Metric** m/kts/km, or **Aviation** ft/kts/nm —
   also sets weather and pool temps to °F or °C), and choose a **12 or
   24-hour clock** (24-hour hides the AM/PM marker). The picked color also
   themes the
   ordinary screen buttons (black text on light colors, white on dark).
-  Defaults: color **blue**, auto-update **on** (for release builds), units
-  **imperial**, clock **12-hour**.
+  Defaults: color **blue**, auto-update **on** (for release builds),
+  notify volume **100**, units **imperial**, clock **12-hour**.
 - **Location** — set your coordinates so weather and flights are accurate. Use
   **Set** to type them, **Search Address**, or **Find by IP**. Default: none —
   on first boot it's guessed from your IP, otherwise your saved location.
@@ -166,7 +184,7 @@ Defaults for a freshly reset device are shown with each setting.
   message if the address can't be found.
 - **Network** — your WiFi network (it scans in the background — pick from the
   list once "Scanning" finishes, or enter it manually), plus **IP
-  setup**: addressing can stay on **DHCP** (the default, works as before) or be
+  Setup**: addressing can stay on **DHCP** (the default, works as before) or be
   switched to **Static** with an IP address, subnet mask, gateway, and DNS
   server, and you can set a device **hostname** (default `cyd-dashboard`) in
   either mode. A blank DNS
@@ -178,13 +196,15 @@ Defaults for a freshly reset device are shown with each setting.
   switching units keeps the same number and re-reads it in the new
   unit), poll interval, the countdown/timer bar on the dashboard, your home
   airport (ICAO),
-  a watched callsign (blinks white while its flight details are shown), and
-  whether to blink the LED for an overhead flight. Also where you enter your
+  a watched callsign and its **Callsign Notify** pattern (LED + speaker
+  alert while its flight details are shown — works even when LED blinking is
+  off — the same 49 presets as alarms), and whether to blink the LED for
+  an overhead flight. Also where you
+  enter your
   OpenSky credentials. The LED blinks blue for every overhead flight, yellow when
   both origin and destination are your home airport (ICAO), green when arriving,
-  red when departing, or white for a watched callsign. Red, green, and yellow stay
-  lit while the live flight is displayed; white repeats while the watched
-  callsign is live. On the home screen the LED also glows red for a critical
+  or red when departing. Red, green, and yellow stay
+  lit while the live flight is displayed. On the home screen the LED also glows red for a critical
   error or yellow when OpenSky is anonymous, matching the on-screen border.
   Critical errors include No WiFi, invalid OpenSky credentials, exhausted
   OpenSky credits, unavailable OpenSky/weather data, and an unavailable Govee

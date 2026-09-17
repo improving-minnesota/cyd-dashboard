@@ -170,14 +170,16 @@ static const char* const kHelpLines[] = {
   "overhead flight, yellow when",
   "both origin/destination are your",
   "home airport (ICAO), green when",
-  "arriving, red when departing,",
-  "or white for a watched callsign",
-  "while its flight details are shown.",
+  "arriving, red when departing.",
   "Yellow/green/red stay lit while",
-  "the live flight is displayed. White",
-  "repeats while the watched callsign",
-  "is live. The LED also glows red",
-  "for a critical error (No WiFi,",
+  "the live flight is displayed. A",
+  "watched callsign alerts with its",
+  "Callsign Notify pattern on the",
+  "LED + speaker while shown - the",
+  "same 49 presets as alarms, from",
+  "Simple's soft beep to melodies",
+  "like Charge. The LED also glows",
+  "red for a critical error (No WiFi,",
   "invalid creds, exhausted credits,",
   "or unavailable data) or yellow",
   "for OpenSky anonymous, matching",
@@ -206,6 +208,10 @@ static const char* const kHelpLines[] = {
   "  below 50. Tap for details.",
   "  A dotted line shows the",
   "  plane's past ground track.",
+  "  Route & track data come",
+  "  from third-party feeds",
+  "  (ADSB.lol, OpenSky) and",
+  "  may be stale or wrong.",
   "Govee pool temp (opt, off):",
   "  thermometer temp plus a",
   "  history graph with low /",
@@ -220,16 +226,21 @@ static const char* const kHelpLines[] = {
   "  Tap the big temperature on",
   "  the idle screen to open it.",
   "Sleep: deep-sleeps overnight",
-  "and wakes on touch.",
+  "and wakes on touch. A short",
+  "chime plays on power-on (not",
+  "  on deep-sleep wake).",
   "Alarms: tap the header clock.",
   "  Up to 6 alarms with weekday",
-  "  masks and an LED + sound",
-  "  alert pattern. Sound needs",
-  "  an external speaker on the",
-  "  JST port; without one the",
-  "  LED flashes only. A bell icon",
-  "  shows beside the clock when",
-  "  any alarm is on.",
+  "  masks and a Notify pattern -",
+  "  49 LED + sound alerts: blinks,",
+  "  chimes, sirens, sweeps, Morse,",
+  "  and tunes (Nokia, Tetris,", 
+  "  Zelda, Charge, Two Bits).",
+  "  Sound needs an external",
+  "  speaker on the JST port;",
+  "  without one the LED flashes",
+  "  only. A bell icon shows beside",
+  "  the clock when any alarm is on.",
   "  On fire: Dismiss or Snooze",
   "  (5 min). An alarm snoozes",
   "  up to 3x then dismisses",
@@ -247,9 +258,8 @@ static const char* const kHelpLines[] = {
   "  then asks for your WiFi.",
   "To redo either later:",
   "  Calibrate: Settings ->",
-  "    General -> Calibrate",
-  "    Touch, or hold the",
-  "    screen 10 sec.",
+  "    Calibrate Touch, or",
+  "    hold the screen 10 sec.",
   "  Network: Settings ->",
   "    Network.",
   "Weather and flights work",
@@ -268,6 +278,10 @@ static const char* const kHelpLines[] = {
   "the text field to place the",
   "cursor, then type or delete",
   "in the middle of a value.",
+  "Shift cycles: lowercase ->",
+  "Shift (one capital letter) ->",
+  "CAPS (capitals until tapped",
+  "again) -> lowercase.",
   "",
   "GETTING CREDENTIALS",
   "WiFi: from your router - the",
@@ -290,13 +304,16 @@ static const char* const kHelpLines[] = {
   "   - also colors buttons;",
   "   units Imperial/Metric/",
   "   Aviation (also weather F/C);",
-  "   clock 12h or 24h.",
+  "   clock 12h or 24h;",
+  "   Notify Volume: 5 levels",
+  "   (5%-100%, default 100)",
+  "   for all speaker sounds.",
   "Location: your coordinates;",
   "   IP guess on first boot.",
   "   Search Address keeps your",
   "   last search so you can fix it.",
   "Network: WiFi network plus",
-  "   IP setup - DHCP or a",
+  "   IP Setup - DHCP or a",
   "   static IP, mask, gateway,",
   "   DNS and hostname. The",
   "   list shows 'Scanning'",
@@ -307,11 +324,12 @@ static const char* const kHelpLines[] = {
   "   15000 (ft/m: ignore planes",
   "   above this), poll 30s,",
   "   timer bar on/off (off),",
-  "   home airport (ICAO),",
-  "   watch callsign (white blink),",
+  "   Home Airport (ICAO),",
+  "   Watch Callsign + its Notify",
+  "   pattern (Radar),",
   "   show IATA codes (on),",
   "   blink LED for each overhead",
-  "   flight (on)."
+  "   flight (on).",
   "Sleep Mode: on; 10 PM - 8 AM,",
   "   wake 5 min.",
   "Pool Temp: off; add Govee key,",
@@ -580,65 +598,73 @@ void drawGeneral() {
   // color for ordinary buttons across the UI.
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextFont(2);
-  tft.setCursor(8, 44);
+  tft.setCursor(8, 40);
   tft.print("Clock Color");
   uint16_t cc = g_clockCol;   // raw picked color (not the button-adjusted one)
-  tft.fillRoundRect(RX(190), 40, 122, 24, 5, cc);
-  tft.drawRoundRect(RX(189), 39, 124, 26, 5, TFT_WHITE);
+  tft.fillRoundRect(RX(190), 36, 122, 24, 5, cc);
+  tft.drawRoundRect(RX(189), 35, 124, 26, 5, TFT_WHITE);
 
   // Auto-Update toggle
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextFont(2);
-  tft.setCursor(8, 80);
+  tft.setCursor(8, 72);
   tft.print("Auto-Update");
   tft.setTextColor(g_autoUpdate ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
-  tft.setCursor(150, 80);
+  tft.setCursor(150, 72);
   tft.print(g_autoUpdate ? "ON" : "OFF");
-  themeBtn(RX(230), 76, 82, 24, 5);
+  themeBtn(RX(230), 68, 82, 24, 5);
   tft.setTextColor(btnFg(btnCol()), btnCol());
   tft.setTextFont(FONT_AUX);
-  tft.setCursor(RX(250), 83);
+  tft.setCursor(RX(250), 75);
   tft.print("Toggle");
 
-  tft.setTextFont(1);
-  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.setCursor(8, 108);
-  tft.print("Checks for new firmware once");
-  tft.setCursor(8, 120);
-  tft.print("a day and installs it.");
+  // Notify Volume: 5-level stepper (5/25/50/75/100) driving every speaker
+  // sound - alarms, the callsign alert, the boot chime - via the LEDC duty.
+  // Stepping plays a short beep at the new level (see notifyTestBeep).
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextFont(2);
+  tft.setCursor(8, 104);
+  tft.print("Notify Volume");
+  char vb[8];
+  snprintf(vb, sizeof vb, "%d%%", g_notifyVol);
+  tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
+  tft.drawCentreString(vb, RX(200), 104, 2);
+  adjPair(TADJ_MX, 100);
 
   // Units cycle: Imperial / Metric / Aviation. Drives flight distances,
   // speeds and altitudes plus weather/pool temperatures (F or C).
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextFont(2);
-  tft.setCursor(8, 140);
+  tft.setCursor(8, 136);
   tft.print("Units");
   tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
-  tft.setCursor(150, 140);
+  tft.setCursor(150, 136);
   tft.print(unitsName());
-  themeBtn(RX(230), 136, 82, 24, 5);
+  themeBtn(RX(230), 132, 82, 24, 5);
   tft.setTextColor(btnFg(btnCol()), btnCol());
   tft.setTextFont(FONT_AUX);
-  tft.setCursor(RX(250), 143);
+  tft.setCursor(RX(250), 139);
   tft.print("Toggle");
 
   // Clock format: 12h (AM/PM marker) or 24h.
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextFont(2);
-  tft.setCursor(8, 176);
+  tft.setCursor(8, 168);
   tft.print("Clock");
   tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
-  tft.setCursor(150, 176);
+  tft.setCursor(150, 168);
   tft.print(g_clock24 ? "24h" : "12h");
-  themeBtn(RX(230), 172, 82, 24, 5);
+  themeBtn(RX(230), 164, 82, 24, 5);
   tft.setTextColor(btnFg(btnCol()), btnCol());
   tft.setTextFont(FONT_AUX);
-  tft.setCursor(RX(250), 179);
+  tft.setCursor(RX(250), 171);
   tft.print("Toggle");
 
   tft.setTextFont(1);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.setCursor(8, 204);
+  tft.setCursor(8, 196);
+  tft.print("Auto-update checks & installs daily.");
+  tft.setCursor(8, 206);
   tft.print("Units also set weather/pool F or C.");
   tft.setCursor(8, 216);
   tft.print("24h clock hides the AM/PM marker.");
@@ -646,7 +672,7 @@ void drawGeneral() {
 
 void handleGeneralTouch(uint16_t x, uint16_t y) {
   if (inRect(x, y, RX(265), 4, RX(315), 24)) { g_screen = SCR_SETTINGS; dirty = true; return; }
-  if (inRect(x, y, RX(230), 76, RX(312), 100)) {  // Auto-Update toggle
+  if (inRect(x, y, RX(230), 68, RX(312), 92)) {  // Auto-Update toggle
     g_autoUpdate = !g_autoUpdate;
     prefs.begin("flight", false); prefs.putBool("autoupd", g_autoUpdate); prefs.end();
     // Turning auto-update ON clears the last-scan date so it can try again today.
@@ -658,13 +684,21 @@ void handleGeneralTouch(uint16_t x, uint16_t y) {
     return;
   }
   // Clock Color: tap the swatch -> swatch-row color picker
-  if (inRect(x, y, RX(180), 36, RX(316), 68)) {
+  if (inRect(x, y, RX(180), 32, RX(316), 64)) {
     colorPickEnter();
     g_screen = SCR_COLORPICK;
     dirty = true;
     return;
   }
-  if (inRect(x, y, RX(230), 136, RX(312), 160)) {  // Units cycle: Imperial/Metric/Aviation
+  int nv = adjPairHit(x, y, TADJ_MX, 100);   // Notify Volume stepper
+  if (nv) {
+    notifyVolStep(nv);   // cycles the 5 fixed levels, wrapping
+    saveInt("ntfvol", g_notifyVol);
+    notifyTestBeep();   // play a short beep at the new level
+    dirty = true;
+    return;
+  }
+  if (inRect(x, y, RX(230), 132, RX(312), 156)) {  // Units cycle: Imperial/Metric/Aviation
     // Keep the displayed numbers and reinterpret them in the new unit
     // (3.5 mi -> 3.5 km), re-storing them in miles / feet.
     float rDisp = g_radiusMi * distConv();
@@ -680,7 +714,7 @@ void handleGeneralTouch(uint16_t x, uint16_t y) {
     dirty = true;
     return;
   }
-  if (inRect(x, y, RX(230), 172, RX(312), 196)) {  // Clock 12h/24h toggle
+  if (inRect(x, y, RX(230), 164, RX(312), 188)) {  // Clock 12h/24h toggle
     g_clock24 = !g_clock24;
     prefs.begin("flight", false); prefs.putBool("clock24", g_clock24); prefs.end();
     dirty = true;
@@ -807,11 +841,11 @@ void drawFtracker() {
     tft.setCursor(RX(250), 43);
     tft.print("Toggle");
 
-    // Enable timer toggle
+    // Enable Timer toggle
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextFont(2);
     tft.setCursor(8, 76);
-    tft.print("Enable timer");
+    tft.print("Enable Timer");
     tft.setTextColor(g_showTimer ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(150, 76);
     tft.print(g_showTimer ? "ON" : "OFF");
@@ -847,8 +881,8 @@ void drawFtracker() {
     tft.setCursor(8, 195);
     tft.print("OpenSky rate limit.");
   } else {
-    // Page 3: Home-airport route setting + Watch callsign
-    drawEditRow(48, "Home airport (ICAO)", g_homeAirport.length() ? g_homeAirport : "--");
+    // Page 3: Home-Airport route setting + Watch Callsign
+    drawEditRow(48, "Home Airport (ICAO)", g_homeAirport.length() ? g_homeAirport : "--");
     tft.setTextFont(1);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(8, 76);
@@ -856,13 +890,23 @@ void drawFtracker() {
     tft.setCursor(8, 87);
     tft.print("departures/arrivals. Empty = off.");
 
-    drawEditRow(124, "Watch callsign", g_watchCallsign.length() ? g_watchCallsign : "--");
+    drawEditRow(124, "Watch Callsign", g_watchCallsign.length() ? g_watchCallsign : "--");
     tft.setTextFont(1);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(8, 152);
-    tft.print("Flights with this callsign blink");
+    tft.print("Alerts with the pattern below");
     tft.setCursor(8, 163);
-    tft.print("white on the header. Empty = off.");
+    tft.print("while its flight is shown.");
+
+    // Callsign Notify preset: same LED + speaker patterns as alarm
+    // Notify. Works even when "Blink for Flight" is off.
+    tft.setTextFont(2);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setCursor(8, 184);
+    tft.print("Callsign Notify");
+    tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
+    tft.drawCentreString(alarmPresetName(g_watchNotify), RX(205), 184, 2);
+    adjPair(TADJ_MX, 178);
   }
 
   // Pager (bottom): left/right arrows + page indicator
@@ -918,7 +962,7 @@ void handleFtrackerTouch(uint16_t x, uint16_t y) {
       dirty = true;
       return;
     }
-    if (inRect(x, y, RX(230), 72, RX(312), 96)) {  // Enable timer toggle
+    if (inRect(x, y, RX(230), 72, RX(312), 96)) {  // Enable Timer toggle
       g_showTimer = !g_showTimer;
       prefs.begin("flight", false); prefs.putBool("timer", g_showTimer); prefs.end();
       dirty = true;
@@ -939,7 +983,15 @@ void handleFtrackerTouch(uint16_t x, uint16_t y) {
     return;
   }
 
-  // Page 3: edit rows
+  // Page 3: edit rows + callsign notification preset stepper
+  int np = adjPairHit(x, y, TADJ_MX, 178);
+  if (np) {
+    g_watchNotify = alarmPresetStep(g_watchNotify, np);   // alphabetical order
+    previewAlarmLed(g_watchNotify);   // play the picked pattern once on LED + speaker
+    saveInt("watchntf", g_watchNotify);
+    dirty = true;
+    return;
+  }
   if (inRect(x, y, RX(270), 48, RX(312), 72)) {  // Edit home airport
     g_screen = SCR_WIFI;
     g_wifiSub = 11;
@@ -1082,11 +1134,11 @@ void drawSleep() {
   drawTimeAdj(84, "Start", g_sleepStartH, g_sleepStartM);
   drawTimeAdj(124, "End", g_sleepEndH, g_sleepEndM);
 
-  // Wake min: label + value + [▼][▲] stepper (±1, range 1-120)
+  // Wake Min: label + value + [▼][▲] stepper (±1, range 1-120)
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextFont(2);
   tft.setCursor(8, 172);
-  tft.print("Wake min");
+  tft.print("Wake Min");
   char wb[8];
   snprintf(wb, sizeof wb, "%d", g_wakeMin);
   tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
