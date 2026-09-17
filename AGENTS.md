@@ -9,6 +9,10 @@ people.
 - All changes land via PRs to `main` — never commit to `main` directly.
 - PR titles must be conventional commits (`feat:`, `fix:`, `chore:`, …); they
   drive release-please versioning.
+- After a release PR merges (`chore(main): release …`), resync local `main`
+  and tags: `git checkout main && git pull --tags`. The merge bumps
+  `.release-please-manifest.json` + `CHANGELOG.md` and CI pushes the `vX.Y.Z`
+  tag — building from a stale checkout bakes the wrong `APP_VERSION`.
 
 ## Building
 
