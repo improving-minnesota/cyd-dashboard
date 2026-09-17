@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v2.0.0...v2.1.0) (2026-09-17)
+
+
+### Features
+
+* 49 LED+speaker notification presets, callsign notify, and notify volume ([#121](https://github.com/improving-minnesota/cyd-dashboard/issues/121)) ([5cef385](https://github.com/improving-minnesota/cyd-dashboard/commit/5cef3856549e58ed7d5dca377c104a08deba21e9))
+
 ## [2.0.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v1.18.0...v2.0.0) (2026-09-15)
 
 
