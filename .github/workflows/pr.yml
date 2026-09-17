@@ -1,5 +1,6 @@
 # PR checks: lint the PR title (conventional commits, required by release-please
-# in release.yml) and verify the firmware compiles. Runs on every PR to main.
+# in release.yml) and verify the firmware compiles. Runs on every PR to main;
+# the build job is skipped when no changed file can affect the firmware.
 name: PR - Lint & Build
 
 on:
@@ -34,10 +35,41 @@ jobs:
             build
             ci
           requireScope: false
-          subjectPattern: '^[A-Za-z].*'
+          subjectPattern: '^[A-Za-z0-9].*'
           subjectPatternError: |
-            The subject should begin with a letter (e.g. "feat: Add widget" or "fix: clear a bug").
+            The subject should begin with a letter or digit (e.g. "feat: Add widget" or "feat: 4.0in board support").
+
+  # Gate the firmware build on the PR's file list: a PR that only touches
+  # docs/release metadata can't break compilation, so building is wasted time.
+  # Gating at the job level (not a workflow paths filter) makes the check
+  # report "skipped", which still satisfies a required-check ruleset.
+  changes:
+    name: Detect firmware-affecting changes
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      firmware: ${{ steps.filter.outputs.firmware }}
+    steps:
+      - name: List changed files
+        id: filter
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          files=$(gh pr view "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" --json files --jq '.files[].path')
+          echo "$files"
+          # Paths that cannot affect the firmware build: markdown, docs/,
+          # LICENSE/.gitignore, and release-please metadata (so release PRs,
+          # which only touch manifest + CHANGELOG, skip the build too).
+          if printf '%s\n' "$files" | grep -vE '(^|/)[^/]+\.md$|^docs/|^LICENSE$|^\.gitignore$|^\.release-please-manifest\.json$|^release-please-config\.json$' | grep -q .; then
+            echo "firmware=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "firmware=false" >> "$GITHUB_OUTPUT"
+          fi
 
   build:
     name: Build firmware
+    needs: changes
+    if: needs.changes.outputs.firmware == 'true'
     uses: ./.github/workflows/build-firmware.yml
