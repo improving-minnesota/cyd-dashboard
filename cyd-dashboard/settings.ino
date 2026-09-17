@@ -305,8 +305,8 @@ static const char* const kHelpLines[] = {
   "   units Imperial/Metric/",
   "   Aviation (also weather F/C);",
   "   clock 12h or 24h;",
-  "   Notify Volume: 5 levels",
-  "   (5%-100%, default 100)",
+  "   Notify Volume: levels",
+  "   1-10 (default 10)",
   "   for all speaker sounds.",
   "Location: your coordinates;",
   "   IP guess on first boot.",
@@ -626,15 +626,16 @@ void drawGeneral() {
   tft.setCursor(RX(250), 75);
   tft.print("Toggle");
 
-  // Notify Volume: 5-level stepper (5/25/50/75/100) driving every speaker
-  // sound - alarms, the callsign alert, the boot chime - via the LEDC duty.
-  // Stepping plays a short beep at the new level (see notifyTestBeep).
+  // Notify Volume: stepper over kNtfVolLevels driving every speaker sound -
+  // alarms, the callsign alert, the boot chime - via the LEDC duty. Shown as
+  // the level number (1-10). Stepping plays a short
+  // beep at the new level (see notifyTestBeep).
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextFont(2);
   tft.setCursor(8, 104);
   tft.print("Notify Volume");
   char vb[8];
-  snprintf(vb, sizeof vb, "%d%%", g_notifyVol);
+  snprintf(vb, sizeof vb, "%d", ntfVolIdx(g_notifyVol) + 1);
   tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
   tft.drawCentreString(vb, RX(200), 104, 2);
   adjPair(TADJ_MX, 100);
@@ -700,7 +701,7 @@ void handleGeneralTouch(uint16_t x, uint16_t y) {
   }
   int nv = adjPairHit(x, y, TADJ_MX, 100);   // Notify Volume stepper
   if (nv) {
-    notifyVolStep(nv);   // cycles the 5 fixed levels, wrapping
+    notifyVolStep(nv);   // cycles the fixed levels, wrapping
     saveInt("ntfvol", g_notifyVol);
     notifyTestBeep();   // play a short beep at the new level
     dirty = true;

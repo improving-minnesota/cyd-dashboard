@@ -716,11 +716,12 @@ portMUX_TYPE g_trackMux = portMUX_INITIALIZER_UNLOCKED;
 String g_homeAirport = "";      // home airport: drives the incoming/outgoing LED blink (empty = none)
 String g_watchCallsign = "";    // callsign to track preferentially + notify for while its flight details are shown
 int    g_watchNotify   = 0;     // its "Callsign Notify" preset: index into the shared alarm patterns (NVS "watchntf")
-#define NTF_VOL_MIN 5           // Notify Volume floor: never fully inaudible
-// Notify Volume is a 5-level pick rather than a percent continuum; NVS
+#define NTF_VOL_MIN 1           // Notify Volume floor: never fully inaudible
+// Notify Volume is a fixed-level pick rather than a percent continuum; NVS
 // "ntfvol" stores the level's percent so values written by older builds
-// still load sanely (they snap to the nearest level).
-const int kNtfVolLevels[] = { 5, 25, 50, 75, 100 };
+// still load sanely (they snap to the nearest level). The UI shows the
+// level number (1-10).
+const int kNtfVolLevels[] = { 1, 2, 3, 4, 5, 15, 25, 50, 75, 100 };
 #define NTF_VOL_LEVELS ((int)(sizeof(kNtfVolLevels) / sizeof(kNtfVolLevels[0])))
 int    g_notifyVol     = 100;   // one of kNtfVolLevels - loudness for all notification sounds (NVS "ntfvol")
 
