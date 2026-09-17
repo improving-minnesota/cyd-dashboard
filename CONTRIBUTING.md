@@ -63,10 +63,18 @@ to be shippable.
 
 ## Building & verifying
 
-CI builds every PR with the production FQBN. To build locally:
+CI builds every PR with the production FQBN — for **both** supported boards,
+so a change that breaks one variant fails the check. One source tree serves
+the 2.8" ESP32-2432S028R and the 4.0" E32R40T; a `-DCYD_*` flag picks the
+variant, the FQBN stays the same. To build locally:
 
 ```bash
+# 2.8" ESP32-2432S028R (default)
 arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom cyd-dashboard
+
+# 4.0" E32R40T
+arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
+  --build-property "compiler.cpp.extra_flags=-DCYD_E32R40T=1" cyd-dashboard
 ```
 
 See [DEVELOPER.md](DEVELOPER.md) for hardware wiring, flashing/upload, partition
