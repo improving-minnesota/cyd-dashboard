@@ -25,10 +25,9 @@
 
 #define OTA_REPO    "improving-minnesota/cyd-dashboard"
 // Release asset name per board variant: each board downloads only the binary
-// built for its hardware. The bare "cyd-dashboard.ino.bin" name is still
-// published (as a copy of the 2432s028r build) so devices running firmware
-// that predates board-named assets can keep updating; it can be retired once
-// those old builds are out of the field.
+// built for its hardware. Firmware that predates board-named assets polled
+// for the bare "cyd-dashboard.ino.bin"; that asset is no longer published,
+// so those builds cannot OTA and must be updated over USB.
 #ifdef CYD_E32R40T
 #define OTA_ASSET   "cyd-dashboard-e32r40t.ino.bin"
 #else

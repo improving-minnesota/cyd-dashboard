@@ -109,20 +109,19 @@ jobs:
           arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
             --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=${{ needs.version.outputs.version }} -DCYD_E32R40T=1" \
             --output-dir build/release-e32r40t cyd-dashboard
+          # Only board-named assets are published (OTA_ASSET). Firmware old
+          # enough to poll for the bare cyd-dashboard.ino.bin name can no
+          # longer see new releases and must be updated over USB.
           mv build/release-e32r40t/cyd-dashboard.ino.bin \
              build/release-e32r40t/cyd-dashboard-e32r40t.ino.bin
-          # Board-named alias for the 2.8" image (identical bytes) so every
-          # board has a model-named asset; the bare name stays for devices
-          # already deployed that poll for cyd-dashboard.ino.bin.
-          cp build/release/cyd-dashboard.ino.bin \
+          mv build/release/cyd-dashboard.ino.bin \
              build/release/cyd-dashboard-2432s028r.ino.bin
 
       - name: Create draft release and attach .bin
         run: |
           VERSION="${{ needs.version.outputs.version }}"
           TAG="v${VERSION}"
-          ASSETS="build/release/cyd-dashboard.ino.bin \
-                  build/release/cyd-dashboard-2432s028r.ino.bin \
+          ASSETS="build/release/cyd-dashboard-2432s028r.ino.bin \
                   build/release-e32r40t/cyd-dashboard-e32r40t.ino.bin"
           # create fails if a draft release already exists from a failed
           # previous run; in that case just attach the assets to it.
