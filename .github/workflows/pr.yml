@@ -44,8 +44,9 @@ jobs:
 
   # Gate the firmware build on the PR's file list: a PR that only touches
   # docs/release metadata can't break compilation, so building is wasted time.
-  # Gating at the job level (not a workflow paths filter) makes the check
-  # report "skipped", which still satisfies a required-check ruleset.
+  # The build job still runs and succeeds (a fast no-op) — a job skipped via
+  # `if:` reports SKIPPED, which this repo's required-check ruleset does NOT
+  # accept, so the skip must happen inside the called workflow's steps.
   changes:
     name: Detect firmware-affecting changes
     runs-on: ubuntu-latest
@@ -74,5 +75,6 @@ jobs:
   build:
     name: Build firmware
     needs: changes
-    if: needs.changes.outputs.firmware == 'true'
     uses: ./.github/workflows/build-firmware.yml
+    with:
+      skip: ${{ needs.changes.outputs.firmware != 'true' }}
