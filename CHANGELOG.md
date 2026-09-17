@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v2.1.1...v2.2.0) (2026-09-17)
+
+
+### Features
+
+* notify volume levels 1-10, adding 1-5% and 15% steps ([93c5fcd](https://github.com/improving-minnesota/cyd-dashboard/commit/93c5fcd26d099c4d61dd025d48b953807f01801d))
+* notify volume levels 1-10, adding 1-5% and 15% steps ([bf06224](https://github.com/improving-minnesota/cyd-dashboard/commit/bf06224b5d2552541c198fefea5756048c6d9389))
+
 ## [2.1.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v2.1.0...v2.1.1) (2026-09-17)
 
 
