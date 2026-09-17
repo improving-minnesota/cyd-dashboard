@@ -349,6 +349,12 @@ GitHub Actions builds and releases the firmware on standard hosted runners
 > required-check ruleset, whereas a workflow-level path filter would leave the
 > check "Expected" forever and block the merge. Any file outside the
 > skip-list defaults to building.
+>
+> The gate answers "can this PR break the firmware build?", not "will this PR
+> release?". Releasability is decided separately by release-please from the
+> conventional commit type: only `feat`, `fix`, `perf`, `revert`, and breaking
+> changes are user-facing — `ci`, `chore`, `docs`, etc. merge without producing
+> a release PR. So a `ci:` PR still compiles in CI but cuts no release.
 
 - **`release.yml`** — runs on every push/merge to `main` and drives the release
   flow with `googleapis/release-please-action@v4`, configured by

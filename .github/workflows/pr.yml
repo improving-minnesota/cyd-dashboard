@@ -28,10 +28,13 @@ jobs:
           types: |
             feat
             fix
+            perf
             refactor
             revert
             chore
             docs
+            style
+            test
             build
             ci
           requireScope: false
