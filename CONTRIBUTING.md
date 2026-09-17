@@ -23,11 +23,17 @@ semver version, so please use the correct type:
 |---|---|
 | `feat: ...` | a new feature or behavior change |
 | `fix: ...` | a bug fix / correction |
-| `chore:`, `docs:`, `refactor:`, `build:`, `ci:` | non-functional changes |
+| `perf: ...` | a performance improvement |
+| `chore:`, `docs:`, `refactor:`, `build:`, `ci:`, `test:`, `style:` | non-functional changes |
 | `feat!:` / `fix!:`, or a `BREAKING CHANGE:` footer | a breaking change |
 
 The subject should start with a letter or number, e.g. `feat: Add a new setting`
 or `feat: 4.0in board support`.
+
+Only `feat`, `fix`, `perf`, and `revert` — or any type carrying a breaking-change
+marker — are *release-worthy*: merging one opens or updates the release-please
+PR. The other types are non-releasing: they produce no release PR and are
+omitted from the changelog.
 
 ## Development workflow
 
@@ -67,7 +73,9 @@ to be shippable.
 CI builds every PR with the production FQBN — for **both** supported boards,
 so a change that breaks one variant fails the check. PRs that only touch docs
 or release metadata (markdown, `docs/`, release-please files) skip the build
-entirely. One source tree serves
+entirely. The gate looks at *files changed*, not the commit type — a `ci:` PR
+still compiles the firmware (which validates the workflow change) even though
+it won't trigger a release when merged. One source tree serves
 the 2.8" ESP32-2432S028R and the 4.0" E32R40T; a `-DCYD_*` flag picks the
 variant, the FQBN stays the same. To build locally:
 
