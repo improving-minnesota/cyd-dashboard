@@ -3938,10 +3938,14 @@ void loop() {
   // any enabled alarm so the OTA screen/reboot can't swallow a firing or yank
   // the UI right after one. The fetch itself still runs on the net task
   // (netWantAutoScan) since the TLS + JSON would overflow the loopTask stack.
+  // The whole scheduler is also gated off inside the sleep window: a
+  // touch-wake (or alarm-due wake) there must never start an OTA, whose
+  // reboot would play the boot sound at night. A scan armed before the
+  // window simply fires at the first awake opportunity after it ends.
   {
     time_t epoch = time(nullptr);
     if (g_autoUpdate && wifiUp && g_timeReady && epoch >= 1600000000L
-        && !g_otaActive && !g_otaRunning) {
+        && !g_otaActive && !g_otaRunning && !inSleepWindowNow()) {
       unsigned long day = (unsigned long)(epoch / 86400UL);
       if (!g_autoScanAt && g_lastScanDay != day) {
         g_autoScanAt = epoch + (time_t)(esp_random() % AUTOSCAN_JITTER_S);
@@ -3965,13 +3969,9 @@ void loop() {
           } else {
             time_t deferTo = occ + AUTOSCAN_ALARM_QUIET_S;
             // Next sleep entry bounds how long the scan can be postponed:
-            // deferring past it would lose today's only opportunity.
-            time_t horizon = 0;
-            if (g_sleepOn) {
-              horizon = inSleepWindowNow()
-                ? (wakeUntil ? epoch + (time_t)((wakeUntil - now) / 1000UL) : epoch)
-                : nextSleepStart(epoch);
-            }
+            // deferring past it would lose today's only opportunity (the
+            // scheduler never runs inside the window itself).
+            time_t horizon = g_sleepOn ? nextSleepStart(epoch) : 0;
             if (!horizon || deferTo <= horizon) {
               g_autoScanAt = deferTo;
             } else {

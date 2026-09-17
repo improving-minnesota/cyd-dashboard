@@ -428,6 +428,10 @@ releases. All of this lives in `cyd-dashboard/ota.ino`.
   past the next sleep-window start — i.e. no quiet slot remains while the
   device is awake — it takes `bestEffortSlot()` instead, the awake moment
   furthest from any firing, so dense alarm schedules can't starve the update.
+  The scheduler is also fully gated off inside the sleep window — a
+  touch-wake or alarm-due wake there can never start an OTA, whose reboot
+  would play the boot sound at night; a pending scan fires at the first
+  awake opportunity after the window ends.
   If Auto-Update is ON and a newer release exists, it starts the OTA.
   Toggling **Auto-Update** ON in **Settings → General** clears `lastscan` and
   schedules an immediate scan (the alarm window still applies).
