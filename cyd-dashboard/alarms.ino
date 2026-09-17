@@ -509,6 +509,24 @@ time_t nextAlarmAt() {
   return (time_t)best;
 }
 
+// Earliest enabled-alarm occurrence after `after`, counting both the next
+// scheduled firing and a parked snooze (whose nextFire sits earlier than the
+// schedule). Unlike nextAlarmAt(), passing `after` earlier than now also finds
+// occurrences that already fired but still sit inside a trailing window - the
+// daily update scan's +/-1h alarm quiet window uses it both ways.
+time_t nextAlarmAfter(time_t after) {
+  uint32_t best = 0;
+  for (int i = 0; i < g_alarmCount; i++) {
+    const Alarm& a = g_alarms[i];
+    if (!a.en) continue;
+    time_t s = nextScheduled(i, after);
+    if (s && (!best || (uint32_t)s < best)) best = (uint32_t)s;
+    if (a.nextFire > (uint32_t)after && (!best || a.nextFire < best))
+      best = a.nextFire;
+  }
+  return (time_t)best;
+}
+
 // "Snoozing for N minutes..." for the dashboard's bottom-left status line
 // while a snooze is pending; returns false when no snooze is pending. The
 // minute count is ceiled so it reads 5 down to 1 rather than hitting 0.

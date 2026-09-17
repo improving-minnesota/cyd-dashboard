@@ -688,6 +688,10 @@ void handleGeneralTouch(uint16_t x, uint16_t y) {
     if (g_autoUpdate) {
       g_lastScanDay = 0;
       prefs.begin("flight", false); prefs.putULong("lastscan", 0); prefs.end();
+      // Scan promptly rather than waiting out the daily jitter; the alarm
+      // quiet window still applies when it fires.
+      g_autoScanAt = time(nullptr);
+      g_autoScanForced = false;
     }
     dirty = true;
     return;
