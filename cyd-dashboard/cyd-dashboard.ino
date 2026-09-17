@@ -38,6 +38,11 @@
 struct RuntimeLogo { char icao[4]; uint16_t* data; int w; int h; };
 bool logosInit();
 const RuntimeLogo* findAirlineLogo(const char* callsign);
+// Same trick for the notification-step type in alarms.ino: without an explicit
+// declaration here, the generated prototype for ntfStepAt() would be hoisted
+// above the struct definition and fail to compile.
+struct NtfStep { uint16_t freq; uint16_t ms; uint8_t rgb; };
+static const NtfStep* ntfStepAt(int preset, unsigned long now);
 void logoRelease(const RuntimeLogo* logo);
 // Forward-declare Plane so Arduino's auto-generated function prototypes (which
 // are inserted before the sketch body) can reference drawFlightInfo(Plane& p).
@@ -567,7 +572,7 @@ int g_wxTF = WX_WEEK;
 
 String g_savedSsid = "";   // WiFi loaded from NVS
 String g_savedPass = "";
-// Network addressing (Settings -> Network -> IP setup). g_ipDhcp keeps today's
+// Network addressing (Settings -> Network -> IP Setup). g_ipDhcp keeps today's
 // DHCP behavior; when false the g_static* strings are applied via WiFi.config().
 bool   g_ipDhcp    = true;
 String g_staticIp   = "";
@@ -709,7 +714,27 @@ volatile bool g_trackBusy = false;   // cross-task guard
 portMUX_TYPE g_trackMux = portMUX_INITIALIZER_UNLOCKED;
 
 String g_homeAirport = "";      // home airport: drives the incoming/outgoing LED blink (empty = none)
-String g_watchCallsign = "";    // callsign to blink white for while its flight details are shown
+String g_watchCallsign = "";    // callsign to track preferentially + notify for while its flight details are shown
+int    g_watchNotify   = 0;     // its "Callsign Notify" preset: index into the shared alarm patterns (NVS "watchntf")
+#define NTF_VOL_MIN 5           // Notify Volume floor: never fully inaudible
+// Notify Volume is a 5-level pick rather than a percent continuum; NVS
+// "ntfvol" stores the level's percent so values written by older builds
+// still load sanely (they snap to the nearest level).
+const int kNtfVolLevels[] = { 5, 25, 50, 75, 100 };
+#define NTF_VOL_LEVELS ((int)(sizeof(kNtfVolLevels) / sizeof(kNtfVolLevels[0])))
+int    g_notifyVol     = 100;   // one of kNtfVolLevels - loudness for all notification sounds (NVS "ntfvol")
+
+// Index of the level nearest a stored percent.
+static int ntfVolIdx(int vol) {
+  int best = 0;
+  for (int i = 1; i < NTF_VOL_LEVELS; i++)
+    if (abs(kNtfVolLevels[i] - vol) < abs(kNtfVolLevels[best] - vol)) best = i;
+  return best;
+}
+// g_notifyVol one step in dir (±1), wrapping through kNtfVolLevels.
+void notifyVolStep(int dir) {
+  g_notifyVol = kNtfVolLevels[(ntfVolIdx(g_notifyVol) + NTF_VOL_LEVELS + dir) % NTF_VOL_LEVELS];
+}
 
 // ---- small helpers ----
 float hav(float lat1, float lon1, float lat2, float lon2) {
@@ -1556,6 +1581,27 @@ void fetchFlights() {
   sortPlanes();
   g_radarDataFailed = false;
   if (isDevBuild()) Serial.printf("[net] flights ok planes=%d free=%u\n", planeCount, (unsigned)ESP.getFreeHeap());
+  // A configured watch callsign outranks the closest flight: when the watched
+  // plane appears in this poll and its blip would land inside the overall
+  // screen bounds, it is promoted to planes[0] so every downstream user
+  // (details, route/track fetches, blink, radar, recall snapshot) tracks it
+  // instead of the closer flight. A watched plane that would not draw is left
+  // alone and the closest flight stays tracked.
+  int watchIdx = -1;
+  if (g_watchCallsign.length() > 0) {
+    for (int i = 0; i < planeCount; i++) {
+      if (isWatchedCallsign(planes[i].callsign) && blipOnScreen(planes[i])) {
+        watchIdx = i;
+        break;
+      }
+    }
+  }
+  if (watchIdx > 0) {
+    Plane t = planes[0];
+    planes[0] = planes[watchIdx];
+    planes[watchIdx] = t;
+  }
+  bool watchShown = (watchIdx >= 0);
   // A freshly found overhead flight re-shows the flight view even if the user
   // had dismissed it earlier via the countdown bar. If the overhead plane's
   // identity changed, reset any route details so they are re-fetched for the
@@ -1563,7 +1609,7 @@ void fetchFlights() {
   static char lastOverheadIcao[7] = "";
   static char lastBlinkIcao[7] = "";    // so we re-blink when the color changes
   static BlinkColor lastBlinkColor = BLINK_NONE;
-  if (planeCount > 0 && planes[0].distMi <= g_radiusMi) {
+  if (planeCount > 0 && (planes[0].distMi <= g_radiusMi || watchShown)) {
     g_suppressFlight = false;
     // Snapshot the overhead flight so the "N aircraft" tap can recall the same
     // details later, even after the plane leaves the radius. Update it every
@@ -1623,30 +1669,30 @@ void fetchFlights() {
     // radar draws no line and dead-reckoning falls back to heading/speed.
     unsigned long nowMs = millis();
     if (!g_routeFetched && (long)(nowMs - g_nextRouteMs) >= 0) fetchRoute(planes[0].icao24);
-    if (!g_trackFetched && (long)(nowMs - g_nextTrackMs) >= 0) fetchTrack(planes[0].icao24);
+    // The watched flight's ground track is refetched every poll instead of
+    // being cached from its first sighting, so the drawn path and the
+    // dead-reckoned blip keep following its real trajectory while it's in view.
+    if ((!g_trackFetched || watchShown) && (long)(nowMs - g_nextTrackMs) >= 0) fetchTrack(planes[0].icao24);
     if (!g_adsbRouteFetched && (long)(nowMs - g_nextAdsbMs) >= 0) fetchAdsbRoute(planes[0].callsign);
     // Decide the LED color from the best available route source. Re-check on
     // every poll and re-blink whenever the color changes (e.g. when route data
     // arrives after the first sighting). OpenSky is preferred per field when
     // non-empty; ADSB.lol fills the gaps. Color priority is yellow (same home
     // airport), green (home arrival), red (home departure), then blue. A
-    // watched callsign overrides the route color and blinks white repeatedly.
+    // watched callsign skips the route-color blink entirely - loop() drives
+    // its saved notification preset via updateWatchNotify() instead, so it
+    // also stays independent of the blink-for-flight setting.
     bool watchMatch = isWatchedCallsign(planes[0].callsign);
-    BlinkColor color = watchMatch ? BLINK_WHITE : computeBlinkColor();
+    BlinkColor color = watchMatch ? BLINK_NONE : computeBlinkColor();
     if (strncmp(planes[0].icao24, lastBlinkIcao, 6) != 0) {
       strncpy(lastBlinkIcao, planes[0].icao24, 6);
       lastBlinkIcao[6] = 0;
       lastBlinkColor = color;
       g_blinkColor = color;
-      g_pendingBlink = true;
+      g_pendingBlink = !watchMatch;
     } else if (!watchMatch && color != lastBlinkColor) {
       lastBlinkColor = color;
       g_blinkColor = color;
-      g_pendingBlink = true;
-    } else if (watchMatch && g_blinkColor != BLINK_WHITE) {
-      // Keep the watched-plane blink re-armed while it stays overhead so loop()
-      // can drive the repeating white blink whenever flight details are shown.
-      g_blinkColor = BLINK_WHITE;
       g_pendingBlink = true;
     }
   } else {
@@ -1851,7 +1897,7 @@ void colorHS(uint16_t c, int& h, int& s) {
   else              h = ((60 * (r - g) / d) + 600) % 360;
 }
 
-// Color for destructive buttons (Del, Yes, Factory Reset): red.
+// Color for destructive buttons (Delete, Yes, Factory Reset): red.
 // When the theme itself is close to red (saturated, hue within ~25 deg of
 // 0), use yellow so the button still contrasts with the header band it
 // sits on.
@@ -2092,6 +2138,17 @@ void drawSnoozeStatus() {
   tft.print(msg);
 }
 
+// True when a flight should be shown live on the dashboard: the tracked plane
+// (planes[0], which fetchFlights promotes a watched callsign into) is inside
+// the configured radius, or is the watched callsign whose blip lands inside
+// the overall screen bounds. Recomputed on the live dx/dy so dead-reckoning
+// off the screen/radius drops the view the same way the next poll would.
+bool flightOverhead() {
+  return planeCount > 0 &&
+         (planes[0].distMi <= g_radiusMi ||
+          (isWatchedCallsign(planes[0].callsign) && blipOnScreen(planes[0])));
+}
+
 void drawDashboard() {
   tft.fillScreen(TFT_BLACK);
 
@@ -2105,8 +2162,7 @@ void drawDashboard() {
 
   // main content: flight overhead or idle weather. Honor g_suppressFlight so a
   // dismissed flight stays dismissed until a new overhead flight is found.
-  bool overhead = g_trackEnabled && !g_suppressFlight
-                  && (planeCount > 0 && planes[0].distMi <= g_radiusMi);
+  bool overhead = g_trackEnabled && !g_suppressFlight && flightOverhead();
   if (overhead) {
     // Route details are drawn inline by drawFlightInfo. They appear once the
     // route is auto-fetched (see fetchRoute in flight_details.ino); the
@@ -2309,37 +2365,9 @@ void blinkLed(BlinkColor color) {
   }
 }
 
-// Continuous white blink for a watched callsign while its flight details are
-// shown. Non-blocking: called from loop() every tick and toggles the LED with
-// millis() so the main loop (touch + drawing) keeps running.
-void updateWatchBlink(unsigned long now, bool active) {
-  static unsigned long cycleStart = 0;
-  const unsigned long PHASE_MS = 240;
-  const unsigned long PAUSE_MS = 1500;
-  const unsigned long CYCLE_MS = 10 * PHASE_MS + PAUSE_MS;
-  pinMode(CYD_LED_RED, OUTPUT);
-  pinMode(CYD_LED_GREEN, OUTPUT);
-  pinMode(CYD_LED_BLUE, OUTPUT);
-  if (!active) {
-    if (cycleStart) {
-      digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
-      cycleStart = 0;
-    }
-    return;
-  }
-  if (cycleStart == 0) cycleStart = now;
-  unsigned long t = (now - cycleStart) % CYCLE_MS;
-  if (t < 10 * PHASE_MS) {
-    bool on = ((t / PHASE_MS) % 2) == 0;
-    if (on) {
-      digitalWrite(CYD_LED_RED, LOW); digitalWrite(CYD_LED_GREEN, LOW); digitalWrite(CYD_LED_BLUE, LOW);
-    } else {
-      digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
-    }
-  } else {
-    digitalWrite(CYD_LED_RED, HIGH); digitalWrite(CYD_LED_GREEN, HIGH); digitalWrite(CYD_LED_BLUE, HIGH);
-  }
-}
+// The watched-callsign notification (LED + speaker) lives in alarms.ino as
+// updateWatchNotify(): it reuses the shared alarm patterns so the callsign
+// alert looks and sounds like the user's chosen preset.
 
 // Keep red/green/yellow route colors solid while the live flight details are
 // shown on the dashboard, and turn them off when the flight leaves or the view
@@ -2772,6 +2800,17 @@ bool plotRadarBlip(int cx, int cy, float scale, float dxMi, float dyMi, float di
 // Erase a previously drawn blip so its old pixel doesn't leave a trail. Only
 // safe because blips are never drawn over on-screen objects.
 void eraseRadarBlip(int px, int py) { tft.fillCircle(px, py, kBlipR, TFT_BLACK); }
+
+// True when a plane's radar blip would land inside the overall screen bounds.
+// fetchFlights() uses this to promote a watched callsign to the tracked slot
+// only when it would actually draw — a plane past the screen edge (even when
+// within the OpenSky poll bbox) does not take priority.
+bool blipOnScreen(const Plane& p) {
+  float scale = (float)kRadarR / g_radiusMi;
+  int px = kRadarCX + (int)(p.dxMi * scale);
+  int py = kRadarCY - (int)(p.dyMi * scale);
+  return px >= 0 && px <= DISP_W - 1 && py >= 0 && py <= 239;
+}
 
 // The overhead flight (planes[0], whose details are on the left) is cyan so
 // it's easy to pick out; the rest stay red (in range) / green (outside).
@@ -3295,8 +3334,7 @@ void handleTouch() {
   }
 
   if (g_screen == SCR_DASH) { // SCR_DASH
-    bool overhead = g_trackEnabled && !g_suppressFlight
-                    && (planeCount > 0 && planes[0].distMi <= g_radiusMi);
+    bool overhead = g_trackEnabled && !g_suppressFlight && flightOverhead();
 
     // tapping the header credits opens the OpenSky Credits screen (three
     // buckets). Only active when flight tracking is on (the indicator is only
@@ -3320,7 +3358,10 @@ void handleTouch() {
     // nothing until a later redraw. The countdown-bar tap zone only applies
     // while the timer is shown (so there is no invisible region when hidden).
     if (g_radarShown &&
-        ((x >= 265 && y >= 4 && x <= 315 && y <= 24) ||  // Back button
+        // Back button - runs to the right screen edge (past the drawn button)
+        // so taps the calibration maps slightly hot still register instead of
+        // dying in the few-pixel dead strip at the panel edge.
+        ((inRect(x, y, RX(265), 4, DISP_W - 1, 24)) ||
          (g_showTimer && x >= RX(296) && y >= HEADER_H + 2 && y <= 200))) {  // countdown bar
       g_suppressFlight = true;
       dirty = true;
@@ -3363,7 +3404,7 @@ void handleTouch() {
     g_screenIdleUntil = millis() + SCREEN_IDLE_TIMEOUT_MS;
     if (g_trackEnabled && inRect(x, y, RX(194), 0, RX(264), 33)) { g_creditsReturn = SCR_FLIGHTDETAIL; g_screen = SCR_CREDITS; dirty = true; return; }
     if (inRect(x, y, 0, 0, RX(190), HEADER_H - 1)) { g_screen = SCR_ALARMS; g_alarmIdx = constrain(g_alarmIdx, 0, g_alarmCount - 1); dirty = true; return; }
-    if (inRect(x, y, RX(265), 4, RX(315), 24)) { g_screen = SCR_DASH; dirty = true; return; }
+    if (inRect(x, y, RX(265), 4, DISP_W - 1, 24)) { g_screen = SCR_DASH; dirty = true; return; }
     return;
   }
 }
@@ -3443,6 +3484,13 @@ void setup() {
   g_clockCol = (uint16_t)prefs.getUInt("clkcol", DEFAULT_CLOCK_COL);
   g_homeAirport = prefs.getString("homeap", "");
   g_watchCallsign = prefs.getString("watchcs", "");
+  // Callsign Notify defaults to "Radar" - looked up by name so it stays
+  // correct even if preset indices shift in a later release.
+  int watchNtfDef = 0;
+  for (int i = 0; i < alarmPresetCount(); i++)
+    if (strcmp(alarmPresetName(i), "Radar") == 0) { watchNtfDef = i; break; }
+  g_watchNotify = constrain((int)prefs.getInt("watchntf", watchNtfDef), 0, alarmPresetCount() - 1);
+  g_notifyVol = kNtfVolLevels[ntfVolIdx((int)prefs.getInt("ntfvol", 100))];
   g_goveeKey = prefs.getString("govee", "");
   g_poolDeviceId = prefs.getString("poolid", "");
   g_poolModel = prefs.getString("poolmodel", "");
@@ -3578,6 +3626,12 @@ void setup() {
   // carved from the heap drops below what mbedtls needs. 12 KB matches the net
   // task's measured peak, so heap stays clear of that threshold.
   xTaskCreate(otaTaskEntry, "ota", 12288, NULL, 1, &g_otaTask);
+
+  // "Device is on" signature: short rising arpeggio + LED sweep, at the NVS
+  // notification volume. Blocking (~0.7s); it finishes before loop()'s LED
+  // logic takes over. Cold boots only - a deep-sleep wake (timer, touch, or
+  // window end) shouldn't announce itself like a fresh power-on.
+  if (!wokeFromDeepSleep) playBootChime();
 
   dirty = true;
 }
@@ -3955,9 +4009,12 @@ void loop() {
 
   // Determine whether a flight is currently shown live on the dashboard (not on
   // the recall flight-detail page), and whether that callsign is the watched one.
+  // The watched-callsign alert is NOT gated by g_blinkForFlight - that toggle
+  // only controls the per-flight route-color blink.
   bool liveFlight = (g_blinkForFlight && g_screen == SCR_DASH && !g_suppressFlight &&
-                     planeCount > 0 && planes[0].distMi <= g_radiusMi);
-  bool watchActive = liveFlight && isWatchedCallsign(planes[0].callsign);
+                     flightOverhead());
+  bool watchActive = g_screen == SCR_DASH && !g_suppressFlight &&
+                     flightOverhead() && isWatchedCallsign(planes[0].callsign);
 
   // A non-watch route blink that just finished is the color to hold solid while
   // the live flight remains on the dashboard.
@@ -3965,18 +4022,17 @@ void loop() {
     g_routeHoldColor = blinked;
   }
 
-  // Drive the LED: watch-white and route-hold notifications override the
-  // dashboard status. The status LED only runs on the main home screen when no
-  // flight notification is active.
-  bool routeActive = liveFlight && g_routeHoldColor != BLINK_NONE;
+  // Drive the LED + speaker: the watched-callsign alert (its saved preset) and
+  // the route-hold color override the dashboard status. The status LED only
+  // runs on the main home screen when no flight notification is active. All of
+  // this stays inside the alarm gate so a firing alarm keeps the LED + speaker.
+  updateWatchNotify(now, watchActive);
+  bool routeActive = liveFlight && !watchActive && g_routeHoldColor != BLINK_NONE;
   if (watchActive) {
     updateRouteLed(false);
-    updateWatchBlink(now, true);
   } else if (routeActive) {
-    updateWatchBlink(now, false);
     updateRouteLed(true);
   } else {
-    updateWatchBlink(now, false);
     g_routeHoldColor = BLINK_NONE;
     if (g_screen == SCR_DASH) updateStatusLed();
     else {

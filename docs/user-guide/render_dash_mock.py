@@ -839,11 +839,11 @@ def draw_alarms(d):
     txt(200, 185, 11, GY, "Blink", anchor="middle")
     adj_pair(252, 166)
 
-    # Footer: < prev | Del (center) | New (right, on the last alarm)
+    # Footer: < prev | Delete (center) | New (right, on the last alarm)
     rect(8, 206, 44, 26, BTN, rx=5)
     txt(30, 224, 11, "#fff", "&lt;", anchor="middle")
-    rect(126, 206, 68, 26, DGR, rx=5)
-    txt(160, 224, 11, "#fff", "Del", anchor="middle")
+    rect(120, 206, 80, 26, DGR, rx=5)
+    txt(160, 224, 11, "#fff", "Delete", anchor="middle")
     rect(228, 206, 84, 26, BTN, rx=5)
     txt(270, 224, 11, "#fff", "New", anchor="middle")
 

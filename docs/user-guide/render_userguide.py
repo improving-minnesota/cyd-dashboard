@@ -45,7 +45,7 @@ CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 CSS = """
 @page { size: Letter landscape; margin: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial,
-       sans-serif; font-size: 8.6pt; line-height: 1.34; color: #222; margin: 0; }
+       sans-serif; font-size: 8.4pt; line-height: 1.3; color: #222; margin: 0; }
 .sheet { display: flex; width: 11in; height: 8.5in;
          background-size: cover; background-position: center; }
 .sheet.out { background-image: url("__ROOT__/bg-lines.png"); }
@@ -76,19 +76,16 @@ h2 .ic { line-height: 1; position: relative; top: 2px; }
 .panel > h2:first-child { margin-top: 0; }
 p { margin: 2.5pt 0; }
 ul, ol { margin: 2pt 0 3pt; padding-left: 13pt; }
-li { margin: 0 0 1.5pt; }
+li { margin: 0 0 1pt; }
 hr { border: none; border-top: 1px solid #999; margin: 5pt 0 3pt; }
 .footer { font-size: 7pt; color: #555; }
 .warn { border: 1.5px solid #b3392e; border-left-width: 6px;
         background: rgba(253, 240, 240, 0.85); color: #7a1f16;
         padding: 5pt 7pt; margin: 9pt 0; font-size: 8.2pt;
         border-radius: 4px; }
-.shot { margin: 12pt 0 5pt; }   /* a line of air between text and images */
+.shot { margin: 8pt 0 4pt; }   /* a line of air between text and images */
 .shot img, img.hero { width: 100%; border: 1px solid #999;
                       border-radius: 4px; }
-/* The reference panel's screenshot rides the bottom edge — keep it inside. */
-.in .panel:nth-child(3) .shot { text-align: center; margin-bottom: 0; }
-.in .panel:nth-child(3) .shot img { width: 84%; }
 /* Front cover: title block at the top, version+source footer pinned to the
    bottom, hero shots filling the middle — flexbox spreads the panel height. */
 .cover { text-align: center; height: 100%;
@@ -109,12 +106,43 @@ hr { border: none; border-top: 1px solid #999; margin: 5pt 0 3pt; }
 """
 
 
-def firmware_version():
-    # The manifest only bumps on release; the guide often covers unreleased
-    # changes, so show "vX.Y.Z+" (that version or newer) rather than implying
-    # the printed guide matches an exact release.
+def ensure_latest_manifest():
+    """Refuse to render when the worktree manifest is stale.
+
+    The manifest only changes via release-please merges on origin/main, so a
+    local manifest that differs from the remote's means the checkout is behind
+    (or the file was hand-edited) and the printed version would be wrong.
+    """
     try:
-        return "v" + json.loads(MANIFEST.read_text())["."] + "+"
+        subprocess.run(["git", "fetch", "origin", "-q"], cwd=REPO,
+                       timeout=30, check=True)
+    except Exception:
+        print("warning: could not fetch origin; rendering with the local "
+              "manifest", file=sys.stderr)
+        return
+    remote = subprocess.run(
+        ["git", "show", "origin/main:.release-please-manifest.json"],
+        cwd=REPO, capture_output=True, text=True)
+    if remote.returncode != 0:
+        return   # no manifest on the remote; nothing to compare against
+    try:
+        remote_ver = json.loads(remote.stdout)["."]
+        local_ver = json.loads(MANIFEST.read_text())["."]
+    except Exception:
+        sys.exit("error: could not parse .release-please-manifest.json")
+    if remote_ver != local_ver:
+        sys.exit("error: .release-please-manifest.json is stale - the local "
+                 "git commits are behind origin/main and must be corrected "
+                 "first (e.g. `git pull`), then re-run this script.")
+
+
+def firmware_version():
+    # The guide documents the NEXT release, not the last one: bump the
+    # manifest's patch number and append "+" (that version or newer).
+    try:
+        ver = json.loads(MANIFEST.read_text())["."]
+        major, minor, patch = (int(p) for p in ver.split("."))
+        return "v%d.%d.%d+" % (major, minor, patch + 1)
     except Exception:
         return ""
 
@@ -140,6 +168,7 @@ def main():
                  "cyd-dashboard/.venv/bin/python -m pip install markdown")
     if not pathlib.Path(CHROME).exists():
         sys.exit(f"Chrome not found at {CHROME}")
+    ensure_latest_manifest()
 
     # Regenerate the simulated dashboard screens first (cached data from
     # mock_data.json unless --refresh; non-fatal if it fails — a stale/missing

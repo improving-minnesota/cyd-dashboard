@@ -1,3 +1,5 @@
+#include <strings.h>   // strcasecmp (preset sort)
+
 // ---- Alarms ----
 // Up to MAX_ALARMS time-of-day alarms with per-weekday masks and an LED +
 // speaker notification pattern (each preset drives the RGB LED and a matching
@@ -44,12 +46,316 @@ bool  g_alarmDelConfirm = false;   // editor is showing the delete confirmation
 String g_alarmTimeStr = "0700";   // HHMM buffer for the manual keyboard editor
 extern int g_wifiSub;             // defined in wifi_config.ino (concatenated last)
 
-// LED notification presets. All digital RGB patterns (active-low LED: LOW=on).
-static const char* const kAlarmPresets[] = {
-  "Blink", "Rapid", "Double", "Colors", "Pulse"
+// ---- notification presets ----
+// Each preset is a looping "score" of steps; a step carries the tone frequency
+// (0 = rest) and the RGB LED channels to light for its duration. Driving LED
+// and speaker from the same table keeps light and sound in sync and makes
+// every preset a readable line of (freq, ms, rgb) notes. rgb bits: 1=red,
+// 2=green, 4=blue (7=white); the LED channels are active-low.
+// struct NtfStep is declared in cyd-dashboard.ino (with ntfStepAt's explicit
+// prototype) so the Arduino-generated prototypes can reference it.
+
+static const NtfStep kPatBlink[] = {   // white flash + beep ~1Hz
+  { 988, 500, 7 }, { 0, 500, 0 },
+};
+static const NtfStep kPatRapid[] = {   // fast white strobe + high beep train
+  { 1047, 150, 7 }, { 0, 150, 0 },
+};
+static const NtfStep kPatDouble[] = {  // two quick blinks/beeps, then a pause
+  { 988, 120, 7 }, { 0, 120, 0 }, { 784, 120, 7 }, { 0, 1440, 0 },
+};
+static const NtfStep kPatColors[] = {  // red -> green -> blue, walking a C triad
+  { 523, 350, 1 }, { 659, 350, 2 }, { 784, 350, 4 },
+};
+static const NtfStep kPatPulse[] = {   // brief flash + two-note chime ~1.6s
+  { 880, 160, 7 }, { 0, 160, 0 }, { 659, 160, 7 }, { 0, 1120, 0 },
+};
+static const NtfStep kPatSimple[] = {  // one soft beep + short flash every ~2s
+  { 784, 120, 7 }, { 0, 1880, 0 },
+};
+static const NtfStep kPatChime[] = {   // doorbell ding-dong (E5 -> C5)
+  { 659, 220, 7 }, { 0, 70, 0 }, { 523, 360, 7 }, { 0, 1350, 0 },
+};
+static const NtfStep kPatSiren[] = {   // red/blue swap with a two-tone siren
+  { 880, 320, 1 }, { 660, 320, 4 },
+};
+static const NtfStep kPatRadar[] = {   // green sonar ping + a fainter echo
+  { 1568, 70, 2 }, { 0, 160, 0 }, { 1175, 60, 2 }, { 0, 2110, 0 },
+};
+static const NtfStep kPatMorse[] = {   // "CYD" in Morse: -.-.  -.--  -..
+  { 988, 270, 7 }, { 0, 90, 0 }, { 988, 90, 7 }, { 0, 90, 0 },   // C
+  { 988, 270, 7 }, { 0, 90, 0 }, { 988, 90, 7 }, { 0, 270, 0 },
+  { 988, 270, 7 }, { 0, 90, 0 }, { 988, 90, 7 }, { 0, 90, 0 },   // Y
+  { 988, 270, 7 }, { 0, 90, 0 }, { 988, 270, 7 }, { 0, 270, 0 },
+  { 988, 270, 7 }, { 0, 90, 0 }, { 988, 90, 7 }, { 0, 90, 0 },   // D
+  { 988, 90, 7 }, { 0, 1010, 0 },
+};
+static const NtfStep kPatCharge[] = {  // "Charge!" fanfare run + held note
+  { 392, 140, 1 }, { 523, 140, 2 }, { 659, 140, 4 }, { 784, 190, 7 },
+  { 0, 60, 0 }, { 659, 140, 7 }, { 784, 460, 7 }, { 0, 1060, 0 },
+};
+static const NtfStep kPatTwoBits[] = { // "shave and a haircut - two bits"
+  { 262, 280, 7 }, { 196, 140, 2 }, { 196, 140, 4 }, { 220, 280, 1 },
+  { 196, 280, 7 }, { 0, 280, 0 }, { 247, 280, 4 }, { 262, 440, 7 },
+  { 0, 800, 0 },
+};
+
+// ---- added presets (appended; never reorder - indices are persisted) ----
+static const NtfStep kPatStrobe[] = {  // 4x fast white strobe + click
+  { 1568, 40, 7 }, { 0, 80, 0 }, { 1568, 40, 7 }, { 0, 80, 0 },
+  { 1568, 40, 7 }, { 0, 80, 0 }, { 1568, 40, 7 }, { 0, 1440, 0 },
+};
+static const NtfStep kPatSlow[] = {    // slow gentle flash + soft C5 every 2s
+  { 523, 400, 7 }, { 0, 1600, 0 },
+};
+static const NtfStep kPatHeart[] = {   // heartbeat lub-dub + double flash
+  { 220, 110, 7 }, { 0, 130, 0 }, { 196, 140, 7 }, { 0, 1620, 0 },
+};
+static const NtfStep kPatTick[] = {    // metronome tick + pinprick flash, 1s
+  { 1568, 25, 7 }, { 0, 975, 0 },
+};
+static const NtfStep kPatCountDn[] = { // 3-2-1 countdown, green "go" beep
+  { 659, 120, 1 }, { 0, 380, 0 }, { 659, 120, 3 }, { 0, 380, 0 },
+  { 659, 120, 6 }, { 0, 380, 0 }, { 988, 450, 2 }, { 0, 1350, 0 },
+};
+static const NtfStep kPatBoot[] = {    // the boot chime as a notification
+  { 523, 110, 1 }, { 659, 110, 2 }, { 784, 110, 4 }, { 1047, 320, 7 },
+  { 0, 1350, 0 },
+};
+static const NtfStep kPatPowerDn[] = { // power-down arpeggio, W-B-G-R
+  { 1047, 110, 4 }, { 784, 110, 2 }, { 659, 110, 1 }, { 523, 320, 1 },
+  { 0, 1350, 0 },
+};
+static const NtfStep kPatSweep[] = {   // rising sweep, LED climbs R->W
+  { 392, 60, 1 }, { 523, 60, 1 }, { 659, 60, 2 }, { 784, 60, 2 },
+  { 988, 60, 4 }, { 1175, 60, 4 }, { 1319, 60, 7 }, { 1568, 60, 7 },
+  { 0, 1520, 0 },
+};
+static const NtfStep kPatSwoop[] = {   // falling sweep, LED sinks W->R
+  { 1568, 60, 7 }, { 1319, 60, 7 }, { 1175, 60, 4 }, { 988, 60, 4 },
+  { 784, 60, 2 }, { 659, 60, 2 }, { 523, 60, 1 }, { 392, 60, 1 },
+  { 0, 1520, 0 },
+};
+static const NtfStep kPatWarble[] = {  // fast two-tone warble, R/B swap
+  { 880, 120, 1 }, { 1175, 120, 4 },
+};
+static const NtfStep kPatWail[] = {    // slow up-down siren, R->B drift
+  { 587, 300, 1 }, { 784, 300, 3 }, { 988, 300, 5 }, { 784, 300, 6 },
+};
+static const NtfStep kPatYelp[] = {    // fast siren yelp, R/B swap
+  { 784, 180, 1 }, { 1047, 180, 4 },
+};
+static const NtfStep kPatHiLo[] = {    // British hi-lo two-tone
+  { 784, 400, 1 }, { 587, 400, 4 },
+};
+static const NtfStep kPatKnight[] = {  // scanner sweep R->B->R with ticks
+  { 1100, 60, 1 }, { 1100, 60, 3 }, { 1100, 60, 2 }, { 1100, 60, 6 },
+  { 1100, 60, 4 }, { 1100, 60, 6 }, { 1100, 60, 2 }, { 1100, 60, 3 },
+  { 0, 1520, 0 },
+};
+static const NtfStep kPatRainbow[] = { // walk a scale through all 7 LED hues
+  { 523, 150, 1 }, { 587, 150, 3 }, { 659, 150, 2 }, { 698, 150, 6 },
+  { 784, 150, 4 }, { 880, 150, 5 }, { 988, 150, 7 }, { 0, 950, 0 },
+};
+static const NtfStep kPatDing[] = {    // single soft bell every ~3s
+  { 1319, 300, 7 }, { 0, 2700, 0 },
+};
+static const NtfStep kPatPing[] = {    // single high ping every ~2.5s
+  { 2093, 60, 2 }, { 0, 2440, 0 },
+};
+static const NtfStep kPatBuzz[] = {    // low buzzer + red
+  { 175, 400, 1 }, { 0, 1600, 0 },
+};
+static const NtfStep kPatAlarm[] = {   // classic alarm-clock beep x4
+  { 1568, 90, 7 }, { 0, 90, 0 }, { 1568, 90, 7 }, { 0, 90, 0 },
+  { 1568, 90, 7 }, { 0, 90, 0 }, { 1568, 90, 7 }, { 0, 1450, 0 },
+};
+static const NtfStep kPatBell[] = {    // bicycle bell ding-ding-ding
+  { 2093, 120, 7 }, { 0, 80, 0 }, { 2093, 120, 7 }, { 0, 80, 0 },
+  { 2093, 120, 7 }, { 0, 1640, 0 },
+};
+static const NtfStep kPatPhone[] = {   // old phone ring burst, cyan LED
+  { 440, 60, 6 }, { 480, 60, 6 }, { 440, 60, 6 }, { 480, 60, 6 },
+  { 440, 60, 6 }, { 480, 60, 6 }, { 0, 1240, 0 },
+};
+static const NtfStep kPatTada[] = {    // ta-da: short pickup + long white hit
+  { 523, 160, 7 }, { 0, 60, 0 }, { 784, 500, 7 }, { 0, 1280, 0 },
+};
+static const NtfStep kPatBugle[] = {   // reveille-style bugle call
+  { 392, 160, 2 }, { 523, 160, 2 }, { 659, 160, 2 }, { 784, 320, 7 },
+  { 659, 160, 2 }, { 784, 500, 7 }, { 0, 1240, 0 },
+};
+static const NtfStep kPatHappy[] = {   // major triad up, green
+  { 523, 140, 2 }, { 659, 140, 2 }, { 784, 280, 7 }, { 0, 1440, 0 },
+};
+static const NtfStep kPatSad[] = {     // minor descend, red
+  { 440, 160, 1 }, { 349, 160, 1 }, { 294, 320, 1 }, { 0, 1520, 0 },
+};
+static const NtfStep kPatCoin[] = {    // arcade coin (B5 -> held E6)
+  { 988, 90, 7 }, { 1319, 410, 7 }, { 0, 1500, 0 },
+};
+static const NtfStep kPatOneUp[] = {   // 1-up: E6 G6 E7 C7 D7 G6
+  { 1319, 120, 7 }, { 1568, 120, 7 }, { 2637, 120, 7 }, { 2093, 120, 7 },
+  { 2349, 120, 7 }, { 1568, 320, 7 }, { 0, 1080, 0 },
+};
+static const NtfStep kPatZelda[] = {   // secret-found falling arpeggio
+  { 988, 110, 7 }, { 831, 110, 7 }, { 622, 110, 7 }, { 466, 110, 7 },
+  { 988, 360, 7 }, { 0, 1380, 0 },
+};
+static const NtfStep kPatPacMan[] = {  // arcade intro chirp
+  { 988, 100, 7 }, { 1319, 100, 7 }, { 1568, 100, 7 }, { 1976, 100, 7 },
+  { 1568, 100, 7 }, { 1976, 240, 7 }, { 0, 1260, 0 },
+};
+static const NtfStep kPatTetris[] = {  // Korobeiniki opening phrase, green
+  { 659, 160, 2 }, { 494, 80, 2 }, { 523, 80, 2 }, { 587, 160, 2 },
+  { 523, 80, 2 }, { 494, 80, 2 }, { 440, 160, 2 }, { 440, 80, 2 },
+  { 523, 80, 2 }, { 659, 160, 2 }, { 587, 80, 2 }, { 523, 80, 2 },
+  { 494, 240, 2 }, { 0, 1440, 0 },
+};
+static const NtfStep kPatElise[] = {   // Fur Elise opening
+  { 659, 90, 7 }, { 622, 90, 7 }, { 659, 90, 7 }, { 622, 90, 7 },
+  { 659, 90, 7 }, { 494, 90, 7 }, { 587, 90, 7 }, { 523, 90, 7 },
+  { 440, 240, 7 }, { 0, 1360, 0 },
+};
+static const NtfStep kPatOdeJoy[] = {  // Ode to Joy phrase
+  { 659, 180, 7 }, { 659, 180, 7 }, { 698, 180, 7 }, { 784, 180, 7 },
+  { 784, 180, 7 }, { 698, 180, 7 }, { 659, 180, 7 }, { 587, 180, 7 },
+  { 523, 180, 7 }, { 523, 180, 7 }, { 587, 180, 7 }, { 659, 180, 7 },
+  { 659, 270, 7 }, { 587, 90, 7 }, { 587, 360, 7 }, { 0, 1080, 0 },
+};
+static const NtfStep kPatFifth[] = {   // Beethoven's 5th: G G G Eb, red
+  { 392, 140, 1 }, { 392, 140, 1 }, { 392, 140, 1 }, { 311, 500, 1 },
+  { 0, 1180, 0 },
+};
+static const NtfStep kPatNokia[] = {   // classic phone ringtone
+  { 659, 120, 7 }, { 587, 120, 7 }, { 370, 120, 7 }, { 415, 120, 7 },
+  { 554, 120, 7 }, { 494, 120, 7 }, { 294, 120, 7 }, { 330, 120, 7 },
+  { 494, 120, 7 }, { 440, 120, 7 }, { 277, 120, 7 }, { 330, 120, 7 },
+  { 440, 400, 7 }, { 0, 1360, 0 },
+};
+static const NtfStep kPatSmoke[] = {   // guitar riff in 4ths
+  { 330, 200, 7 }, { 392, 200, 7 }, { 440, 300, 7 }, { 330, 200, 7 },
+  { 392, 200, 7 }, { 466, 100, 7 }, { 440, 300, 7 }, { 330, 200, 7 },
+  { 392, 200, 7 }, { 440, 200, 7 }, { 392, 200, 7 }, { 330, 320, 7 },
+  { 0, 1180, 0 },
+};
+static const NtfStep kPatDixie[] = {   // car-horn melody, white
+  { 392, 130, 7 }, { 330, 130, 7 }, { 262, 130, 7 }, { 262, 130, 7 },
+  { 262, 130, 7 }, { 294, 130, 7 }, { 330, 130, 7 }, { 349, 130, 7 },
+  { 392, 130, 7 }, { 392, 130, 7 }, { 392, 130, 7 }, { 330, 320, 7 },
+  { 0, 1250, 0 },
+};
+static const NtfStep kPatJingle[] = {  // jingle bells phrase
+  { 659, 140, 7 }, { 659, 140, 7 }, { 659, 280, 7 }, { 0, 60, 0 },
+  { 659, 140, 7 }, { 659, 140, 7 }, { 659, 280, 7 }, { 0, 60, 0 },
+  { 659, 140, 7 }, { 784, 140, 7 }, { 523, 140, 7 }, { 587, 140, 7 },
+  { 659, 400, 7 }, { 0, 1120, 0 },
+};
+// Indices are persisted (per-alarm in the NVS blob, and the callsign-notify
+// choice in "watchntf"), so never reorder - append new presets at the end.
+struct NtfPreset { const char* name; const NtfStep* steps; uint8_t n; };
+#define NTFPRESET(nm, tab) { nm, tab, (uint8_t)(sizeof(tab) / sizeof(tab[0])) }
+static const NtfPreset kNtfPresets[] = {
+  NTFPRESET("Blink",    kPatBlink),
+  NTFPRESET("Rapid",    kPatRapid),
+  NTFPRESET("Double",   kPatDouble),
+  NTFPRESET("Colors",   kPatColors),
+  NTFPRESET("Pulse",    kPatPulse),
+  NTFPRESET("Simple",   kPatSimple),
+  NTFPRESET("Chime",    kPatChime),
+  NTFPRESET("Siren",    kPatSiren),
+  NTFPRESET("Radar",    kPatRadar),
+  NTFPRESET("Morse",    kPatMorse),
+  NTFPRESET("Charge",   kPatCharge),
+  NTFPRESET("Two Bits", kPatTwoBits),
+  NTFPRESET("Strobe",   kPatStrobe),
+  NTFPRESET("Slow",     kPatSlow),
+  NTFPRESET("Heart",    kPatHeart),
+  NTFPRESET("Tick",     kPatTick),
+  NTFPRESET("3-2-1 Go", kPatCountDn),
+  NTFPRESET("Boot",     kPatBoot),
+  NTFPRESET("Power Dn", kPatPowerDn),
+  NTFPRESET("Sweep",    kPatSweep),
+  NTFPRESET("Swoop",    kPatSwoop),
+  NTFPRESET("Warble",   kPatWarble),
+  NTFPRESET("Wail",     kPatWail),
+  NTFPRESET("Yelp",     kPatYelp),
+  NTFPRESET("Hi-Lo",    kPatHiLo),
+  NTFPRESET("Knight",   kPatKnight),
+  NTFPRESET("Rainbow",  kPatRainbow),
+  NTFPRESET("Ding",     kPatDing),
+  NTFPRESET("Ping",     kPatPing),
+  NTFPRESET("Buzz",     kPatBuzz),
+  NTFPRESET("Alarm",    kPatAlarm),
+  NTFPRESET("Bell",     kPatBell),
+  NTFPRESET("Phone",    kPatPhone),
+  NTFPRESET("Tada",     kPatTada),
+  NTFPRESET("Bugle",    kPatBugle),
+  NTFPRESET("Happy",    kPatHappy),
+  NTFPRESET("Sad",      kPatSad),
+  NTFPRESET("Coin",     kPatCoin),
+  NTFPRESET("One-Up",   kPatOneUp),
+  NTFPRESET("Zelda",    kPatZelda),
+  NTFPRESET("Pac-Man",  kPatPacMan),
+  NTFPRESET("Tetris",   kPatTetris),
+  NTFPRESET("Elise",    kPatElise),
+  NTFPRESET("Ode Joy",  kPatOdeJoy),
+  NTFPRESET("Fifth",    kPatFifth),
+  NTFPRESET("Nokia",    kPatNokia),
+  NTFPRESET("Smoke",    kPatSmoke),
+  NTFPRESET("Dixie",    kPatDixie),
+  NTFPRESET("Jingle",   kPatJingle),
 };
 static const int kNumAlarmPresets =
-    sizeof(kAlarmPresets) / sizeof(kAlarmPresets[0]);
+    sizeof(kNtfPresets) / sizeof(kNtfPresets[0]);
+
+// Accessors so other settings screens (e.g. the callsign notification in
+// Flight Tracker) can offer the same presets without touching the table.
+int alarmPresetCount() { return kNumAlarmPresets; }
+const char* alarmPresetName(int i) {
+  return kNtfPresets[constrain(i, 0, kNumAlarmPresets - 1)].name;
+}
+
+// Steppers cycle alphabetically, but the persisted value stays a kNtfPresets
+// index (it's in NVS), so the table itself is never reordered. g_ntfOrder
+// maps display position -> preset index and is sorted once on first use.
+static uint8_t g_ntfOrder[64];
+static bool g_ntfOrderInit = false;
+static void ntfOrderInit() {
+  if (g_ntfOrderInit) return;
+  for (int i = 0; i < kNumAlarmPresets; i++) g_ntfOrder[i] = i;
+  for (int i = 1; i < kNumAlarmPresets; i++)
+    for (int j = i; j > 0 &&
+         strcasecmp(kNtfPresets[g_ntfOrder[j]].name,
+                    kNtfPresets[g_ntfOrder[j - 1]].name) < 0; j--) {
+      uint8_t t = g_ntfOrder[j];
+      g_ntfOrder[j] = g_ntfOrder[j - 1];
+      g_ntfOrder[j - 1] = t;
+    }
+  g_ntfOrderInit = true;
+}
+
+// Preset index one alphabetical step from `preset` (dir is ±1, wraps).
+int alarmPresetStep(int preset, int dir) {
+  ntfOrderInit();
+  int pos = 0;
+  for (int i = 0; i < kNumAlarmPresets; i++)
+    if (g_ntfOrder[i] == preset) { pos = i; break; }
+  return g_ntfOrder[(pos + kNumAlarmPresets + dir) % kNumAlarmPresets];
+}
+
+// The step active at `now`: the pattern loops, so now % period picks the step.
+static const NtfStep* ntfStepAt(int preset, unsigned long now) {
+  const NtfPreset& p = kNtfPresets[constrain(preset, 0, kNumAlarmPresets - 1)];
+  uint32_t period = 0;
+  for (int i = 0; i < p.n; i++) period += p.steps[i].ms;
+  uint32_t t = period ? now % period : 0;
+  for (int i = 0; i < p.n; i++) {
+    if (t < p.steps[i].ms) return &p.steps[i];
+    t -= p.steps[i].ms;
+  }
+  return &p.steps[p.n - 1];
+}
 
 // ---- storage ----
 // Bump when the Alarm/AlarmStore layout changes; a mismatch loads defaults.
@@ -274,6 +580,11 @@ void previewAlarmLed(int preset) {
   g_ledPreviewUntil = millis() + 3000;
 }
 
+// One-shot short beep (speaker only) played by updateAlarmLed() - used by the
+// Notify Volume stepper so each change is heard at the new level.
+static uint32_t g_testBeepUntil = 0;
+void notifyTestBeep() { g_testBeepUntil = millis() + 160; }
+
 // True while the alarm LED owns the LED: a firing alarm or a preset preview.
 // The normal flight/status LED code skips its updates while this is set.
 bool alarmLedBusy() {
@@ -281,78 +592,37 @@ bool alarmLedBusy() {
          (g_ledPreviewPreset >= 0 && (long)(millis() - g_ledPreviewUntil) < 0);
 }
 
-static void ledPattern(int preset, unsigned long now) {
-  switch (preset) {
-    case 1:   // Rapid: fast white strobe
-      ledWrite(1, 1, 1); if ((now / 150) % 2) ledWrite(0, 0, 0);
-      break;
-    case 2: { // Double: two quick blinks, then a pause
-      unsigned long t = now % 1800;
-      bool on = (t < 120) || (t >= 240 && t < 360);
-      ledWrite(on, on, on);
-      break;
-    }
-    case 3: { // Colors: cycle red -> green -> blue
-      int p = (now / 350) % 3;
-      ledWrite(p == 0, p == 1, p == 2);
-      break;
-    }
-    case 4:   // Pulse: brief white flash every ~1.6s
-      ledWrite(now % 1600 < 80, now % 1600 < 80, now % 1600 < 80);
-      break;
-    default:  // Blink: white on/off ~1Hz, like the tracked-flight blink
-      ledWrite(1, 1, 1); if ((now / 500) % 2) ledWrite(0, 0, 0);
-      break;
-  }
-}
-
 // ---- notification speaker (non-blocking, driven with the LED) ----
-// GPIO 26 is the CYD's JST speaker connector through the onboard amp. Each
-// preset's beep pattern mirrors its LED cadence so the sound matches the
-// light: Rapid is a fast beep train, Double is two quick beeps then a pause,
-// Colors walks up a triad one note per color step, Pulse is a soft two-note
-// chime per flash, and Blink is a plain ~1Hz beep. toneWrite() is gated on
-// the requested frequency so the LEDC channel isn't re-attached every tick.
+// GPIO 26 is the CYD's JST speaker connector through the onboard amp. Volume
+// comes from the LEDC duty cycle: tone() always runs ~50% (10-bit, duty 511),
+// so we drive ledcWrite() directly with a duty scaled by the "Notify
+// Volume" setting (g_notifyVol, NVS "ntfvol", one of kNtfVolLevels). A square wave's
+// loudness tracks its duty, so 100 reproduces the old full-volume sound and
+// 0 is silent. tone()/noTone() are not used: they queue onto a background
+// task that resets the duty to half-scale, which would undo the volume.
 #define SPK_PIN 26
-static int g_toneFreq = -1;   // currently playing freq, -1 = silent
+#define SPK_RES 10                  // LEDC bits; 50% duty = 511 like tone()
+static int  g_toneFreq = -1;        // currently playing freq, -1 = silent
+static bool g_spkAttached = false;  // SPK_PIN is attached to an LEDC channel
 
 static void toneWrite(int freq) {
   if (freq == g_toneFreq) return;
   g_toneFreq = freq;
-#ifdef CYD_E32R40T
-  // The E32R40T gates its FM8002E amp behind GPIO 4 (active-low shutdown) -
-  // enable it once so tone() on GPIO 26 actually reaches the speaker.
-  static bool ampOn = false;
-  if (!ampOn) { pinMode(4, OUTPUT); digitalWrite(4, LOW); ampOn = true; }
-#endif
-  if (freq <= 0) noTone(SPK_PIN);
-  else           tone(SPK_PIN, freq);
-}
-
-static void tonePattern(int preset, unsigned long now) {
-  switch (preset) {
-    case 1:   // Rapid: fast high beeps on the strobe cadence
-      toneWrite((now / 150) % 2 ? 0 : 1047);            // C6
-      break;
-    case 2: { // Double: two quick beeps per 1.8s cycle (B5 then G5)
-      unsigned long t = now % 1800;
-      toneWrite((t < 120) ? 988 : (t >= 240 && t < 360) ? 784 : 0);
-      break;
-    }
-    case 3: { // Colors: C5->E5->G5, one note per color step (350ms)
-      const int f[3] = {523, 659, 784};
-      toneWrite(f[(now / 350) % 3]);
-      break;
-    }
-    case 4: { // Pulse: soft two-note chime each 1.6s cycle
-      unsigned long t = now % 1600;
-      toneWrite((t < 160) ? 880 : (t >= 320 && t < 480) ? 659 : 0);
-      break;
-    }
-    default:  // Blink: single beep pulsing ~1Hz with the LED
-      toneWrite((now / 500) % 2 ? 0 : 988);             // B5
-      break;
+  // Both boards gate their audio amp behind GPIO 4 (active-low shutdown):
+  // the E32R40T uses an FM8002E, and the 2432S028R's SC8002B turned out to
+  // use the same pin (verified with the speaker-test app: LOW = loud tone
+  // while the display keeps working). Re-asserted on every tone in case a
+  // TFT_RST pulse during a later tft.init() left it high again.
+  if (freq > 0) { pinMode(4, OUTPUT); digitalWrite(4, LOW); }
+  if (freq <= 0) {
+    if (g_spkAttached) ledcWrite(SPK_PIN, 0);   // silent; pin stays attached
+    return;
   }
+  // Retune with the duty still at 0 so the note starts cleanly, then apply
+  // the volume-scaled duty.
+  if (!g_spkAttached) { ledcAttach(SPK_PIN, freq, SPK_RES); g_spkAttached = true; }
+  else                ledcChangeFrequency(SPK_PIN, freq, SPK_RES);
+  ledcWrite(SPK_PIN, (uint32_t)g_notifyVol * 511 / 100);
 }
 
 void updateAlarmLed(unsigned long now) {
@@ -366,11 +636,67 @@ void updateAlarmLed(unsigned long now) {
   if (preset < 0) {
     g_ledPreviewPreset = -1;
     if (wasActive) { ledWrite(0, 0, 0); toneWrite(0); wasActive = false; }
+    // Volume-test beep from the General page's Notify Volume stepper
+    // (speaker only - no LED) so each step is heard at the new level.
+    toneWrite((long)(now - g_testBeepUntil) < 0 ? 880 : 0);
     return;
   }
   wasActive = true;
-  ledPattern(preset, now);
-  tonePattern(preset, now);
+  const NtfStep* s = ntfStepAt(preset, now);
+  ledWrite(s->rgb & 1, s->rgb & 2, s->rgb & 4);
+  toneWrite(s->freq);
+}
+
+// ---- watch-callsign notification ----
+// While a watched callsign's flight is shown on the dashboard, the LED runs
+// the user's saved "Callsign Notify" preset (same patterns as alarms)
+// and the speaker plays that preset's beep pattern for the first ~5s of each
+// sighting. Independent of the blink-for-flight setting. Driven from loop()
+// inside the !alarmLedBusy() gate so a firing alarm keeps the LED + speaker.
+// Disarming on inactive re-arms the notification so a watched flight that
+// leaves and returns notifies again.
+#define WATCH_TONE_MS 5000
+static unsigned long g_watchToneStart = 0;
+static bool g_watchToneArmed = false;
+static bool g_watchLedOn = false;
+
+void updateWatchNotify(unsigned long now, bool active) {
+  if (!active) {
+    // Only silence the speaker if this notifier was the one using it - the
+    // volume-test beep and other one-shots must not be cut off.
+    if (g_watchToneArmed) { g_watchToneArmed = false; toneWrite(0); }
+    if (g_watchLedOn) { ledWrite(0, 0, 0); g_watchLedOn = false; }
+    return;
+  }
+  g_watchLedOn = true;
+  if (!g_watchToneArmed) {
+    g_watchToneArmed = true;
+    g_watchToneStart = now;
+  }
+  const NtfStep* s = ntfStepAt(g_watchNotify, now);
+  ledWrite(s->rgb & 1, s->rgb & 2, s->rgb & 4);
+  // Speaker only for the first ~5s of a sighting; the LED pattern keeps
+  // running while the watched flight is shown.
+  toneWrite(now - g_watchToneStart < WATCH_TONE_MS ? s->freq : 0);
+}
+
+// ---- boot chime ----
+// A short rising C5-E5-G5-C6 arpeggio while the LED steps red->green->blue->
+// white: the "device is on" signature. Blocking in setup() so it finishes
+// before the loop's LED logic takes over. Cold boots only - setup() skips it
+// whenever the reset came out of deep sleep.
+static const NtfStep kBootChime[] = {
+  { 523, 110, 1 }, { 659, 110, 2 }, { 784, 110, 4 }, { 1047, 320, 7 },
+};
+
+void playBootChime() {
+  for (int i = 0; i < (int)(sizeof(kBootChime) / sizeof(kBootChime[0])); i++) {
+    ledWrite(kBootChime[i].rgb & 1, kBootChime[i].rgb & 2, kBootChime[i].rgb & 4);
+    toneWrite(kBootChime[i].freq);
+    delay(kBootChime[i].ms);
+  }
+  ledWrite(0, 0, 0);
+  toneWrite(0);
 }
 
 // ---- drawing ----
@@ -395,7 +721,7 @@ void drawAlarmBell(int x, int y, uint16_t bg) {
 
 // Alarms editor screen: "Alarms > N". Enable toggle, a time stepper (tap the
 // time itself for keyboard entry), weekday toggles, notify-preset stepper,
-// and a < / New-or-> / Del footer.
+// and a < / New-or-> / Delete footer.
 void drawAlarms() {
   Alarm& a = g_alarms[g_alarmIdx];
   tft.fillScreen(TFT_BLACK);
@@ -470,10 +796,10 @@ void drawAlarms() {
   tft.setCursor(8, 172);
   tft.print("Notify");
   tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
-  tft.drawCentreString(kAlarmPresets[a.preset], RX(200), 172, 2);
+  tft.drawCentreString(alarmPresetName(a.preset), RX(200), 172, 2);
   adjPair(TADJ_MX, 166);
 
-  // Footer: < prev (left) | Del (center) | > next or New (right)
+  // Footer: < prev (left) | Delete (center) | > next or New (right)
   tft.setTextFont(2);
   tft.setTextColor(btnFg(btnCol()), btnCol());
   if (g_alarmIdx > 0) {
@@ -481,9 +807,9 @@ void drawAlarms() {
     tft.drawCentreString("<", 30, 211, 2);
   }
   if (g_alarmCount > 1) {
-    tft.fillRoundRect(CX - 34, 206, 68, 26, 5, dangerCol());
+    tft.fillRoundRect(CX - 40, 206, 80, 26, 5, dangerCol());
     tft.setTextColor(btnFg(dangerCol()), dangerCol());
-    tft.drawCentreString("Del", CX, 211, 2);
+    tft.drawCentreString("Delete", CX, 211, 2);
     tft.setTextColor(btnFg(btnCol()), btnCol());
   }
   if (g_alarmIdx + 1 < g_alarmCount) {
@@ -515,7 +841,7 @@ void drawAlarmFire() {
     snprintf(sb, sizeof sb, "Snoozed %d/%d", a.snoozes, ALARM_MAX_SNOOZES);
     tft.drawCentreString(sb, CX, 120, 2);
   } else {
-    tft.drawCentreString(kAlarmPresets[a.preset], CX, 120, 2);
+    tft.drawCentreString(alarmPresetName(a.preset), CX, 120, 2);
   }
 
   themeBtn(CX - 144, 158, 140, 62, 8);
@@ -589,17 +915,17 @@ void handleAlarmsTouch(uint16_t x, uint16_t y) {
   }
   int np = adjPairHit(x, y, TADJ_MX, 166);   // notify preset stepper
   if (np) {
-    a.preset = (a.preset + kNumAlarmPresets + np) % kNumAlarmPresets;
+    a.preset = alarmPresetStep(a.preset, np);   // steppers cycle alphabetically
     previewAlarmLed(a.preset);   // play the picked pattern once on the LED
     saveAlarms();
     dirty = true;
     return;
   }
-  // footer: < left | Del center | > or New right
+  // footer: < left | Delete center | > or New right
   if (g_alarmIdx > 0 && inRect(x, y, 8, 206, 52, 232)) {
     g_alarmIdx--; dirty = true; return;
   }
-  if (g_alarmCount > 1 && inRect(x, y, CX - 34, 206, CX + 34, 232)) {
+  if (g_alarmCount > 1 && inRect(x, y, CX - 40, 206, CX + 40, 232)) {
     g_alarmDelConfirm = true;   // ask first; the actual delete happens on Yes
     dirty = true;
     return;

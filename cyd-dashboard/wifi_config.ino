@@ -1,7 +1,7 @@
 // wifi_config.ino - on-device network provisioning via the touchscreen.
 //
 // Part of the cyd-dashboard sketch. Provides these sub-screens:
-//   0 = network list (scan results) + "enter manually" + "IP setup"
+//   0 = network list (scan results) + "enter manually" + "IP Setup"
 //   1 = keyboard to type an SSID
 //   2 = keyboard to type a password, then save & connect
 //   20 = IP Settings page (DHCP/Static + address fields)
@@ -9,7 +9,8 @@
 // Credentials are stored in NVS so the device reconnects after a reboot.
 
 int  g_wifiSub = 0;         // 0=list, 1=ssid keyboard, 2=pass keyboard
-bool g_kbShift = false;     // uppercase letters on the on-screen keyboard
+bool g_kbShift = false;     // one-shot: capital for the next letter only
+bool g_kbCaps  = false;     // caps lock: capitals until Shift is tapped again
 bool g_kbSym   = false;     // symbol/number pad mode
 int  g_kbCursor = 0;        // edit cursor index (0..length) in the active field
 int  g_lastKbSub = -1;      // last field drawn, so we can reset the cursor on change
@@ -107,23 +108,23 @@ void drawWifiScreen() {
   if (g_wifiSub == 0) drawWifiList();
   else if (g_wifiSub == 1) drawKeyboard("Enter SSID", g_ssid, false);
   else if (g_wifiSub == 2) drawKeyboard("Password for " + g_ssid, g_pass, true);
-  else if (g_wifiSub == 3) drawKeyboard("OpenSky client id", g_osClientId, false);
-  else if (g_wifiSub == 4) drawKeyboard("OpenSky client secret", g_osClientSecret, true);
-  else if (g_wifiSub == 5) drawKeyboard("Search address", g_addrSearch, false);
-  else if (g_wifiSub == 6) drawKeyboard("Sleep start (HHMM)", g_sleepStartStr, false);
-  else if (g_wifiSub == 7) drawKeyboard("Sleep end (HHMM)", g_sleepEndStr, false);
-  else if (g_wifiSub == 8) drawKeyboard("Alarm time (HHMM)", g_alarmTimeStr, false);
-  else if (g_wifiSub == 10) drawKeyboard("Lat,Lon", g_latLonStr, false);
-  else if (g_wifiSub == 11) drawKeyboard("Home airport (ICAO)", g_homeAirport, false);
-  else if (g_wifiSub == 13) drawKeyboard("Watch callsign", g_watchCallsign, false);
+  else if (g_wifiSub == 3) drawKeyboard("OpenSky Client ID", g_osClientId, false);
+  else if (g_wifiSub == 4) drawKeyboard("OpenSky Client Secret", g_osClientSecret, true);
+  else if (g_wifiSub == 5) drawKeyboard("Search Address", g_addrSearch, false);
+  else if (g_wifiSub == 6) drawKeyboard("Sleep Start (HHMM)", g_sleepStartStr, false);
+  else if (g_wifiSub == 7) drawKeyboard("Sleep End (HHMM)", g_sleepEndStr, false);
+  else if (g_wifiSub == 8) drawKeyboard("Alarm Time (HHMM)", g_alarmTimeStr, false);
+  else if (g_wifiSub == 10) drawKeyboard("Lat, Lon", g_latLonStr, false);
+  else if (g_wifiSub == 11) drawKeyboard("Home Airport (ICAO)", g_homeAirport, false);
+  else if (g_wifiSub == 13) drawKeyboard("Watch Callsign", g_watchCallsign, false);
   else if (g_wifiSub == 12) drawAddrStatus();
   else if (g_wifiSub == 20) drawIpConfig();
-  else if (g_wifiSub == 21) drawKeyboard("Static IP address", g_staticIp, false);
-  else if (g_wifiSub == 22) drawKeyboard("Subnet mask", g_staticMask, false);
+  else if (g_wifiSub == 21) drawKeyboard("Static IP Address", g_staticIp, false);
+  else if (g_wifiSub == 22) drawKeyboard("Subnet Mask", g_staticMask, false);
   else if (g_wifiSub == 23) drawKeyboard("Gateway", g_staticGw, false);
-  else if (g_wifiSub == 24) drawKeyboard("DNS server", g_staticDns, false);
+  else if (g_wifiSub == 24) drawKeyboard("DNS Server", g_staticDns, false);
   else if (g_wifiSub == 25) drawKeyboard("Hostname", g_hostname, false);
-  else drawKeyboard("Govee API key", g_goveeKey, true);
+  else drawKeyboard("Govee API Key", g_goveeKey, true);
 }
 
 void handleWifiTouch(uint16_t x, uint16_t y) {
@@ -148,7 +149,7 @@ void drawWifiList() {
   tft.setCursor(8, 32);
   if (!g_scanning) tft.printf("%d networks", g_netCount);
   tft.setCursor(RX(200), 32);
-  tft.print(g_ipDhcp ? "IP: DHCP" : "IP: static");
+  tft.print(g_ipDhcp ? "IP: DHCP" : "IP: Static");
 
   if (g_scanning) {
     // Async scan in flight - the dots animate from pollWifiScan().
@@ -199,7 +200,7 @@ void drawWifiList() {
   themeBtn(CX - 50, 212, 100, 26, 6);
   tft.drawCentreString("Manual", CX, 218, 2);
   themeBtn(RX(218), 212, 94, 26, 6);
-  tft.drawCentreString("IP setup", RX(265), 218, 2);
+  tft.drawCentreString("IP Setup", RX(265), 218, 2);
 }
 
 void handleWifiListTouch(uint16_t x, uint16_t y) {
@@ -323,8 +324,8 @@ void drawIpConfig() {
       tft.print("Not connected.");
     }
   } else {
-    drawIpRow(76,  "IP address", g_staticIp);
-    drawIpRow(104, "Subnet mask", g_staticMask);
+    drawIpRow(76,  "IP Address", g_staticIp);
+    drawIpRow(104, "Subnet Mask", g_staticMask);
     drawIpRow(132, "Gateway",    g_staticGw);
     drawIpRow(160, "DNS",        g_staticDns);
     drawIpRow(188, "Hostname",   g_hostname);
@@ -382,7 +383,7 @@ char keyFromXY(int x, int y) {
     else if (row == 1) c = "ASDFGHJKL."[col];
     else c = "ZXCVBNM-_@"[col];
     // shift only affects letters (symbols stay as-is)
-    if (c >= 'A' && c <= 'Z' && !g_kbShift) c = c + 32;
+    if (c >= 'A' && c <= 'Z' && !g_kbShift && !g_kbCaps) c = c + 32;
   } else {
     if (row == 0) c = "1234567890"[col];
     else if (row == 1) c = "-@#$%&*()_"[col];
@@ -495,23 +496,38 @@ void drawKeyboard(const String& title, const String& text, bool pw) {
       tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
       tft.setTextFont(2);
       char ch = rows[r][c];
-      if (ch >= 'A' && ch <= 'Z' && !g_kbShift) ch = ch + 32;   // show lowercase unless shift
+      if (ch >= 'A' && ch <= 'Z' && !g_kbShift && !g_kbCaps) ch = ch + 32;   // show lowercase unless shift/caps
       tft.setCursor(x0 + DISP_W / 30, yy + 4);
       tft.print(ch);
     }
     yy += 28;
   }
 
-  // bottom control bar: Shift | ?123/abc | space | del | OK
+  // bottom control bar: Shift | ?123/abc | space | backspace | OK
   const int ctrlY = 144, ctrlH = 75, ctrlW = DISP_W / 5;
-  const char* labels[5] = { "Shift", g_kbSym ? "abc" : "?123", "space", "del", "OK" };
-  uint16_t cols[5] = { g_kbShift ? TFT_YELLOW : TFT_NAVY, TFT_NAVY, TFT_NAVY, dangerCol(), TFT_DARKGREEN };
+  const char* labels[5] = { g_kbCaps ? "CAPS" : (g_kbShift ? "Shift" : "shift"),
+                            g_kbSym ? "abc" : "?123", "space", "", "OK" };
+  // Shift stays the standard control color - its label (shift/Shift/CAPS)
+  // carries the state, not the background.
+  uint16_t cols[5] = { TFT_NAVY, TFT_NAVY, TFT_NAVY, dangerCol(), TFT_DARKGREEN };
   for (int i = 0; i < 5; i++) {
     int x = i * ctrlW;
     uint16_t bg = cols[i];
     tft.fillRoundRect(x, ctrlY, ctrlW - 2, ctrlH, 5, bg);
-    tft.setTextColor(TFT_WHITE, bg);
+    tft.setTextColor(btnFg(bg), bg);
     tft.setTextFont(2);
+    if (i == 3) {
+      // Backspace glyph: the built-in fonts are ASCII-only (no U+232B), so
+      // draw it - a left-pointed tag with an X punched out, kept just under
+      // the font-2 label size.
+      uint16_t fg = btnFg(bg);
+      int gx = x + ctrlW / 2 - 9, gy = ctrlY + 30;
+      tft.fillTriangle(gx, gy + 7, gx + 5, gy, gx + 5, gy + 14, fg);
+      tft.fillRoundRect(gx + 5, gy, 14, 14, 3, fg);
+      tft.drawLine(gx + 8, gy + 4, gx + 15, gy + 10, bg);
+      tft.drawLine(gx + 15, gy + 4, gx + 8, gy + 10, bg);
+      continue;
+    }
     tft.setCursor(x + ctrlW / 2 - strlen(labels[i]) * 4, ctrlY + 30);
     tft.print(labels[i]);
   }
@@ -529,7 +545,7 @@ void drawKeyboard(const String& title, const String& text, bool pw) {
 
 void handleKeyboardTouch(uint16_t x, uint16_t y) {
   if (inRect(x, y, RX(265), 4, RX(315), 24)) {  // Back
-    g_kbShift = false; g_kbSym = false; g_kbShow = false;
+    g_kbShift = false; g_kbCaps = false; g_kbSym = false; g_kbShow = false;
     g_lastKbSub = -1;   // next entry starts with the cursor at the end
     if (g_wifiSub == 3) { g_screen = SCR_FTRACKER; dirty = true; return; }   // OpenSky creds
     if (g_wifiSub == 4) { g_wifiSub = 3; dirty = true; return; }
@@ -603,10 +619,17 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
     default: maxlen = 63; break;
   }
 
-  // bottom control bar (y 144..219): Shift | ?123/abc | space | del | OK
+  // bottom control bar (y 144..219): Shift | ?123/abc | space | backspace | OK
   if (y >= 144 && y <= 219) {
     int i = constrain(x / (DISP_W / 5), 0, 4);
-    if (i == 0) { g_kbShift = !g_kbShift; dirty = true; }
+    if (i == 0) {   // Shift cycles: shift -> Shift (next letter) -> CAPS -> shift
+      // No timing window - resistive-screen taps can't reliably tell a
+      // deliberate double-tap from two separate presses.
+      if (g_kbCaps)       { g_kbCaps = false; g_kbShift = false; }
+      else if (g_kbShift) { g_kbCaps = true; }
+      else                { g_kbShift = true; }
+      dirty = true;
+    }
     else if (i == 1) { g_kbSym = !g_kbSym; g_kbShift = false; dirty = true; }
     else if (i == 2) {  // space (insert at cursor)
       if (buf.length() < maxlen) {
@@ -623,7 +646,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
       }
     }
     else if (i == 4) {  // OK
-      g_kbShift = false; g_kbSym = false; g_kbShow = false;
+      g_kbShift = false; g_kbCaps = false; g_kbSym = false; g_kbShow = false;
       if (g_wifiSub == 1) { g_wifiSub = 2; dirty = true; }
       else if (g_wifiSub == 2 && g_ssid.length() > 0) saveAndConnectWifi();
       else if (g_wifiSub == 3) { g_wifiSub = 4; dirty = true; }
@@ -644,7 +667,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
           } else {
             g_addrErr = (String(lastErr) == "no match") ? "no-match"
                                                          : friendlyGeoError(lastErr);
-            g_wifiSub = 12;   // stay in the flow; "Fix address" returns to edit
+            g_wifiSub = 12;   // stay in the flow; "Fix Address" returns to edit
           }
           dirty = true;
         }
@@ -687,7 +710,8 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
       g_kbCursor++;
       dirty = true;
     }
-    // tap one uppercase char per Shift press, then drop back to lowercase
+    // tap one uppercase char per Shift press, then drop back to lowercase;
+    // CAPS is intentionally NOT cleared here
     if (g_kbShift && c >= 'A' && c <= 'Z') { g_kbShift = false; dirty = true; }
   }
 }
@@ -1002,9 +1026,9 @@ void drawAddrStatus() {
   tft.setTextColor(btnFg(g_clockCol), g_clockCol);
   tft.setTextFont(2);
   tft.setCursor(8, 6);
-  if (g_addrErr == "empty")            tft.print("Address search");
-  else if (g_addrErr == "no-match")    tft.print("Address not found");
-  else                                 tft.print("Search failed");
+  if (g_addrErr == "empty")            tft.print("Address Search");
+  else if (g_addrErr == "no-match")    tft.print("Address Not Found");
+  else                                 tft.print("Search Failed");
 
   if (g_addrErr == "empty") {
     tft.setTextColor(TFT_RED, TFT_BLACK);
@@ -1048,7 +1072,7 @@ void drawAddrStatus() {
   tft.setTextColor(btnFg(btnCol()), btnCol());
   tft.setTextFont(2);
   tft.setCursor(86, 207);
-  tft.print("Fix address");
+  tft.print("Fix Address");
 }
 
 void handleAddrStatusTouch(uint16_t x, uint16_t y) {

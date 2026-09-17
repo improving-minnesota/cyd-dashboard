@@ -280,8 +280,10 @@ void drawIdle() {
   tft.setTextFont(FONT_AUX);
   tft.setCursor(8, 224);
   char sb[40];
+  // lastErr is only ever set by the flights fetch, so with tracking off it
+  // would sit on the initial "connecting..." forever - leave the line blank.
   if (snoozeStatusText(sb, sizeof sb)) tft.print(sb);
-  else tft.print(lastErr);
+  else if (g_trackEnabled) tft.print(lastErr);
 }
 
 // ---- Weather temp history graph ----

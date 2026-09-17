@@ -15,10 +15,16 @@
 - **Flights overhead** *(optional — on by default)* — a mini radar of live
   aircraft near you: callsign, route, altitude, speed, distance, airline logo,
   and the plane's actual ground track.
+- **Flight recall** — tap the aircraft count to bring the last overhead
+  flight's details back up, even after it's gone.
 - **Pool temperature** *(optional — off by default)* — current water
   temperature and history graphs, if you have a Govee pool thermometer.
 - **Sleep mode** — the screen sleeps overnight and wakes on touch.
 - **Alarms** — up to 6 weekday-scheduled alarms with an LED + sound alert.
+- **Startup chime** — a short rising melody + LED sweep plays on power-on
+  (waking from deep sleep stays silent).
+- **Settings** — every option on the device is configurable on-screen:
+  units, clock, WiFi, location, flight tracking, alarms, and more.
 - **Self-updates** — new firmware installs itself over WiFi.
 
 <div class="shot"><img src="DEVELOPER-USERGUIDE-idle.png"
@@ -50,6 +56,9 @@ from a development computer.
   **10 seconds** to recalibrate.
 - **Wrong weather or no flights nearby** — fix your location under
   **Settings → Location**.
+- **A flight's route or track looks wrong** — route and ground-track data
+  come from third-party feeds (ADSB.lol, OpenSky) that may not have the
+  latest data, so they can be missing, outdated, or inaccurate.
 - **New WiFi network** — re-enter it under **Settings → Network**.
 
 <div class="shot"><img src="DEVELOPER-USERGUIDE-ftracker.png"
@@ -88,7 +97,7 @@ runs on your WiFi — no computer needed.
 1. **Plug it in.** On a brand-new device (or after a Factory Reset) it first
    asks you to tap a few crosshairs to calibrate the touchscreen — this is
    skipped if calibration is already saved.
-2. **Enter WiFi.** Type your network name and password on the on-screen
+2. **Enter WiFi.** Type your network name and password with the on-screen
    keyboard. (Change it later under **Settings → Network**.)
 3. Done — the dashboard appears and starts loading weather and flights.
 
@@ -146,10 +155,11 @@ tap**:
 
 ## ⏰ Alarms
 
-Up to 6, each with its own weekdays and LED pattern (Blink, Rapid, Double,
-Colors, Pulse). Set the time with the **▼ / ▲** arrow buttons — hour on the
+Up to 6, each with its own weekdays and a **Notify** pattern. Set the
+time with the
+**▼ / ▲** arrow buttons — hour on the
 left, minute on the right (the hour rolls through AM/PM) — or tap the time
-to type it. A bell icon sits beside the clock while any alarm is on. **Del** asks
+to type it. A bell icon sits beside the clock while any alarm is on. **Delete** asks
 for confirmation before removing an alarm.
 
 When one fires: **Dismiss** stops it for today; **Snooze** refires in 5 min
@@ -159,10 +169,12 @@ snoozed or missed alarm still fires after a power loss.
 
 🔊 Sound requires an **external speaker** plugged into the board's small
 JST port — the display has no built-in speaker, so without one alarms flash
-the LED only.
+the LED only. Loudness comes from **Notify Volume** under
+Settings → General; it applies to alarms, the callsign alert, and the boot
+chime.
 
 <div class="shot"><img src="DEVELOPER-USERGUIDE-alarms.png"
-     alt="Alarms editor: enable toggle, time steppers, weekday pickers, LED preset"></div>
+     alt="Alarms editor: enable toggle, time steppers, weekday pickers, Notify preset"></div>
 
 <!-- PANEL -->
 
@@ -173,7 +185,8 @@ Defaults shown in parentheses.
 
 - **General** — theme color picked from swatch rows (tap a hue, then a
   shade or grey — colors the
-  header and screen buttons); auto-update (on); units (Imperial ft/mph/mi,
+  header and screen buttons); auto-update (on); Notify Volume (5 levels,
+  default 100); units (Imperial ft/mph/mi,
   Metric m/kts/km, or Aviation ft/kts/nm — also sets weather and pool temps
   to °F or °C); clock (12-hour with AM/PM, or 24-hour).
 - **Location** — your coordinates (auto-guessed on first boot).
@@ -182,7 +195,8 @@ Defaults shown in parentheses.
 - **Flight Tracker** — enabled (on); radar radius (3.5, in mi/km/nm — how far
   away to look); altitude ceiling (15,000, in ft/m — planes above it are
   ignored); poll interval (30 s); timer bar (off); home
-  airport (none); watched callsign (none); LED blink (on); Show IATA (on);
+  airport (none); watched callsign (none); Callsign Notify (Radar —
+  the same presets as alarms); LED blink (on); Show IATA (on);
   OpenSky credentials.
 - **Sleep Mode** — enabled (on); sleeps 10:00 PM – 8:00 AM; a touch wakes it
   for 5 minutes.
@@ -198,7 +212,9 @@ Defaults shown in parentheses.
 - **Yellow** — OpenSky is running anonymously; flights still work.
 - **Flight blinks** — blue for any overhead flight; red when it's departing
   your home airport; green when arriving; yellow when both ends are your home
-  airport; white for your watched callsign.
+  airport. A watched callsign instead plays its **Callsign Notify**
+  pattern on the LED and speaker
+  while its details are shown — independent of the blink setting.
 
 ## 📦 Updates
 
