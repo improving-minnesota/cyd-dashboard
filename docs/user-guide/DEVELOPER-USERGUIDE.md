@@ -185,8 +185,8 @@ Defaults shown in parentheses.
 
 - **General** — theme color picked from swatch rows (tap a hue, then a
   shade or grey — colors the
-  header and screen buttons); auto-update (on); Notify Volume (5 levels,
-  default 100); units (Imperial ft/mph/mi,
+  header and screen buttons); auto-update (on); Notify Volume (levels 1–10,
+  default 10); units (Imperial ft/mph/mi,
   Metric m/kts/km, or Aviation ft/kts/nm — also sets weather and pool temps
   to °F or °C); clock (12-hour with AM/PM, or 24-hour).
 - **Location** — your coordinates (auto-guessed on first boot).

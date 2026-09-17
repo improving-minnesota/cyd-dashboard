@@ -176,7 +176,7 @@ Defaults for a freshly reset device are shown with each setting.
 - **General** — set the **Clock Color** (the dashboard's clock/header bar) on
   a swatch picker (tap a hue, then a shade or grey), toggle **Auto-Update** (whether the device
   checks for and installs firmware updates), adjust **Notify Volume**
-  (5 levels: 5%–100%, applies to every speaker sound — alarms, the callsign alert, and
+  (levels 1–10, applies to every speaker sound — alarms, the callsign alert, and
   the boot chime; each step plays a test beep at the new level), pick the
   **Units**
   (**Imperial** ft/mph/mi, **Metric** m/kts/km, or **Aviation** ft/kts/nm —
@@ -185,7 +185,7 @@ Defaults for a freshly reset device are shown with each setting.
   themes the
   ordinary screen buttons (black text on light colors, white on dark).
   Defaults: color **blue**, auto-update **on** (for release builds),
-  notify volume **100**, units **imperial**, clock **12-hour**.
+  notify volume **10**, units **imperial**, clock **12-hour**.
 - **Location** — set your coordinates so weather and flights are accurate. Use
   **Set** to type them, **Search Address**, or **Find by IP**. Default: none —
   on first boot it's guessed from your IP, otherwise your saved location.
