@@ -340,15 +340,16 @@ GitHub Actions builds and releases the firmware on standard hosted runners
      production FQBN. (The CYD display pinout comes from the sketch's own
      `tft_setup.h`, so no library patching is required.)
 
-> **Docs-only PRs skip the firmware build.** A `changes` gate job in `pr.yml`
-> lists the PR's files; if every one is docs/release metadata (markdown,
-> `docs/`, `LICENSE`, `.gitignore`, release-please manifest/config — so
-> release-please's own PRs qualify), the `build` job is skipped. The gate is a
-> job-level `if`, not a workflow `paths` filter, on purpose: a skipped job
-> reports the "Build firmware" check as *skipped*, which satisfies a
-> required-check ruleset, whereas a workflow-level path filter would leave the
-> check "Expected" forever and block the merge. Any file outside the
-> skip-list defaults to building.
+> **Docs-only PRs skip the firmware compile.** A `changes` gate job in
+> `pr.yml` lists the PR's files; if every one is docs/release metadata
+> (markdown, `docs/`, `LICENSE`, `.gitignore`, release-please manifest/config —
+> so release-please's own PRs qualify), it passes `skip=true` to
+> `build-firmware.yml`, whose heavy steps are skipped and the job succeeds in
+> seconds. The skip must happen inside the called workflow — a job-level `if`
+> reports the "Build firmware" check as *skipped*, which the required-check
+> ruleset does not accept (it would block the merge), and a workflow-level
+> `paths` filter would leave the check "Expected" forever. Any file outside
+> the skip-list defaults to building.
 >
 > The gate answers "can this PR break the firmware build?", not "will this PR
 > release?". Releasability is decided separately by release-please from the
