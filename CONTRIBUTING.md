@@ -26,7 +26,8 @@ semver version, so please use the correct type:
 | `chore:`, `docs:`, `refactor:`, `build:`, `ci:` | non-functional changes |
 | `feat!:` / `fix!:`, or a `BREAKING CHANGE:` footer | a breaking change |
 
-The subject should start with a letter (upper or lower case), e.g. `feat: Add a new setting`.
+The subject should start with a letter or number, e.g. `feat: Add a new setting`
+or `feat: 4.0in board support`.
 
 ## Development workflow
 
@@ -64,7 +65,9 @@ to be shippable.
 ## Building & verifying
 
 CI builds every PR with the production FQBN — for **both** supported boards,
-so a change that breaks one variant fails the check. One source tree serves
+so a change that breaks one variant fails the check. PRs that only touch docs
+or release metadata (markdown, `docs/`, release-please files) skip the build
+entirely. One source tree serves
 the 2.8" ESP32-2432S028R and the 4.0" E32R40T; a `-DCYD_*` flag picks the
 variant, the FQBN stays the same. To build locally:
 

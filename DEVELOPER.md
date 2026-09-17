@@ -338,13 +338,17 @@ GitHub Actions builds and releases the firmware on standard hosted runners
   2. **Build** the firmware: installs arduino-cli, the `esp32` core (3.3.11),
      TFT_eSPI (2.5.43) and ArduinoJson (7.4.3), then compiles with the
      production FQBN. (The CYD display pinout comes from the sketch's own
-     `tft_setup.h`, so no library patching is required.) This verifies every
-     PR compiles.
+     `tft_setup.h`, so no library patching is required.)
 
-> **Docs-only PRs:** `pr.yml` has no path filter, so even a docs-only PR runs
-> the (harmless) firmware build. That's intentional — it keeps the "Build
-> firmware" check predictable for branch-protection rulesets. For occasional
-> one-off doc updates, just let the build run.
+> **Docs-only PRs skip the firmware build.** A `changes` gate job in `pr.yml`
+> lists the PR's files; if every one is docs/release metadata (markdown,
+> `docs/`, `LICENSE`, `.gitignore`, release-please manifest/config — so
+> release-please's own PRs qualify), the `build` job is skipped. The gate is a
+> job-level `if`, not a workflow `paths` filter, on purpose: a skipped job
+> reports the "Build firmware" check as *skipped*, which satisfies a
+> required-check ruleset, whereas a workflow-level path filter would leave the
+> check "Expected" forever and block the merge. Any file outside the
+> skip-list defaults to building.
 
 - **`release.yml`** — runs on every push/merge to `main` and drives the release
   flow with `googleapis/release-please-action@v4`, configured by
