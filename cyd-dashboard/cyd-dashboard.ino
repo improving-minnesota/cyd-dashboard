@@ -27,6 +27,7 @@
 #include "esp_sleep.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
+#include "esp_random.h"
 #include "esp_sntp.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -80,6 +81,14 @@ enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW, 
 // Deep-sleep wake interval while inside the sleep window. The device wakes
 // briefly to log the pool temperature, then returns to low-power deep sleep.
 #define SLEEP_POOL_INTERVAL_US (5ULL * 60ULL * 1000000ULL)   // 5 minutes
+
+// Daily auto-update scan scheduling. The once-per-day GitHub release check is
+// spread over a random offset within JITTER so fleets that wake together (end
+// of a sleep window, midnight rollover) don't hit the API in the same minute,
+// and it never starts within +/- QUIET of an enabled alarm firing (see the
+// scheduler in loop()).
+#define AUTOSCAN_JITTER_S       3600
+#define AUTOSCAN_ALARM_QUIET_S  3600
 
 // ---- Touch-wake from deep sleep ----
 // VERIFIED on this unit: the XPT2046 touch IRQ is GPIO 36 (active-low) and
@@ -422,6 +431,8 @@ bool  g_showTimer = false;     // show/update the dashboard countdown bar (Fligh
 bool  g_showIata = true;       // show IATA airport codes in route display when ADSB.lol has them
 bool  g_autoUpdate = true;     // auto-check/install firmware updates once/day (General)
 unsigned long g_lastScanDay = 0; // epoch day of last auto-update scan (0 = never)
+time_t g_autoScanAt = 0;         // epoch the pending daily scan may run (0 = none)
+bool   g_autoScanForced = false; // scan sits at a least-bad slot inside an alarm window
 
 // OTA / firmware update state
 int    g_updateState = 0;      // 0 idle, 1 checking, 2 available, 3 none, 4 error
@@ -3690,6 +3701,43 @@ bool inSleepWindowNow() {
   return (cur >= start || cur < end);   // wraps past midnight
 }
 
+// Epoch of the next sleep-window start after `after` (today's or tomorrow's),
+// or 0 when Sleep Mode is off. Bounds the daily update scan to the awake time
+// remaining before the device next sleeps.
+time_t nextSleepStart(time_t after) {
+  if (!g_sleepOn) return 0;
+  struct tm t;
+  if (!getLocalTime(&t, 0)) return 0;
+  for (int d = 0; d < 2; d++) {
+    struct tm c = t;
+    c.tm_mday += d;
+    c.tm_hour = g_sleepStartH; c.tm_min = g_sleepStartM;
+    c.tm_sec = 0; c.tm_isdst = -1;
+    time_t cand = mktime(&c);
+    if (cand > after) return cand;
+  }
+  return 0;
+}
+
+// Latest-resort slot for the daily update scan when the remaining awake time
+// is one solid alarm window: the midpoint of the largest occurrence-free gap
+// inside [from, horizon] - the moment furthest from any firing.
+static time_t bestEffortSlot(time_t from, time_t horizon) {
+  time_t best = from, segStart = from;
+  long bestGap = -1;
+  time_t occ = nextAlarmAfter(from - 1);
+  while (occ && occ <= horizon) {
+    if (occ - segStart > bestGap) {
+      bestGap = occ - segStart;
+      best = segStart + (occ - segStart) / 2;
+    }
+    segStart = occ + 1;
+    occ = nextAlarmAfter(occ);
+  }
+  if (horizon - segStart > bestGap) best = segStart + (horizon - segStart) / 2;
+  return best;
+}
+
 // Low-power pool logger run while inside the sleep window. Wakes on the deep-
 // sleep timer, syncs time, logs the pool temperature to flash, and sleeps
 // again. Returns true only when the sleep window has ended (so the caller
@@ -3879,10 +3927,65 @@ void loop() {
       }
       dirty = true;
     }
-    // Daily auto-update scan (once/day): kick it off on the net task so the
-    // synchronous GitHub TLS fetch doesn't run on (and overflow) the small
-    // loopTask stack, and doesn't freeze the main loop.
-    if (g_autoUpdate) netWantAutoScan = true;
+  }
+
+  // --- Daily auto-update scan scheduling ---
+  // Instead of checking GitHub the instant WiFi comes up, the once-per-day
+  // scan is scheduled at a random offset within AUTOSCAN_JITTER_S of the day's
+  // first opportunity: fleets that wake together (end of a sleep window,
+  // midnight rollover) then spread their API calls instead of hitting it in
+  // the same minute. The scan also stays out of +/-AUTOSCAN_ALARM_QUIET_S of
+  // any enabled alarm so the OTA screen/reboot can't swallow a firing or yank
+  // the UI right after one. The fetch itself still runs on the net task
+  // (netWantAutoScan) since the TLS + JSON would overflow the loopTask stack.
+  {
+    time_t epoch = time(nullptr);
+    if (g_autoUpdate && wifiUp && g_timeReady && epoch >= 1600000000L
+        && !g_otaActive && !g_otaRunning) {
+      unsigned long day = (unsigned long)(epoch / 86400UL);
+      if (!g_autoScanAt && g_lastScanDay != day) {
+        g_autoScanAt = epoch + (time_t)(esp_random() % AUTOSCAN_JITTER_S);
+        if (isDevBuild())
+          Serial.printf("[ota] auto scan scheduled in %lus\n",
+                        (unsigned long)(g_autoScanAt - epoch));
+      }
+      if (g_autoScanAt && epoch >= g_autoScanAt) {
+        if (g_alarmFiring) {
+          // Never start an OTA over a ringing alarm; retry shortly. Kept
+          // ahead of the forced check so even a least-bad slot waits.
+          g_autoScanAt = epoch + 300;
+        } else if (g_autoScanForced) {
+          g_autoScanAt = 0; g_autoScanForced = false;
+          netWantAutoScan = true;
+        } else {
+          time_t occ = nextAlarmAfter(epoch - AUTOSCAN_ALARM_QUIET_S);
+          if (!occ || occ > epoch + AUTOSCAN_ALARM_QUIET_S) {
+            g_autoScanAt = 0;
+            netWantAutoScan = true;
+          } else {
+            time_t deferTo = occ + AUTOSCAN_ALARM_QUIET_S;
+            // Next sleep entry bounds how long the scan can be postponed:
+            // deferring past it would lose today's only opportunity.
+            time_t horizon = 0;
+            if (g_sleepOn) {
+              horizon = inSleepWindowNow()
+                ? (wakeUntil ? epoch + (time_t)((wakeUntil - now) / 1000UL) : epoch)
+                : nextSleepStart(epoch);
+            }
+            if (!horizon || deferTo <= horizon) {
+              g_autoScanAt = deferTo;
+            } else {
+              g_autoScanAt = bestEffortSlot(epoch, horizon);
+              g_autoScanForced = true;
+            }
+            if (isDevBuild())
+              Serial.printf("[ota] auto scan deferred to epoch %lu%s\n",
+                            (unsigned long)g_autoScanAt,
+                            g_autoScanForced ? " (forced)" : "");
+          }
+        }
+      }
+    }
   }
 
   // --- Polling runs only while WiFi is up; otherwise updates are suspended ---

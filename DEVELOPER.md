@@ -416,11 +416,20 @@ releases. All of this lives in `cyd-dashboard/ota.ino`.
 
 ### What triggers a check
 
-- **Daily auto-scan** (`maybeAutoUpdate()`), run once per boot right after WiFi
-  connects and NTP syncs. It runs at most once per calendar day (tracked in NVS
-  as the epoch day under `lastscan`). If Auto-Update is ON and a newer release
-  exists, it starts the OTA. Toggling **Auto-Update** ON in
-  **Settings → General** clears `lastscan` so it can check again the same day.
+- **Daily auto-scan** (`maybeAutoUpdate()`), run once per calendar day
+  (tracked in NVS as the epoch day under `lastscan`). When a new day is
+  detected — first WiFi connect after boot, or midnight rollover on an
+  always-on device — the scheduler in `loop()` picks a random time within
+  `AUTOSCAN_JITTER_S` (1 h) so fleets that wake together don't hit GitHub in
+  the same minute. At fire time the scan is deferred past any enabled alarm
+  occurrence within `AUTOSCAN_ALARM_QUIET_S` (±1 h, via `nextAlarmAfter()`,
+  which covers scheduled firings and parked snoozes); if deferring would land
+  past the next sleep-window start — i.e. no quiet slot remains while the
+  device is awake — it takes `bestEffortSlot()` instead, the awake moment
+  furthest from any firing, so dense alarm schedules can't starve the update.
+  If Auto-Update is ON and a newer release exists, it starts the OTA.
+  Toggling **Auto-Update** ON in **Settings → General** clears `lastscan` and
+  schedules an immediate scan (the alarm window still applies).
 - **Manual** — opening **Settings → About** triggers a check (via the net task,
   so the UI doesn't freeze); if newer, it shows **Upgrade Available (vX.Y.Z)**
   with an **Install** button.
