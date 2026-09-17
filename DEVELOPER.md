@@ -94,7 +94,7 @@ rest.
 
 | Flag | Board | Panel | OTA release asset | Build dir |
 |---|---|---|---|---|
-| *(none)* | 2.8" ESP32-2432S028R | ILI9341 320x240, touch on VSPI | `cyd-dashboard-2432s028r.ino.bin` (+ legacy `cyd-dashboard.ino.bin` copy) | `build/release` |
+| *(none)* | 2.8" ESP32-2432S028R | ILI9341 320x240, touch on VSPI | `cyd-dashboard-2432s028r.ino.bin` | `build/release` |
 | `-DCYD_E32R40T=1` | 4.0" E32R40T | ST7796 480x320, touch shares the TFT's HSPI, backlight GPIO 27, speaker amp enable GPIO 4 | `cyd-dashboard-e32r40t.ino.bin` | `build/release-e32r40t` |
 
 All layout code targets a logical DISP_W x 240 screen: 320x240 on the 2.8"
@@ -126,9 +126,9 @@ cyd-dashboard/.venv/bin/python scripts/ota_push.py --dir build/release-e32r40t
 
 Release assets are named per board (`OTA_ASSET` in `ota.ino`); `release.yml`
 builds each variant and `build-firmware.yml` compiles all of them on every
-PR. The bare `cyd-dashboard.ino.bin` name is kept (a copy of the 2432s028r
-build) only for firmware old enough to poll for it — retire it once those
-devices are gone.
+PR. Only board-named assets are published: firmware old enough to poll for
+the bare `cyd-dashboard.ino.bin` name (before board-named assets existed) can
+no longer see new releases and must be updated over USB.
 
 #### Identifying boards on serial ports
 
@@ -359,7 +359,7 @@ GitHub Actions builds and releases the firmware on standard hosted runners
   2. Once merged, the workflow builds the OTA firmware with
      `-DAPP_VERSION=<version>` (so **Settings → About** shows the release
      version), creates a draft GitHub **release**, attaches
-     `cyd-dashboard.ino.bin` (the raw app image for the inactive OTA slot), and
+     the per-board `.bin` assets (raw app images for the inactive OTA slot), and
      publishes it (release-please runs with `skip-github-release`, so devices
      never see a release before the `.bin` is attached).
   3. After the release is published, the merged release-please PR is marked
@@ -391,7 +391,7 @@ releases. All of this lives in `cyd-dashboard/ota.ino`.
 1. **Check.** `fetchLatestRelease()` GETs
    `https://api.github.com/repos/improving-minnesota/cyd-dashboard/releases/latest`
    (no auth — the repo is public), parses the `tag_name` (e.g. `v1.0.1`), and
-   finds the `cyd-dashboard.ino.bin` asset URL.
+   finds the board's `OTA_ASSET` asset URL.
 2. **Compare.** `compareVersions()` / `isNewerThanRunning()` strip the leading
    `v` and compare semver against the running `kVersion`.
 3. **Install.** `performOTA()` downloads the `.bin` in 4 KB chunks, streams them
@@ -569,7 +569,7 @@ Behavior notes:
   `.release-please-manifest.json` (and `CHANGELOG.md`). Pushing that merge to
   `main` triggers the `release.yml`
   workflow, which builds the firmware, creates and publishes the
-  `vMAJOR.MINOR.PATCH` GitHub release, attaches `cyd-dashboard.ino.bin`, and
+  `vMAJOR.MINOR.PATCH` GitHub release, attaches the per-board `.bin` assets, and
   then marks the release-please PR as `autorelease: published` so the next
   release cycle is not blocked. The build job bakes the new version into
   **Settings → About**.
