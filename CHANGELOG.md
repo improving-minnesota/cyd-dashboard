@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.1.1](https://github.com/improving-minnesota/cyd-dashboard/compare/v3.1.0...v3.1.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* never run the daily update scan inside the sleep window ([c75f83b](https://github.com/improving-minnesota/cyd-dashboard/commit/c75f83b7b7f7fbc53eca1b6412de35a3a6e230a2))
+* never run the daily update scan inside the sleep window ([da57257](https://github.com/improving-minnesota/cyd-dashboard/commit/da5725787da340014a28c58660c5301ffb1f0982))
+
 ## [3.1.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v3.0.0...v3.1.0) (2026-09-17)
 
 
