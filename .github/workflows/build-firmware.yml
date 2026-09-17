@@ -7,6 +7,11 @@ on:
         description: 'Version string (with or without a leading "v") to bake into APP_VERSION. Leave empty for PR/dev builds.'
         required: false
         type: string
+      skip:
+        description: 'Skip the compile (docs-only PR). The job still succeeds as a fast no-op so a required "Build firmware" check stays green.'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -14,9 +19,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
+        if: ${{ !inputs.skip }}
         uses: actions/checkout@v4
 
+      - name: Report skipped build
+        if: ${{ inputs.skip }}
+        run: echo "No firmware-affecting files changed; skipping compile."
+
       - name: Install arduino-cli
+        if: ${{ !inputs.skip }}
         run: |
           mkdir -p "$HOME/bin"
           curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
@@ -24,17 +35,20 @@ jobs:
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
       - name: Install esp32 core (3.3.11)
+        if: ${{ !inputs.skip }}
         run: |
           arduino-cli config init
           arduino-cli core update-index
           arduino-cli core install esp32:esp32@3.3.11
 
       - name: Install libraries
+        if: ${{ !inputs.skip }}
         run: |
           arduino-cli lib install "TFT_eSPI@2.5.43"
           arduino-cli lib install "ArduinoJson@7.4.3"
 
       - name: Build firmware
+        if: ${{ !inputs.skip }}
         run: |
           set -e
           VERSION=""
