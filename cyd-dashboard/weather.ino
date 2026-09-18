@@ -80,9 +80,60 @@ const char* wdName(int offset) {
   return nms[w];
 }
 
+// Open-Meteo 429 handling. The free API limits per client IP (600/min, 5000/hr,
+// 10000/day) and to 1 concurrent request per IP - several boards behind one
+// NAT share the quota. Each 429 body names the exceeded bucket in its "reason"
+// ("Minutely/Hourly/Daily API request limit exceeded" or "Too many concurrent
+// requests"), and every bucket resets on its UTC boundary: next minute, top of
+// the next hour, next midnight. Jitter on each deadline keeps boards that hit
+// a shared limit from resuming in lockstep.
+static void noteWxRateLimit(HTTPClient& http) {
+  long nowSec = (long)time(nullptr);
+  if (nowSec < 1600000000L) nowSec = (long)(millis() / 1000UL);  // pre-NTP fallback
+  String reason = http.getString();   // small {"error":true,"reason":"..."} body
+  unsigned long until;
+  bool retrySoon = false;
+  if (reason.indexOf("Minutely") >= 0) {
+    until = (unsigned long)(nowSec - nowSec % 60 + 60) + esp_random() % 15;
+    retrySoon = true;
+  } else if (reason.indexOf("Hourly") >= 0) {
+    until = (unsigned long)(nowSec - nowSec % 3600 + 3600) + esp_random() % 120;
+  } else if (reason.indexOf("Daily") >= 0) {
+    until = (unsigned long)(nowSec - nowSec % 86400 + 86400) + esp_random() % 600;
+  } else if (reason.indexOf("concurrent") >= 0) {
+    // Transient queue overflow - the slot frees in seconds, so retry well
+    // inside the normal cadence.
+    until = (unsigned long)nowSec + 20 + esp_random() % 25;
+    retrySoon = true;
+  } else {
+    // Unknown reason: exponential backoff (30s, 1m, 2m, ... capped at 15m);
+    // a persistent streak is treated like the daily cap.
+    unsigned long backoff = min(30UL << min(g_wx429Streak, 9), 900UL);
+    until = (unsigned long)nowSec + backoff + esp_random() % 30;
+    retrySoon = backoff < WEATHER_REFRESH_MS / 1000UL;
+    if (g_wx429Streak >= 5) {
+      until = (unsigned long)(nowSec - nowSec % 86400 + 86400) + esp_random() % 600;
+      retrySoon = false;
+    }
+  }
+  g_wx429Streak++;
+  g_wxNextEpoch = until;
+  // +1s cushion so the retry can't land a rounding-second inside the window.
+  if (retrySoon) g_wxRetryAt = millis() + (until - (unsigned long)nowSec) * 1000UL + 1000UL;
+  prefs.begin("flight", false); prefs.putULong("wxrl", until); prefs.end();
+  if (isDevBuild()) {
+    Serial.printf("[net] meteo 429 streak=%d until epoch %lu reason=%s\n",
+                  g_wx429Streak, until, reason.c_str());
+  }
+}
+
 // Open-Meteo weather fetch (free, no API key)
 void fetchWeather() {
   if (WiFi.status() != WL_CONNECTED) return;
+  // Inside a stored 429 window: covers the loop poll, boot, first-connect, and
+  // deep-sleep wake paths alike. Keeps the last displayed data rather than
+  // churning a guaranteed failure.
+  if (g_wxNextEpoch && (unsigned long)time(nullptr) < g_wxNextEpoch) return;
 
   char url[320];
   snprintf(url, sizeof url,
@@ -97,6 +148,12 @@ void fetchWeather() {
   HTTPClient http;
   http.setTimeout(5000);
   int code = httpsRequestRetry(http, sec, url, HTTPS_METHOD_GET, "", nullptr, false);
+  if (code == HTTP_CODE_TOO_MANY_REQUESTS) {
+    noteWxRateLimit(http);
+    g_weatherDataFailed = true;
+    http.end();
+    return;
+  }
   if (code != HTTP_CODE_OK) {
     g_weatherDataFailed = true;
     http.end();
@@ -144,6 +201,12 @@ void fetchWeather() {
   g_weatherValid = true;
   g_weatherDataFailed = false;
   g_lastWeather = millis();
+  g_wx429Streak = 0;
+  g_wxRetryAt = 0;   // a success from any path cancels a pending armed retry
+  if (g_wxNextEpoch) {
+    g_wxNextEpoch = 0;
+    prefs.begin("flight", false); prefs.putULong("wxrl", 0); prefs.end();
+  }
 
   // record in the RAM ring buffer and (if available) persistent flash log
   weatherLog(g_temp, (unsigned long)time(nullptr));

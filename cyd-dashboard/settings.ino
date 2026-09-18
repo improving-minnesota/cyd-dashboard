@@ -327,16 +327,17 @@ static const char* const kHelpLines[] = {
   "   above this), poll 30s,",
   "   timer bar on/off (off),",
   "   Home Airport (ICAO),",
-  "   Watch Callsign + its Notify",
-  "   pattern (Radar); matches",
-  "   any part of the callsign,",
-  "   show IATA codes (on),",
-  "   blink LED for each overhead",
-  "   flight (on).",
+  "   Watch Callsign (ICAO) +",
+  "   its Notify pattern (Radar);",
+  "   matches any part of a",
+  "   callsign; Show IATA",
+  "   Airports (on); LED",
+  "   blink per flight (on).",
   "Sleep Mode: on; 10 PM - 8 AM,",
   "   wake 5 min.",
   "Pool Temp: off; add Govee key,",
   "   pick thermometer.",
+  "   (off = no data collected)",
   "Calibrate Touch: if taps land",
   "   in the wrong spot, rerun it.",
   "About: version, author, update.",
@@ -871,11 +872,11 @@ void drawFtracker() {
     tft.setCursor(RX(250), 79);
     tft.print("Toggle");
 
-    // Show IATA toggle
+    // Show IATA Airports toggle
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextFont(2);
     tft.setCursor(8, 112);
-    tft.print("Show IATA");
+    tft.print("Show IATA Airports");
     tft.setTextColor(g_showIata ? TFT_GREENYELLOW : TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(150, 112);
     tft.print(g_showIata ? "ON" : "OFF");
@@ -906,7 +907,7 @@ void drawFtracker() {
     tft.setCursor(8, 87);
     tft.print("departures/arrivals. Empty = off.");
 
-    drawEditRow(124, "Watch Callsign", g_watchCallsign.length() ? g_watchCallsign : "--");
+    drawEditRow(124, "Watch Callsign (ICAO)", g_watchCallsign.length() ? g_watchCallsign : "--");
     tft.setTextFont(1);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(8, 152);
