@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.5.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v3.4.0...v3.5.0) (2026-09-18)
+
+
+### Features
+
+* watch-callsign wildcard and one-time alarms ([b7580b7](https://github.com/improving-minnesota/cyd-dashboard/commit/b7580b7abf2a2dac8e6a24e3066dcbfbb485f99c))
+* watch-callsign wildcard and one-time alarms ([6dda895](https://github.com/improving-minnesota/cyd-dashboard/commit/6dda8958a721193c090a2333a1a65d04f12fe9a9))
+
 ## [3.4.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v3.3.0...v3.4.0) (2026-09-18)
 
 
