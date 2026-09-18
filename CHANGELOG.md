@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.4.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v3.3.0...v3.4.0) (2026-09-18)
+
+
+### Features
+
+* honor Pool Temp toggle and back off on API rate limits ([f619b2e](https://github.com/improving-minnesota/cyd-dashboard/commit/f619b2e15bfa4af32dbabd8eb99ab0d1c9ba94d2))
+* honor Pool Temp toggle and back off on API rate limits ([844b143](https://github.com/improving-minnesota/cyd-dashboard/commit/844b143b7600b1bef9fe8e9271f807e5ad85b239))
+
 ## [3.3.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v3.2.0...v3.3.0) (2026-09-18)
 
 
