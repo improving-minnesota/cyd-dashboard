@@ -726,7 +726,7 @@ volatile bool g_trackBusy = false;   // cross-task guard
 portMUX_TYPE g_trackMux = portMUX_INITIALIZER_UNLOCKED;
 
 String g_homeAirport = "";      // home airport: drives the incoming/outgoing LED blink (empty = none)
-String g_watchCallsign = "";    // callsign to track preferentially + notify for while its flight details are shown
+String g_watchCallsign = "";    // callsign fragment to track preferentially + notify for (substring match) while its flight details are shown
 int    g_watchNotify   = 0;     // its "Callsign Notify" preset: index into the shared alarm patterns (NVS "watchntf")
 #define NTF_VOL_MIN 1           // Notify Volume floor: never fully inaudible
 // Notify Volume is a fixed-level pick rather than a percent continuum; NVS
@@ -1598,7 +1598,9 @@ void fetchFlights() {
   // plane appears in this poll and its blip would land inside the overall
   // screen bounds, it is promoted to planes[0] so every downstream user
   // (details, route/track fetches, blink, radar, recall snapshot) tracks it
-  // instead of the closer flight. A watched plane that would not draw is left
+  // instead of the closer flight. The watch value is a substring match, so
+  // several planes can qualify - planes[] is distance-sorted, making the
+  // first match the nearest one. A watched plane that would not draw is left
   // alone and the closest flight stays tracked.
   int watchIdx = -1;
   if (g_watchCallsign.length() > 0) {
@@ -2317,12 +2319,14 @@ static BlinkColor computeBlinkColor() {
   return BLINK_BLUE;
 }
 
-// True when the configured watch callsign matches `cs` (case-insensitive).
+// True when the configured watch callsign appears anywhere in `cs`
+// (case-insensitive, substring match): "DAL" matches DAL1234 and "5432"
+// matches DAL5432, so a partial entry still tracks the flight.
 static bool isWatchedCallsign(const char* cs) {
   if (g_watchCallsign.length() == 0) return false;
   String a = cs; a.trim(); a.toUpperCase();
   String b = g_watchCallsign; b.trim(); b.toUpperCase();
-  return a == b;
+  return a.indexOf(b) >= 0;
 }
 
 // Blink `pin` (active-low) `times` times, `ms` per phase.
