@@ -43,7 +43,9 @@ no computer needed.
   displayed. A watched callsign instead alerts with its **Callsign
   Notify** pattern — the same 49 presets as alarms, from a soft **Simple**
   beep to melodies like **Charge** and **Two Bits** — on the LED and speaker
-  while its flight details are shown. On the home screen the LED
+  while its flight details are shown. The watch value matches any part of
+  the callsign, so `DAL` catches `DAL1234` and `5432` catches `DAL5432`. On
+  the home screen the LED
   also glows red for a critical error or yellow when OpenSky is anonymous,
   matching the on-screen border. Critical errors include No WiFi, invalid
   OpenSky credentials, exhausted OpenSky credits, unavailable OpenSky/weather
@@ -205,7 +207,8 @@ Defaults for a freshly reset device are shown with each setting.
   switching units keeps the same number and re-reads it in the new
   unit), poll interval, the countdown/timer bar on the dashboard, your home
   airport (ICAO),
-  a watched callsign and its **Callsign Notify** pattern (LED + speaker
+  a watched callsign (matches any part of the callsign — `DAL` catches
+  `DAL1234`) and its **Callsign Notify** pattern (LED + speaker
   alert while its flight details are shown — works even when LED blinking is
   off — the same 49 presets as alarms), **Show IATA** (display route
   airports as `ICAO | IATA` when ADSB.lol provides an IATA code), and

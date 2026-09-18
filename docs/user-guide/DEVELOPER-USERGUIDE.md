@@ -25,7 +25,8 @@
   (waking from deep sleep stays silent).
 - **Settings** — every option on the device is configurable on-screen:
   units, clock, WiFi, location, flight tracking, alarms, and more.
-- **Self-updates** — new firmware installs itself over WiFi.
+- **Firmware updates** — checks for new firmware once a day and installs it
+  over WiFi, or update manually.
 
 <div class="shot"><img src="DEVELOPER-USERGUIDE-idle.png"
      alt="Idle dashboard: weather, sunrise/sunset, pool temperature, 7-day forecast"></div>
@@ -195,8 +196,8 @@ Defaults shown in parentheses.
 - **Flight Tracker** — enabled (on); radar radius (3.5, in mi/km/nm — how far
   away to look); altitude ceiling (15,000, in ft/m — planes above it are
   ignored); poll interval (30 s); timer bar (off); home
-  airport (none); watched callsign (none); Callsign Notify (Radar —
-  the same presets as alarms); LED blink (on); Show IATA (on);
+  airport (none); watched callsign (none — matches any part of a callsign);
+  Callsign Notify (Radar); LED blink (on); Show IATA (on);
   OpenSky credentials.
 - **Sleep Mode** — enabled (on); sleeps 10:00 PM – 8:00 AM; a touch wakes it
   for 5 minutes.
@@ -216,8 +217,9 @@ Defaults shown in parentheses.
   pattern on the LED and speaker
   while its details are shown — independent of the blink setting.
 
-## 📦 Updates
+## 📦 Firmware updates
 
-The device updates itself over WiFi. **Auto-Update** (on by default) checks
-once a day; or open **Settings → About** and tap **Install** when a newer
-version is offered. If an update fails to start, it rolls back automatically.
+The device keeps its firmware current over WiFi. **Auto-Update** (on by
+default) checks once a day and installs new releases; to update
+manually, open **Settings → About** and tap **Install** if a newer
+version is offered. If an update fails, it rolls back automatically.

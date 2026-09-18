@@ -173,7 +173,9 @@ static const char* const kHelpLines[] = {
   "arriving, red when departing.",
   "Yellow/green/red stay lit while",
   "the live flight is displayed. A",
-  "watched callsign alerts with its",
+  "watched callsign - the value",
+  "matches any part of a real",
+  "callsign - alerts with its",
   "Callsign Notify pattern on the",
   "LED + speaker while shown - the",
   "same 49 presets as alarms, from",
@@ -326,7 +328,8 @@ static const char* const kHelpLines[] = {
   "   timer bar on/off (off),",
   "   Home Airport (ICAO),",
   "   Watch Callsign + its Notify",
-  "   pattern (Radar),",
+  "   pattern (Radar); matches",
+  "   any part of the callsign,",
   "   show IATA codes (on),",
   "   blink LED for each overhead",
   "   flight (on).",
@@ -907,9 +910,9 @@ void drawFtracker() {
     tft.setTextFont(1);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     tft.setCursor(8, 152);
-    tft.print("Alerts with the pattern below");
+    tft.print("Matches any part of a callsign;");
     tft.setCursor(8, 163);
-    tft.print("while its flight is shown.");
+    tft.print("alerts while its flight is shown.");
 
     // Callsign Notify preset: same LED + speaker patterns as alarm
     // Notify. Works even when "Blink for Flight" is off.

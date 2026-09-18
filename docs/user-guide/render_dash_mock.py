@@ -706,7 +706,10 @@ def draw_wxgraph(d):
     gx, gy, gw, gh = 10, 66, 300, 140
     rect(gx, gy, gw, gh, BTN, stroke="#fff", sw=1)
 
-    now = int(time.time())
+    # Anchor the 24h window to the cached data's newest sample, not the wall
+    # clock: re-renders from mock_data.json stay identical however old the
+    # fetch is (a --refresh run's data is brand-new either way).
+    now = max((t for t, _ in d["wx_hist"]), default=int(time.time()))
     win, t0 = 86400, now - 86400
     series = [(t, v) for t, v in d["wx_hist"] if t0 <= t <= now]
     if not series:
