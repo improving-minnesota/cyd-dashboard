@@ -908,7 +908,7 @@ Settings are stored in NVS under the `"flight"` namespace (see `setup()` in
 | `units` | int | `0` | Device units (General → Units): 0 = Imperial (ft/mph/mi), 1 = Metric (m/kts/km), 2 = Aviation (ft/kts/nm). Radius and ceiling are still stored in miles/feet; the selected unit only changes what's displayed and what the sliders edit — switching units keeps the displayed number and reinterprets it in the new unit. Temperatures are fetched/logged in °F and converted at display (`tempDisp()`), so Metric and Aviation show °C. Migrates the old `metric` bool on first boot. |
 | `clock24` | bool | `false` | 24-hour clock (General → Clock). Affects the header clock, time editors, alarm times, and sunrise/sunset; `false` shows 12-hour times with AM/PM markers. |
 | `homeap` | string | `""` | Home Airport (ICAO). Used for the LED blink: red when origin matches, green when destination matches. Leave empty to disable. |
-| `watchcs` | string | `""` | Watched callsign (Flight Tracker → Watch Callsign (ICAO)) — substring match (`isWatchedCallsign`), case-insensitive: "DAL" matches DAL1234, "5432" matches DAL5432. When a matching plane appears in a poll and its radar blip is inside the screen bounds it is promoted to the tracked flight (closest match wins — `planes[]` is distance-sorted); while shown it alerts with the `watchntf` pattern on the LED + speaker. Leave empty to disable. |
+| `watchcs` | string | `""` | Watched callsign (Flight Tracker → Watch Callsign (ICAO)) — substring match (`isWatchedCallsign`), case-insensitive: "DAL" matches DAL1234, "5432" matches DAL5432; a lone "*" matches every flight. When a matching plane appears in a poll and its radar blip is inside the screen bounds it is promoted to the tracked flight (closest match wins — `planes[]` is distance-sorted); while shown it alerts with the `watchntf` pattern on the LED + speaker. Leave empty to disable. |
 | `watchntf` | int | index of "Radar" | Callsign Notify preset (Flight Tracker → Callsign Notify): index into `kNtfPresets` in `alarms.ino` (49 presets — blink styles, sirens, sweeps, Morse, chimes/bells, melodies). The default is looked up by name at boot so reordering can't change it; persisted indices must still never be reordered — append new presets at the end. Runs on the LED + speaker while the watched flight is shown; independent of `blinkf`. |
 | `ntfvol` | int | `100` | Notify Volume (General → Notify Volume): one of 10 levels — 1/2/3/4/5/15/25/50/75/100 percent (`kNtfVolLevels`; the 1% floor keeps notifications audible). The UI shows the level number (1–10); NVS stores the percent. Non-level values stored by older builds snap to the nearest level on load. Scales the LEDC duty cycle for every speaker sound — alarm/callsign patterns, the volume-test beep, and the boot chime (`playBootChime()` at the end of `setup()`). `tone()` can't be used for volume: it fixes duty at ~50%, so `toneWrite()` in `alarms.ino` drives `ledcWrite()` directly. |
 | `ipdhcp` | bool | `true` | Network addressing mode (Network → IP Setup). `true` = DHCP; `false` = static using the keys below. |
@@ -921,7 +921,7 @@ the color on every poll and re-blinks whenever the route state changes, so a
 flight that first appears with no route data still gets the correct color once
 its route arrives. Color priority is:
 
-- **Watched callsign** — a configured callsign (`watchcs`) promoted to the tracked flight runs its `watchntf` notification preset (same LED + speaker patterns as alarms) while its details are shown, plus a ~5 s speaker alert once per sighting. Independent of **Blink for Flight**; suppressed on the recall flight-detail page and while an alarm owns the LED/speaker.
+- **Watched callsign** — a configured callsign (`watchcs`) promoted to the tracked flight runs its `watchntf` notification preset (same LED + speaker patterns as alarms) while its details are shown, plus a ~5 s speaker alert once per sighting (re-armed when the watched streak ends or a different watched plane takes over the tracked slot). Independent of **Blink for Flight**; suppressed on the recall flight-detail page and while an alarm owns the LED/speaker.
 - **Yellow** — origin and destination are both `homeap` (same home airport).
 - **Green** — destination matches `homeap`.
 - **Red** — origin matches `homeap`.
@@ -1056,15 +1056,16 @@ any alarm is enabled.
 
 - **Storage** — one NVS blob (`alarms` in the `flight` namespace, versioned
   by `ALARM_STORE_VER`) holding `count` + a packed `Alarm` array (`en`, `h`,
-  `m`, weekday bitmask, `preset`, `snoozes`, `nextFire`). Max `MAX_ALARMS`
+  `m`, weekday bitmask (0 = one-time alarm), `preset`, `snoozes`, `nextFire`). Max `MAX_ALARMS`
   (6). Settings/Factory reset wipes it like any other setting.
 - **Firing** — each alarm carries `nextFire`, the persisted epoch of its
   next firing. `checkAlarms()` runs every `loop()` tick: an alarm is due iff
   `now >= nextFire`, so a firing missed while asleep or powered off goes off
   on the next run with no grace-window bookkeeping. `nextFire` is rewritten
   whenever the situation changes: any editor write or a Dismiss rearms it to
-  the next matching weekday (`nextScheduled()`, strictly future), and a
-  Snooze parks it at `now + 5 min`. `nextFire == 0` means "recompute once
+  the next matching weekday (`nextScheduled()`, strictly future — an empty
+  `days` mask schedules as all-days so a one-time alarm fires at the next
+  h:m), and a Snooze parks it at `now + 5 min`. `nextFire == 0` means "recompute once
   the clock is synced" (e.g. an alarm edited before NTP). A snoozed alarm
   needs no flag — `isSnoozed()` is just `nextFire` earlier than the next
   scheduled occurrence — and each alarm tracks its own `nextFire`, so
@@ -1085,7 +1086,8 @@ any alarm is enabled.
   is on" signature; `setup()` skips it when `esp_reset_reason()` reports a
   deep-sleep wake.
 - **Dismiss** rearms `nextFire` to the next scheduled weekday and returns to
-  the dashboard.
+  the dashboard — or, for a one-time alarm (empty `days` mask), clears `en`
+  instead so the single firing ends it.
 - **Snooze** sets `nextFire = now + 5 min`, increments `a.snoozes`, and
   returns to the dashboard; the alarm refires when `nextFire` passes —
   surviving deep sleep and power loss since it's in NVS. The dashboard's

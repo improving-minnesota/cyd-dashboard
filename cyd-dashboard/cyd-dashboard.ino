@@ -1696,7 +1696,9 @@ void fetchFlights() {
     // The watched flight's ground track is refetched every poll instead of
     // being cached from its first sighting, so the drawn path and the
     // dead-reckoned blip keep following its real trajectory while it's in view.
-    if ((!g_trackFetched || watchShown) && (long)(nowMs - g_nextTrackMs) >= 0) fetchTrack(planes[0].icao24);
+    // A "*" watch is excluded: it matches whatever plane is nearest, so the
+    // per-poll refetch would hit the track endpoint for every overhead flight.
+    if ((!g_trackFetched || (watchShown && !watchIsWildcard())) && (long)(nowMs - g_nextTrackMs) >= 0) fetchTrack(planes[0].icao24);
     if (!g_adsbRouteFetched && (long)(nowMs - g_nextAdsbMs) >= 0) fetchAdsbRoute(planes[0].callsign);
     // Decide the LED color from the best available route source. Re-check on
     // every poll and re-blink whenever the color changes (e.g. when route data
@@ -2330,11 +2332,20 @@ static BlinkColor computeBlinkColor() {
   return BLINK_BLUE;
 }
 
+// True when the configured watch callsign is "*", the match-all wildcard.
+static bool watchIsWildcard() {
+  String b = g_watchCallsign; b.trim(); b.toUpperCase();
+  return b == "*";
+}
+
 // True when the configured watch callsign appears anywhere in `cs`
 // (case-insensitive, substring match): "DAL" matches DAL1234 and "5432"
-// matches DAL5432, so a partial entry still tracks the flight.
+// matches DAL5432, so a partial entry still tracks the flight. A lone "*"
+// matches every flight, turning the callsign notification into an
+// any-flight alert.
 static bool isWatchedCallsign(const char* cs) {
   if (g_watchCallsign.length() == 0) return false;
+  if (watchIsWildcard()) return true;
   String a = cs; a.trim(); a.toUpperCase();
   String b = g_watchCallsign; b.trim(); b.toUpperCase();
   return a.indexOf(b) >= 0;
@@ -4161,7 +4172,7 @@ void loop() {
   // the route-hold color override the dashboard status. The status LED only
   // runs on the main home screen when no flight notification is active. All of
   // this stays inside the alarm gate so a firing alarm keeps the LED + speaker.
-  updateWatchNotify(now, watchActive);
+  updateWatchNotify(now, watchActive, planeCount > 0 ? planes[0].icao24 : "");
   bool routeActive = liveFlight && !watchActive && g_routeHoldColor != BLINK_NONE;
   if (watchActive) {
     updateRouteLed(false);

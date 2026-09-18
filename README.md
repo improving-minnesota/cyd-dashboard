@@ -25,11 +25,30 @@ no computer needed.
 
 ## What it does
 
+- **Alarms** — up to 6 time-of-day alarms, each with its own days-of-week mask
+  and notification pattern. Leaving all days off makes a one-time alarm. Fifty synchronized LED + speaker presets — blink
+  styles (**Blink**, **Rapid**, **Strobe**, **Slow**), unobtrusive singles
+  (**Simple**, **Ding**, **Ping**, **Tick**), sirens and sweeps (**Siren**,
+  **Wail**, **Yelp**, **Hi-Lo**, **Sweep**, **Swoop**, **Warble**), effects
+  (**Heartbeat**, **Radar**, **Knight Rider**-style scanner, **Morse** "CYD",
+  phone/bell/buzzer sounds), and melodies (**Charge**, **Two
+  Bits**, **Nokia**, **Zelda**, **Tetris**, **Für Elise**, **Ode to Joy**,
+  Beethoven's **Fifth**, **Smoke on the Water**, **Dixie**, **Jingle Bells**,
+  arcade **Coin**/**1-Up**/**Pac-Man**, **Happy**/**Sad**, and more). Sound
+  requires an **external speaker**
+  plugged into the board's JST speaker header — the CYD has no
+  built-in speaker, so without one alarms flash the LED only. When one
+  fires, big **Dismiss** and **Snooze** (5 min) buttons appear; up to 3
+  snoozes, then it dismisses itself for the day. A small
+  bell icon appears next to the header clock while any alarm is enabled.
+  Alarms fire on time even during Sleep Mode — the device wakes at the alarm
+  time — and a snoozed or missed alarm still fires after a power loss.
 - **Clock** — a big time and date in the header, with a small AM/PM marker.
-- **Weather** — current temperature, "feels like", humidity, sunrise/sunset, and
-  a 7-day forecast, refreshed every 10 minutes. The current temperature is also
-  logged to flash (always on) and graphed over Day / Week / Month / Year with the
-  low, average, and high.
+- **Firmware updates** — updates itself over WiFi from GitHub, either
+  automatically once a day or manually from the About screen.
+- **Flight recall** — tap the aircraft count on the idle screen (e.g. "6
+  aircraft") to bring the last overhead flight's details back up, even
+  after it's gone.
 - **Flight tracker** *(optional; on by default)* — live aircraft overhead
   (from OpenSky) with a mini radar,
   callsign, altitude/speed/distance, planned route from ADSB.lol shown as
@@ -44,7 +63,8 @@ no computer needed.
   Notify** pattern — the same 49 presets as alarms, from a soft **Simple**
   beep to melodies like **Charge** and **Two Bits** — on the LED and speaker
   while its flight details are shown. The watch value matches any part of
-  the callsign, so `DAL` catches `DAL1234` and `5432` catches `DAL5432`. On
+  the callsign, so `DAL` catches `DAL1234` and `5432` catches `DAL5432` (`*`
+  matches every flight). On
   the home screen the LED
   also glows red for a critical error or yellow when OpenSky is anonymous,
   matching the on-screen border. Critical errors include No WiFi, invalid
@@ -52,39 +72,21 @@ no computer needed.
   data, and an unavailable Govee pool temp. Note that route and ground-track
   data come from third-party feeds (ADSB.lol, OpenSky) and may not always be
   current or accurate — a route can be missing, stale, or just wrong.
-- **Flight recall** — tap the aircraft count on the idle screen (e.g. "6
-  aircraft") to bring the last overhead flight's details back up, even
-  after it's gone.
 - **Govee pool temp monitor** *(optional; off by default)* — current pool
   water temperature from a Govee thermometer, with a history graph
   (Day / Week / Month / Year) showing the low, average, and high. Fetches
   happen only while the feature is enabled.
-- **Sleep mode** — deep-sleeps overnight and wakes on touch.
-- **Alarms** — up to 6 time-of-day alarms, each with its own days-of-week mask
-  and notification pattern. Fifty synchronized LED + speaker presets — blink
-  styles (**Blink**, **Rapid**, **Strobe**, **Slow**), unobtrusive singles
-  (**Simple**, **Ding**, **Ping**, **Tick**), sirens and sweeps (**Siren**,
-  **Wail**, **Yelp**, **Hi-Lo**, **Sweep**, **Swoop**, **Warble**), effects
-  (**Heartbeat**, **Radar**, **Knight Rider**-style scanner, **Morse** "CYD",
-  phone/bell/buzzer sounds), and melodies (**Charge**, **Two
-  Bits**, **Nokia**, **Zelda**, **Tetris**, **Für Elise**, **Ode to Joy**,
-  Beethoven's **Fifth**, **Smoke on the Water**, **Dixie**, **Jingle Bells**,
-  arcade **Coin**/**1-Up**/**Pac-Man**, **Happy**/**Sad**, and more). Sound
-  requires an **external speaker**
-  plugged into the board's JST speaker header (GPIO 26) — the CYD has no
-  built-in speaker, so without one alarms flash the LED only. When one
-  fires, big **Dismiss** and **Snooze** (5 min) buttons appear; up to 3
-  snoozes, then it dismisses itself for the day. A small
-  bell icon appears next to the header clock while any alarm is enabled.
-  Alarms fire on time even during Sleep Mode — the device wakes at the alarm
-  time — and a snoozed or missed alarm still fires after a power loss.
-- **Startup chime** — a short rising chime (C5–E5–G5–C6) with an RGB LED
-  sweep plays on power-on; waking from deep sleep stays silent.
 - **Settings** — every option is configurable on the device itself: theme
   color, units, clock, WiFi/network, location, flight tracking, alarms,
   and more — see the [User guide](#user-guide) below.
-- **Firmware updates** — updates itself over WiFi from GitHub, either
-  automatically once a day or manually from the About screen.
+- **Sleep mode** — deep-sleeps overnight and wakes on touch.
+- **Startup chime** — a short rising chime with an RGB LED
+  sweep plays on power-on; waking from deep sleep stays silent. Additionally,
+  a chime plays after a firmware update.
+- **Weather** — current temperature, "feels like", humidity, sunrise/sunset, and
+  a 7-day forecast, refreshed every 10 minutes. The current temperature is also
+  saved on the device (always on) and graphed over Day / Week / Month / Year with the
+  low, average, and high.
 
 ## Hardware
 
@@ -99,9 +101,8 @@ Each combines an ESP32, a color display, and a resistive touchscreen in a
 single ready-to-run unit, so no separate wiring or external display is needed.
 
 The code is tailored to these boards' exact wiring, so **it won't work on
-other ESP32 boards or displays without modification** — new variants get their
-own `-DCYD_<MODEL>` build flag (see [DEVELOPER.md](DEVELOPER.md) → "Board
-variants"). Developers can find the wiring and flashing details in
+other ESP32 boards or displays without modification**. Developers can find
+board-variant, wiring, and flashing details in
 [DEVELOPER.md](DEVELOPER.md).
 
 ## Getting started
@@ -142,7 +143,7 @@ Where to get each credential is explained below.
 
 ## Using the device
 
-- On power-on the device plays a short rising chime (C5–E5–G5–C6) with an
+- On power-on the device plays a short rising chime with an
   RGB LED sweep — the "device is on" signature, at your **Notify Volume**.
   Waking from deep sleep stays silent.
 - Tap the **Settings** cog to open the settings menu.
@@ -156,8 +157,7 @@ Where to get each credential is explained below.
   credits** as three small readouts — **CRP** (radar polling), **CRL** (route
   lookup), and **CFT** (flight tracking). A value is **grey** when healthy,
   turns **yellow** below 500 (or shows a yellow **?** until that bucket's first
-  fetch), and **pink** below 50. A `429` rate/credit-limited response for any
-  bucket sets that path to 0. Tap the readouts to open the **OpenSky Credits**
+  fetch), and **pink** below 50. Tap the readouts to open the **OpenSky Credits**
   screen.
 - On the idle screen, tap the **weather temperature** (top-left) to open the
   weather temperature history graph.
@@ -176,32 +176,10 @@ Where to get each credential is explained below.
 
 Defaults for a freshly reset device are shown with each setting.
 
-- **General** — set the **Clock Color** (the dashboard's clock/header bar) on
-  a swatch picker (tap a hue, then a shade or grey), toggle **Auto-Update** (whether the device
-  checks for and installs firmware updates), adjust **Notify Volume**
-  (levels 1–10, applies to every speaker sound — alarms, the callsign alert, and
-  the boot chime; each step plays a test beep at the new level), pick the
-  **Units**
-  (**Imperial** ft/mph/mi, **Metric** m/kts/km, or **Aviation** ft/kts/nm —
-  also sets weather and pool temps to °F or °C), and choose a **12 or
-  24-hour clock** (24-hour hides the AM/PM marker). The picked color also
-  themes the
-  ordinary screen buttons (black text on light colors, white on dark).
-  Defaults: color **blue**, auto-update **on** (for release builds),
-  notify volume **10**, units **imperial**, clock **12-hour**.
-- **Location** — set your coordinates so weather and flights are accurate. Use
-  **Set** to type them, **Search Address**, or **Find by IP**. Default: none —
-  on first boot it's guessed from your IP, otherwise your saved location.
-  **Search Address** keeps your last search so you can fix it, and shows a clear
-  message if the address can't be found.
-- **Network** — your WiFi network (it scans in the background — pick from the
-  list once "Scanning" finishes, or enter it manually), plus **IP
-  Setup**: addressing can stay on **DHCP** (the default, works as before) or be
-  switched to **Static** with an IP address, subnet mask, gateway, and DNS
-  server, and you can set a device **hostname** (default `cyd-dashboard`) in
-  either mode. A blank DNS
-  uses the gateway; incomplete static fields fall back to DHCP. Changes apply
-  on the next connect.
+- **About** — version, author, and firmware update status. When a newer version
+  is available it shows **Upgrade Available** with an **Install** button.
+- **Calibrate Touch** — recalibrate the touchscreen if taps land in the wrong
+  spot.
 - **Flight Tracker** — on/off, radar radius (how far away to look,
   shown in mi/km/nm), altitude ceiling (planes above it are ignored, shown in
   ft/m — radius and ceiling follow the Units setting under General, and
@@ -210,7 +188,7 @@ Defaults for a freshly reset device are shown with each setting.
   airport (ICAO),
   **Watch Callsign (ICAO)** (matches any part of the
   callsign — `DAL` catches
-  `DAL1234`) and its **Callsign Notify** pattern (LED + speaker
+  `DAL1234`, or `*` to match every flight) and its **Callsign Notify** pattern (LED + speaker
   alert while its flight details are shown — works even when LED blinking is
   off — the same 49 presets as alarms), **Show IATA Airports** (display route
   airports as `ICAO | IATA` when ADSB.lol provides an IATA code), and
@@ -232,15 +210,35 @@ Defaults for a freshly reset device are shown with each setting.
   airport set, no watched callsign, show IATA **on**, blinking **on**. If your OpenSky **radar-polling** credits run
   out, the poll backs off to a slower 15-minute recovery check until they refill
   (OpenSky resets daily).
-- **Sleep Mode** — enable it, set the start/end time, and the wake duration.
-  Defaults: **on**, sleeps 10:00 PM – 8:00 AM, **5 min** wake.
+- **General** — set the **Clock Color** (the dashboard's clock/header bar) on
+  a swatch picker (tap a hue, then a shade or grey), toggle **Auto-Update** (whether the device
+  checks for and installs firmware updates), adjust **Notify Volume**
+  (levels 1–10, applies to every speaker sound — alarms, the callsign alert, and
+  the boot chime; each step plays a test beep at the new level), pick the
+  **Units**
+  (**Imperial** ft/mph/mi, **Metric** m/kts/km, or **Aviation** ft/kts/nm —
+  also sets weather and pool temps to °F or °C), and choose a **12 or
+  24-hour clock** (24-hour hides the AM/PM marker). The picked color also
+  themes the
+  ordinary screen buttons (black text on light colors, white on dark).
+  Defaults: color **blue**, auto-update **on** (for release builds),
+  notify volume **10**, units **imperial**, clock **12-hour**.
+- **Help** — this guide, on the device.
+- **Location** — set your coordinates so weather and flights are accurate. Use
+  **Set** to type them, **Search Address**, or **Find by IP**. Default: none —
+  on first boot it's guessed from your IP, otherwise your saved location.
+  **Search Address** keeps your last search so you can fix it, and shows a clear
+  message if the address can't be found.
+- **Network** — your WiFi network (it scans in the background — pick from the
+  list once "Scanning" finishes, or enter it manually), plus **IP
+  Setup**: addressing can stay on **DHCP** (the default, works as before) or be
+  switched to **Static** with an IP address, subnet mask, gateway, and DNS
+  server, and you can set a device **hostname** (default `cyd-dashboard`) in
+  either mode. A blank DNS
+  uses the gateway; incomplete static fields fall back to DHCP. Changes apply
+  on the next connect.
 - **Pool Temp** — enable it, enter your Govee API key, and pick your
   thermometer. While off, no pool data is fetched or logged. Default: **off**.
-- **Calibrate Touch** — recalibrate the touchscreen if taps land in the wrong
-  spot.
-- **About** — version, author, and firmware update status. When a newer version
-  is available it shows **Upgrade Available** with an **Install** button.
-- **Help** — this guide, on the device.
 - **Reset** — confirms before wiping and shows a message saying exactly what's
   being reset. **Factory Reset** clears settings *and* all files (including
   pool and weather temperature history and airline logos) and touch
@@ -250,6 +248,8 @@ Defaults for a freshly reset device are shown with each setting.
   credentials; **Graph Data**
   clears pool and weather temperature history. All three reboot the device.
   **Restart** reboots without clearing anything; **Cancel** changes nothing.
+- **Sleep Mode** — enable it, set the start/end time, and the wake duration.
+  Defaults: **on**, sleeps 10:00 PM – 8:00 AM, **5 min** wake.
 
 ## Updates (OTA)
 
