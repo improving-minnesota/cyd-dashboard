@@ -3,7 +3,10 @@
 // ---- Alarms ----
 // Up to MAX_ALARMS time-of-day alarms with per-weekday masks and an LED +
 // speaker notification pattern (each preset drives the RGB LED and a matching
-// beep pattern on the JST speaker header, GPIO 26). Stored as one NVS blob
+// beep pattern on the JST speaker header, GPIO 26). An empty mask isn't a
+// dead alarm - it's a one-time alarm: nextScheduled() treats it as "any
+// weekday" so it fires at the next h:m, and dismissing it turns it off.
+// Stored as one NVS blob
 // in the "flight" namespace, so Settings/Factory reset wipes them like every
 // other setting.
 //
@@ -392,11 +395,14 @@ bool anyAlarmEnabled() {
 
 // ---- scheduling ----
 // Earliest future epoch matching the alarm's h:m on an allowed weekday, or 0
-// if it can't fire (disabled, no days selected, or time not synced yet).
+// if it can't fire (disabled or time not synced yet). No days selected is a
+// one-time alarm: the mask effectively becomes "any weekday", so it fires at
+// the next h:m and alarmDismiss() turns it off instead of rearming.
 // Strictly future so a firing already in progress doesn't reselect itself.
 static time_t nextScheduled(int i, time_t now) {
   const Alarm& a = g_alarms[i];
-  if (!a.en || !a.days) return 0;
+  if (!a.en) return 0;
+  uint8_t mask = a.days ? a.days : 0x7F;   // no days = one-time, next h:m
   struct tm t;
   if (!getLocalTime(&t, 0)) return 0;
   for (int d = 0; d < 8; d++) {
@@ -404,7 +410,7 @@ static time_t nextScheduled(int i, time_t now) {
     c.tm_mday += d;
     c.tm_hour = a.h; c.tm_min = a.m; c.tm_sec = 0; c.tm_isdst = -1;
     time_t cand = mktime(&c);   // normalizes the date and fills tm_wday
-    if (cand > now && ((a.days >> c.tm_wday) & 1)) return cand;
+    if (cand > now && ((mask >> c.tm_wday) & 1)) return cand;
   }
   return 0;
 }
@@ -550,7 +556,16 @@ void fireAlarm(int i) {
 
 void alarmDismiss() {
   if (g_fireIdx >= 0 && g_fireIdx < g_alarmCount) {
-    rearmAlarm(g_fireIdx);   // next scheduled day = "dismissed for today"
+    Alarm& a = g_alarms[g_fireIdx];
+    if (a.days) {
+      rearmAlarm(g_fireIdx);   // next scheduled day = "dismissed for today"
+    } else {
+      // One-time alarm (no days): the firing is the whole schedule, so the
+      // episode ends by turning the alarm off instead of rearming it.
+      a.en = 0;
+      a.snoozes = 0;
+      a.nextFire = 0;
+    }
     saveAlarms();
   }
   g_alarmFiring = false;
@@ -672,22 +687,28 @@ void updateAlarmLed(unsigned long now) {
 // sighting. Independent of the blink-for-flight setting. Driven from loop()
 // inside the !alarmLedBusy() gate so a firing alarm keeps the LED + speaker.
 // Disarming on inactive re-arms the notification so a watched flight that
-// leaves and returns notifies again.
+// leaves and returns notifies again; a different watched plane taking over
+// the tracked slot (substring matches can hand off mid-view) also counts as
+// a new sighting and replays the speaker window.
 #define WATCH_TONE_MS 5000
 static unsigned long g_watchToneStart = 0;
 static bool g_watchToneArmed = false;
 static bool g_watchLedOn = false;
+static char g_watchIcao[7] = "";   // icao24 the current sighting belongs to
 
-void updateWatchNotify(unsigned long now, bool active) {
+void updateWatchNotify(unsigned long now, bool active, const char* icao24) {
   if (!active) {
     // Only silence the speaker if this notifier was the one using it - the
     // volume-test beep and other one-shots must not be cut off.
     if (g_watchToneArmed) { g_watchToneArmed = false; toneWrite(0); }
     if (g_watchLedOn) { ledWrite(0, 0, 0); g_watchLedOn = false; }
+    g_watchIcao[0] = 0;
     return;
   }
   g_watchLedOn = true;
-  if (!g_watchToneArmed) {
+  if (strncmp(icao24, g_watchIcao, 6) != 0) {
+    strncpy(g_watchIcao, icao24, 6);
+    g_watchIcao[6] = 0;
     g_watchToneArmed = true;
     g_watchToneStart = now;
   }
@@ -822,6 +843,14 @@ void drawAlarms() {
     tft.setTextColor(btnFg(c), c);
     tft.setCursor(bx + 11, 133);
     tft.print(dl[i]);
+  }
+  // An empty day mask isn't a dead alarm - it's a one-time alarm, so say so
+  // or the row reads as "never fires".
+  if (!a.days) {
+    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    tft.setTextFont(1);
+    tft.setCursor(64, 159);
+    tft.print("No days = One-Time Alarm");
   }
 
   // Notify preset stepper

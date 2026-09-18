@@ -9,24 +9,25 @@
 <!-- inside flap: the welcome panel, first thing seen when opened -->
 ## ✨ What it shows
 
+- **Alarms** — up to 6 weekday-scheduled alarms with an LED + sound alert.
 - **Clock & date** — always on top.
-- **Weather** — current temperature, feels-like, humidity, sunrise/sunset, a
-  7-day forecast, and temperature history graphs (Day / Week / Month / Year).
+- **Firmware updates** — checks for new firmware once a day and installs it
+  over WiFi, or update manually.
+- **Flight recall** — tap the aircraft count to bring the last overhead
+  flight's details back up, even after it's gone.
 - **Flights overhead** *(optional — on by default)* — a mini radar of live
   aircraft near you: callsign, route, altitude, speed, distance, airline logo,
   and the plane's actual ground track.
-- **Flight recall** — tap the aircraft count to bring the last overhead
-  flight's details back up, even after it's gone.
 - **Pool temperature** *(optional — off by default)* — current water
   temperature and history graphs, if you have a Govee pool thermometer.
-- **Sleep mode** — the screen sleeps overnight and wakes on touch.
-- **Alarms** — up to 6 weekday-scheduled alarms with an LED + sound alert.
-- **Startup chime** — a short rising melody + LED sweep plays on power-on
-  (waking from deep sleep stays silent).
 - **Settings** — every option on the device is configurable on-screen:
   units, clock, WiFi, location, flight tracking, alarms, and more.
-- **Firmware updates** — checks for new firmware once a day and installs it
-  over WiFi, or update manually.
+- **Sleep mode** — the screen sleeps overnight and wakes on touch.
+- **Startup chime** — a short rising melody + LED sweep plays on power-on
+  (stays silent when it wakes from sleep mode). Additionally, a chime plays
+  after a firmware update.
+- **Weather** — current temperature, feels-like, humidity, sunrise/sunset, a
+  7-day forecast, and temperature history graphs (Day / Week / Month / Year).
 
 <div class="shot"><img src="DEVELOPER-USERGUIDE-idle.png"
      alt="Idle dashboard: weather, sunrise/sunset, pool temperature, 7-day forecast"></div>
@@ -58,7 +59,7 @@ from a development computer.
 - **Wrong weather or no flights nearby** — fix your location under
   **Settings → Location**.
 - **A flight's route or track looks wrong** — route and ground-track data
-  come from third-party feeds (ADSB.lol, OpenSky) that may not have the
+  come from public flight-data feeds that may not have the
   latest data, so they can be missing, outdated, or inaccurate.
 - **New WiFi network** — re-enter it under **Settings → Network**.
 
@@ -113,7 +114,7 @@ Open **Settings → Location**, then use whichever is easiest:
 - **Set** — type your latitude and longitude directly.
 - **Find by IP** — guess again from your connection.
 
-## 🔑 OpenSky API key (recommended)
+## 🔑 OpenSky account (recommended)
 
 Flights work out of the box, but a free OpenSky account raises your daily
 limit and removes the yellow "anonymous" warning.
@@ -156,7 +157,8 @@ tap**:
 
 ## ⏰ Alarms
 
-Up to 6, each with its own weekdays and a **Notify** pattern. Set the
+Up to 6, each with its own weekdays and a **Notify** pattern. Leave all
+weekdays off for a one-time alarm. Set the
 time with the
 **▼ / ▲** arrow buttons — hour on the
 left, minute on the right (the hour rolls through AM/PM) — or tap the time
@@ -184,6 +186,15 @@ chime.
 
 Defaults shown in parentheses.
 
+- **About** — version, author, and firmware update status / install.
+- **Calibrate Touch** — rerun touch calibration.
+- **Flight Tracker** — enabled (on); radar radius (3.5, in mi/km/nm — how far
+  away to look); altitude ceiling (15,000, in ft/m — planes above it are
+  ignored); poll interval (30 s); timer bar (off); home
+  airport (none); watch callsign — (none, matches
+  any part of a callsign; \* matches every flight);
+  callsign notify (Radar); LED blink (on); Show IATA Airports (on);
+  OpenSky credentials.
 - **General** — theme color picked from swatch rows (tap a hue, then a
   shade or grey — colors the
   header and screen buttons); auto-update (on); Notify Volume (levels 1–10,
@@ -193,20 +204,11 @@ Defaults shown in parentheses.
 - **Location** — your coordinates (auto-guessed on first boot).
 - **Network** — WiFi network (shows *Scanning* while it searches); DHCP or
   static IP; device hostname.
-- **Flight Tracker** — enabled (on); radar radius (3.5, in mi/km/nm — how far
-  away to look); altitude ceiling (15,000, in ft/m — planes above it are
-  ignored); poll interval (30 s); timer bar (off); home
-  airport (none); Watch Callsign (ICAO) — (none, matches
-  any part of a callsign);
-  Callsign Notify (Radar); LED blink (on); Show IATA Airports (on);
-  OpenSky credentials.
-- **Sleep Mode** — enabled (on); sleeps 10:00 PM – 8:00 AM; a touch wakes it
-  for 5 minutes.
 - **Pool Temp** — (off) enable, enter the API key, pick your thermometer.
   While off, no data is collected.
-- **Calibrate Touch** — rerun touch calibration.
-- **About** — version, author, and firmware update status / install.
 - **Reset** — see the back cover.
+- **Sleep Mode** — enabled (on); sleeps 10:00 PM – 8:00 AM; a touch wakes it
+  for 5 minutes.
 
 ## 💡 LED & border colors
 
