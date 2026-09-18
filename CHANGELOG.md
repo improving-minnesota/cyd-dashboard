@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.3.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v3.2.0...v3.3.0) (2026-09-18)
+
+
+### Features
+
+* watch callsign matches any part of the callsign ([07f8b7b](https://github.com/improving-minnesota/cyd-dashboard/commit/07f8b7b96190d8b9576fad10b6731ce595675066))
+* watch callsign matches any part of the callsign ([bc4d759](https://github.com/improving-minnesota/cyd-dashboard/commit/bc4d759569738e45b16467ccca2356aec4c69875))
+
 ## [3.2.0](https://github.com/improving-minnesota/cyd-dashboard/compare/v3.1.1...v3.2.0) (2026-09-17)
 
 
