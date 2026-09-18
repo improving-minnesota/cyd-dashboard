@@ -196,12 +196,14 @@ Defaults shown in parentheses.
 - **Flight Tracker** — enabled (on); radar radius (3.5, in mi/km/nm — how far
   away to look); altitude ceiling (15,000, in ft/m — planes above it are
   ignored); poll interval (30 s); timer bar (off); home
-  airport (none); watched callsign (none — matches any part of a callsign);
-  Callsign Notify (Radar); LED blink (on); Show IATA (on);
+  airport (none); Watch Callsign (ICAO) — (none, matches
+  any part of a callsign);
+  Callsign Notify (Radar); LED blink (on); Show IATA Airports (on);
   OpenSky credentials.
 - **Sleep Mode** — enabled (on); sleeps 10:00 PM – 8:00 AM; a touch wakes it
   for 5 minutes.
 - **Pool Temp** — (off) enable, enter the API key, pick your thermometer.
+  While off, no data is collected.
 - **Calibrate Touch** — rerun touch calibration.
 - **About** — version, author, and firmware update status / install.
 - **Reset** — see the back cover.

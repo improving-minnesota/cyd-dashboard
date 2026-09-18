@@ -57,7 +57,8 @@ no computer needed.
   after it's gone.
 - **Govee pool temp monitor** *(optional; off by default)* — current pool
   water temperature from a Govee thermometer, with a history graph
-  (Day / Week / Month / Year) showing the low, average, and high.
+  (Day / Week / Month / Year) showing the low, average, and high. Fetches
+  happen only while the feature is enabled.
 - **Sleep mode** — deep-sleeps overnight and wakes on touch.
 - **Alarms** — up to 6 time-of-day alarms, each with its own days-of-week mask
   and notification pattern. Fifty synchronized LED + speaker presets — blink
@@ -207,10 +208,11 @@ Defaults for a freshly reset device are shown with each setting.
   switching units keeps the same number and re-reads it in the new
   unit), poll interval, the countdown/timer bar on the dashboard, your home
   airport (ICAO),
-  a watched callsign (matches any part of the callsign — `DAL` catches
+  **Watch Callsign (ICAO)** (matches any part of the
+  callsign — `DAL` catches
   `DAL1234`) and its **Callsign Notify** pattern (LED + speaker
   alert while its flight details are shown — works even when LED blinking is
-  off — the same 49 presets as alarms), **Show IATA** (display route
+  off — the same 49 presets as alarms), **Show IATA Airports** (display route
   airports as `ICAO | IATA` when ADSB.lol provides an IATA code), and
   whether to blink the LED for
   an overhead flight. Also where you
@@ -233,7 +235,7 @@ Defaults for a freshly reset device are shown with each setting.
 - **Sleep Mode** — enable it, set the start/end time, and the wake duration.
   Defaults: **on**, sleeps 10:00 PM – 8:00 AM, **5 min** wake.
 - **Pool Temp** — enable it, enter your Govee API key, and pick your
-  thermometer. Default: **off**.
+  thermometer. While off, no pool data is fetched or logged. Default: **off**.
 - **Calibrate Touch** — recalibrate the touchscreen if taps land in the wrong
   spot.
 - **About** — version, author, and firmware update status. When a newer version

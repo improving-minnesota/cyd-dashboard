@@ -116,7 +116,7 @@ void drawWifiScreen() {
   else if (g_wifiSub == 8) drawKeyboard("Alarm Time (HHMM)", g_alarmTimeStr, false);
   else if (g_wifiSub == 10) drawKeyboard("Lat, Lon", g_latLonStr, false);
   else if (g_wifiSub == 11) drawKeyboard("Home Airport (ICAO)", g_homeAirport, false);
-  else if (g_wifiSub == 13) drawKeyboard("Watch Callsign", g_watchCallsign, false);
+  else if (g_wifiSub == 13) drawKeyboard("Watch Callsign (ICAO)", g_watchCallsign, false);
   else if (g_wifiSub == 12) drawAddrStatus();
   else if (g_wifiSub == 20) drawIpConfig();
   else if (g_wifiSub == 21) drawKeyboard("Static IP Address", g_staticIp, false);

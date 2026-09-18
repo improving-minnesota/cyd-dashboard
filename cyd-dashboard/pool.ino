@@ -8,6 +8,59 @@
 
 // ---- Govee Open API: Pool Temp integration ----
 
+// Govee enforces two rate-limit tiers, each returning *-Remaining and *-Reset
+// (UTC epoch seconds) headers: per-day X-RateLimit-* (10000/day per key) and
+// per-minute API-RateLimit-* (per endpoint/device), plus a Retry-After on 429.
+// Response headers to capture - without collectHeaders() HTTPClient discards
+// everything except a small built-in set.
+static const char* kGoveeRlKeys[] = {
+  "X-RateLimit-Remaining", "X-RateLimit-Reset",
+  "API-RateLimit-Remaining", "API-RateLimit-Reset", "Retry-After"
+};
+static const int kGoveeRlKeyCount = sizeof(kGoveeRlKeys) / sizeof(kGoveeRlKeys[0]);
+
+// Park all Govee requests until the server's stated reset deadline. The jitter
+// on each candidate desynchronizes boards that share one API key - a shared
+// 429 hands every board the same reset epoch, so without it they'd all resume
+// in one burst.
+static void noteGoveeRateLimit(HTTPClient& http) {
+  long nowSec = (long)time(nullptr);
+  if (nowSec < 1600000000L) nowSec = (long)(millis() / 1000UL);  // pre-NTP fallback
+  unsigned long until = (unsigned long)nowSec + 300UL;   // headerless fallback
+  String day = http.header("X-RateLimit-Reset");
+  if (day.length()) until = max(until, (unsigned long)day.toInt() + esp_random() % 300UL);
+  String perMin = http.header("API-RateLimit-Reset");
+  if (perMin.length()) until = max(until, (unsigned long)perMin.toInt() + esp_random() % 30UL);
+  String retry = http.header("Retry-After");
+  if (retry.length()) until = max(until, (unsigned long)(nowSec + retry.toInt() + (long)(esp_random() % 15UL)));
+  g_goveeRateReset = until;
+  prefs.begin("flight", false); prefs.putULong("goveerl", until); prefs.end();
+  if (isDevBuild()) Serial.printf("[net] govee rate limited until epoch %lu\n", until);
+}
+
+// True while inside a stored Govee rate-limit window.
+bool goveeRateLimited() {
+  return g_goveeRateReset != 0 && (unsigned long)time(nullptr) < g_goveeRateReset;
+}
+
+// A successful response lifts the deadline (persisted too, so the next
+// deep-sleep wake doesn't think it's still limited).
+static void clearGoveeRateLimit() {
+  if (!g_goveeRateReset) return;
+  g_goveeRateReset = 0;
+  prefs.begin("flight", false); prefs.putULong("goveerl", 0); prefs.end();
+}
+
+// A 200 reporting an exhausted bucket parks further requests preemptively so
+// we don't burn the extra 429 to learn the same deadline.
+static void checkGoveeRemaining(HTTPClient& http) {
+  String dayRem = http.header("X-RateLimit-Remaining");
+  String minRem = http.header("API-RateLimit-Remaining");
+  if ((dayRem.length() && dayRem.toInt() <= 0) || (minRem.length() && minRem.toInt() <= 0)) {
+    noteGoveeRateLimit(http);
+  }
+}
+
 // Select the currently-highlighted thermometer and persist it.
 void selectGoveeDevice() {
   if (g_goveeCount == 0) { g_poolValid = false; return; }
@@ -24,23 +77,27 @@ void selectGoveeDevice() {
   prefs.putString("poolmodel", g_poolModel);
   prefs.putString("poolname", g_poolName);
   prefs.end();
-  netWantPool = true;   // fetch the newly-selected device's temp async
+  if (g_poolEnabled) netWantPool = true;   // fetch the newly-selected device's temp async
 }
 
 // Fetch the list of thermometers on the account into g_goveeDevs.
 // Response shape: data is an array of {sku, device, deviceName, type, capabilities}.
 // Thermometers have type "devices.types.thermometer" / a "sensorTemperature" capability.
 bool fetchGoveeDevices() {
-  if (WiFi.status() != WL_CONNECTED || g_goveeKey.length() == 0) { g_goveeAuthBad = false; return false; }
+  if (WiFi.status() != WL_CONNECTED || g_goveeKey.length() == 0 || goveeRateLimited()) { g_goveeAuthBad = false; return false; }
   // Govee's Open API is Amazon-signed (Amazon Root CA 1 is in the global store).
   NetworkClientSecure sec;
   HTTPClient http;
   http.setTimeout(5000);
+  http.collectHeaders(kGoveeRlKeys, kGoveeRlKeyCount);
   const char* devHdrs[] = { "Govee-API-Key", g_goveeKey.c_str(), nullptr };
   int code = httpsRequestRetry(http, sec, "https://openapi.api.govee.com/router/api/v1/user/devices",
                                HTTPS_METHOD_GET, "", devHdrs, false);
   g_goveeAuthBad = (code == HTTP_CODE_UNAUTHORIZED || code == HTTP_CODE_FORBIDDEN);
+  if (code == HTTP_CODE_TOO_MANY_REQUESTS) { noteGoveeRateLimit(http); http.end(); return false; }
   if (code != HTTP_CODE_OK) { http.end(); return false; }
+  clearGoveeRateLimit();
+  checkGoveeRemaining(http);
   BoundedAllocator devicesAlloc(16384);
   JsonDocument doc(&devicesAlloc);
   HttpBodyStream body(http);
@@ -74,22 +131,30 @@ bool fetchGoveeDevices() {
 // POST /device/state with body {requestId, payload:{sku, device}}; the
 // temperature is in payload.capabilities[] where instance=="sensorTemperature".
 bool fetchGoveeTemp() {
-  if (WiFi.status() != WL_CONNECTED || g_goveeKey.length() == 0 || g_poolDeviceId.length() == 0) {
+  if (!g_poolEnabled || WiFi.status() != WL_CONNECTED || g_goveeKey.length() == 0
+      || g_poolDeviceId.length() == 0) {
     g_poolValid = false;
     g_goveeAuthBad = false;
     return false;
   }
+  // Inside a Govee rate-limit window the server already told us to wait - keep
+  // the last reading instead of burning a guaranteed-failure request.
+  if (goveeRateLimited()) return false;
   String requestBody = "{\"requestId\":\"pool-1\",\"payload\":{\"sku\":\"" + g_poolModel
                        + "\",\"device\":\"" + g_poolDeviceId + "\"}}";
   // Verified TLS via the global trust store (Amazon Root CA 1).
   NetworkClientSecure sec;
   HTTPClient http;
   http.setTimeout(5000);
+  http.collectHeaders(kGoveeRlKeys, kGoveeRlKeyCount);
   const char* tempHdrs[] = { "Govee-API-Key", g_goveeKey.c_str(), "Content-Type", "application/json", nullptr };
   int code = httpsRequestRetry(http, sec, "https://openapi.api.govee.com/router/api/v1/device/state",
                                HTTPS_METHOD_POST, requestBody, tempHdrs, false);
   g_goveeAuthBad = (code == HTTP_CODE_UNAUTHORIZED || code == HTTP_CODE_FORBIDDEN);
+  if (code == HTTP_CODE_TOO_MANY_REQUESTS) { noteGoveeRateLimit(http); g_poolValid = false; http.end(); return false; }
   if (code != HTTP_CODE_OK) { g_poolValid = false; http.end(); return false; }
+  clearGoveeRateLimit();
+  checkGoveeRemaining(http);
   BoundedAllocator tempAlloc(4096);
   JsonDocument doc(&tempAlloc);
   HttpBodyStream body(http);
@@ -211,6 +276,14 @@ void handlePoolTouch(uint16_t x, uint16_t y) {
   if (inRect(x, y, RX(230), 36, RX(312), 60)) {  // Enabled toggle
     g_poolEnabled = !g_poolEnabled;
     prefs.begin("flight", false); prefs.putBool("poolen", g_poolEnabled); prefs.end();
+    // On: kick an immediate fetch instead of waiting out the poll cadence.
+    // Off: drop the stale reading so "Current" shows -- (capture is stopped
+    // everywhere, so nothing refreshes it).
+    if (g_poolEnabled) {
+      if (g_poolDeviceId.length() > 0) netWantPool = true;
+    } else {
+      g_poolValid = false;
+    }
     dirty = true;
     return;
   }

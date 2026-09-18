@@ -759,12 +759,27 @@ shares that same mounted partition. If the partition is moved or erased
 (e.g. a partition-table change), it is formatted once again and the previous
 history is dropped.
 
-Data collection runs both while awake and while asleep. While asleep the
+Data collection runs both while awake and while asleep. Pool logging happens
+only while the Pool Temp feature is enabled (`g_poolEnabled` gates every fetch
+path: boot, first-connect, the 5-min poll, and the sleep wake); the weather
+log has no toggle. While asleep the
 deep-sleep timer wakes every ~5 min (sooner if an alarm's `nextFire` lands
 first — see "Alarms"); the **same single wake** connects, logs
-the pool temp and the weather temp, and goes back to sleep — weather logging
+the pool temp (when enabled) and the weather temp, and goes back to sleep —
+weather logging
 adds **no additional wake-ups**, only one extra HTTPS call within the wake the
 pool already needs.
+
+Both providers rate-limit: Govee returns `X-RateLimit-*` (per-day) and
+`API-RateLimit-*` (per-minute) headers with `*-Reset` as a UTC epoch plus
+`Retry-After` on 429; Open-Meteo's 429 body names the exceeded bucket
+("Minutely/Hourly/Daily..." or "Too many concurrent requests"), each resetting
+on its UTC boundary. On a 429 either fetch parks until the stated deadline —
+persisted in NVS (`goveerl` / `wxrl`) so deep-sleep wakes honor it — with
+`esp_random()` jitter so boards sharing an API key / NAT IP don't resume in
+lockstep; Open-Meteo "concurrent"/minutely 429s arm a sooner-than-cadence
+retry (`g_wxRetryAt`), and an unparsed reason falls back to exponential
+backoff escalating to next-UTC-midnight after 5 strikes.
 
 ### Power loss vs. deep sleep
 
@@ -888,12 +903,12 @@ Settings are stored in NVS under the `"flight"` namespace (see `setup()` in
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `timer` | bool | `false` | Show the dashboard countdown/timer bar (Flight Tracker → Enable Timer). |
-| `showiata` | bool | `true` | Display route airports as `ICAO | IATA` when ADSB.lol provides an IATA code (Flight Tracker → Show IATA). |
+| `showiata` | bool | `true` | Display route airports as `ICAO | IATA` when ADSB.lol provides an IATA code (Flight Tracker → Show IATA Airports). |
 | `clkcol` | uint32 | `TFT_BLUE` | RGB565 theme color from the General → Clock Color picker — tap-target swatch rows for hue, shade, and greyscale (`hsv565()`/`colorPickEnter()`). Drives the header band and every ordinary button; `btnFg()` picks black text on light colors, white on dark, and `btnCol()` nudges buttons a shade darker on light themes / toward white on dark ones. Header Back buttons are ordinary buttons (`backBtn()`); destructive buttons use `dangerCol()` — red, or yellow when the theme is near-red. History graphs draw on the button color (`graphBgCol()`), the data line is the theme pushed 75% toward white/black (`graphLineCol()`), and the avg line is the theme's complement at the same blend (`graphAvgCol()`). Semantic controls keep their own colors. |
 | `units` | int | `0` | Device units (General → Units): 0 = Imperial (ft/mph/mi), 1 = Metric (m/kts/km), 2 = Aviation (ft/kts/nm). Radius and ceiling are still stored in miles/feet; the selected unit only changes what's displayed and what the sliders edit — switching units keeps the displayed number and reinterprets it in the new unit. Temperatures are fetched/logged in °F and converted at display (`tempDisp()`), so Metric and Aviation show °C. Migrates the old `metric` bool on first boot. |
 | `clock24` | bool | `false` | 24-hour clock (General → Clock). Affects the header clock, time editors, alarm times, and sunrise/sunset; `false` shows 12-hour times with AM/PM markers. |
 | `homeap` | string | `""` | Home Airport (ICAO). Used for the LED blink: red when origin matches, green when destination matches. Leave empty to disable. |
-| `watchcs` | string | `""` | Watched callsign — substring match (`isWatchedCallsign`), case-insensitive: "DAL" matches DAL1234, "5432" matches DAL5432. When a matching plane appears in a poll and its radar blip is inside the screen bounds it is promoted to the tracked flight (closest match wins — `planes[]` is distance-sorted); while shown it alerts with the `watchntf` pattern on the LED + speaker. Leave empty to disable. |
+| `watchcs` | string | `""` | Watched callsign (Flight Tracker → Watch Callsign (ICAO)) — substring match (`isWatchedCallsign`), case-insensitive: "DAL" matches DAL1234, "5432" matches DAL5432. When a matching plane appears in a poll and its radar blip is inside the screen bounds it is promoted to the tracked flight (closest match wins — `planes[]` is distance-sorted); while shown it alerts with the `watchntf` pattern on the LED + speaker. Leave empty to disable. |
 | `watchntf` | int | index of "Radar" | Callsign Notify preset (Flight Tracker → Callsign Notify): index into `kNtfPresets` in `alarms.ino` (49 presets — blink styles, sirens, sweeps, Morse, chimes/bells, melodies). The default is looked up by name at boot so reordering can't change it; persisted indices must still never be reordered — append new presets at the end. Runs on the LED + speaker while the watched flight is shown; independent of `blinkf`. |
 | `ntfvol` | int | `100` | Notify Volume (General → Notify Volume): one of 10 levels — 1/2/3/4/5/15/25/50/75/100 percent (`kNtfVolLevels`; the 1% floor keeps notifications audible). The UI shows the level number (1–10); NVS stores the percent. Non-level values stored by older builds snap to the nearest level on load. Scales the LEDC duty cycle for every speaker sound — alarm/callsign patterns, the volume-test beep, and the boot chime (`playBootChime()` at the end of `setup()`). `tone()` can't be used for volume: it fixes duty at ~50%, so `toneWrite()` in `alarms.ino` drives `ledcWrite()` directly. |
 | `ipdhcp` | bool | `true` | Network addressing mode (Network → IP Setup). `true` = DHCP; `false` = static using the keys below. |
@@ -919,7 +934,8 @@ flight is displayed on the dashboard; they turn off when the flight leaves, the 
 dismisses it, or the screen switches to recalled flight details. Blue turns off after
 its blink. When no flight notification is active on the home screen,
 the LED mirrors the dashboard border: solid red for a critical issue (No WiFi, invalid
-OpenSky credentials, exhausted radar credits, unavailable OpenSky/weather/pool temp
+OpenSky credentials, exhausted radar credits, rate-limited or unavailable
+OpenSky/weather/pool temp
 data) or solid yellow when OpenSky is running anonymously. The blink and status
 handling is performed in `loop()` after the flight view is drawn.
 
@@ -941,7 +957,8 @@ The dashboard draws a colored screen border and tints the clock bar to flag
 state (`drawAuthBorder` / `drawStatusBorder` in `cyd-dashboard.ino`):
 
 - **Red** (critical): no WiFi, invalid OpenSky credentials, the OpenSky
-  **radar-polling** credits exhausted, or pool data unavailable. The clock bar
+  **radar-polling** credits exhausted, or weather/pool data rate-limited or
+  unavailable. The clock bar
   turns maroon to match.
 - **Yellow** (warning): running OpenSky **anonymously** (no credentials
   configured). This is non-critical — flights still work at a lower rate limit
@@ -1023,7 +1040,7 @@ available (falling back to heading/speed otherwise). A failed or empty track
 (e.g. no `/tracks/*` credits) simply draws no line.
 
 The adsb.lol callsign route (`fetchAdsbRoute()`) additionally carries each
-airport's **IATA** code (`_airports[].iata`). When the **Show IATA** setting is
+airport's **IATA** code (`_airports[].iata`). When the **Show IATA Airports** setting is
 on (default), the displayed origin/destination codes render as
 `ICAO | IATA` (e.g. `OJAI | AMM`); with it off or when no IATA is available the
 plain ICAO code is shown. All comparisons — the home-airport LED logic, the

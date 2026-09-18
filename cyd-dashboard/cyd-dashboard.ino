@@ -513,6 +513,9 @@ bool  g_goveeAuthBad = false; // Govee API rejected the key (401/403) -> invalid
 bool  g_poolEnabled = false;  // Pool Temp feature on/off (defaults off)
 unsigned long g_lastPool = 0;
 const unsigned long POOL_REFRESH_MS = 300UL * 1000UL;  // 5 min (respect Govee API limits)
+// UTC epoch of the Govee rate-limit window end (NVS "goveerl"); persisted so
+// deep-sleep wakes don't re-hit a long daily-limit window. 0 = not limited.
+unsigned long g_goveeRateReset = 0;
 
 // Pool temp history: tiered storage so Month/Year graphs have real range without
 // unbounded memory/flash use.
@@ -660,6 +663,12 @@ unsigned long g_lastData = 0;
 unsigned long lastClockDraw = 0;
 unsigned long g_lastWeather = 0;
 const unsigned long WEATHER_REFRESH_MS = 10UL * 60UL * 1000UL;
+// Open-Meteo 429 backoff. g_wxNextEpoch is a UTC-epoch suppression deadline
+// (NVS "wxrl", so deep-sleep wakes honor it); g_wxRetryAt is a millis deadline
+// for transient cases that should retry sooner than the 10-min cadence.
+int  g_wx429Streak = 0;
+unsigned long g_wxNextEpoch = 0;
+unsigned long g_wxRetryAt = 0;
 
 // First WiFi connect after boot: refresh everything needing the network right
 // away instead of waiting for the poll/countdown timers (matters when WiFi is
@@ -2208,8 +2217,10 @@ const char* dashboardCriticalLabel() {
     if (g_creditsKnown && g_creditsExhausted) return "No Flight Credits";
     if (g_radarDataFailed) return "OpenSky Data Unavailable";
   }
+  if (g_wxNextEpoch && (unsigned long)time(nullptr) < g_wxNextEpoch) return "Weather Rate Limited";
   if (g_weatherDataFailed) return "Weather Data Unavailable";
 #if POOL_FEATURE
+  if (g_poolEnabled && goveeRateLimited()) return "Govee Rate Limited";
   if (g_poolEnabled && !g_poolValid) return g_goveeAuthBad ? "Invalid Govee Creds" : "Pool Temp Data Unavailable";
 #endif
   return nullptr;
@@ -3513,6 +3524,8 @@ void setup() {
   g_poolModel = prefs.getString("poolmodel", "");
   g_poolName = prefs.getString("poolname", "");
   g_poolEnabled = prefs.getBool("poolen", false);
+  g_goveeRateReset = prefs.getULong("goveerl", 0);
+  g_wxNextEpoch = prefs.getULong("wxrl", 0);
   // First boot = no saved location; guess from IP in setup() when connected.
   g_firstBoot = (g_lat == 0.0f && g_lon == 0.0f);
   if (isDevBuild()) {
@@ -3625,7 +3638,7 @@ void setup() {
     // to sync first so the initial sample gets a real epoch (otherwise it would
     // be invisible to the history graph).
 #if POOL_FEATURE
-    if (g_goveeKey.length() > 0) {
+    if (g_poolEnabled && g_goveeKey.length() > 0) {
       unsigned long t0 = millis();
       while (time(nullptr) < 1600000000L && millis() - t0 < 8000) delay(100);
       if (g_poolDeviceId.length() == 0) fetchGoveeDevices();
@@ -3774,7 +3787,7 @@ bool sleeperRun() {
     // An alarm whose time passed since the last 5-minute wake wins over the
     // sleep schedule: boot normally and let loop()'s checkAlarms() fire it.
     if (alarmDueNow()) return true;
-    if (g_goveeKey.length() > 0 && g_poolDeviceId.length() > 0) {
+    if (g_poolEnabled && g_goveeKey.length() > 0 && g_poolDeviceId.length() > 0) {
       fetchGoveeTemp();                      // logs to flash via poolLog
     }
     fetchWeather();                          // logs weather temp to flash via weatherLog
@@ -3936,7 +3949,7 @@ void loop() {
         if (g_firstBoot) netWantLocation = true;
         else netWantWeather = true;
 #if POOL_FEATURE
-        if (g_poolDeviceId.length() > 0) { g_lastPool = now; netWantPool = true; }
+        if (g_poolEnabled && g_poolDeviceId.length() > 0) { g_lastPool = now; netWantPool = true; }
 #endif
       }
       dirty = true;
@@ -4022,15 +4035,19 @@ void loop() {
         netWantFlights = true;
       }
     }
-    // Periodic weather refresh
-    if (now - g_lastWeather >= WEATHER_REFRESH_MS) {
+    // Periodic weather refresh. An armed 429 retry (transient "concurrent" /
+    // minutely limits) fires sooner than the cadence; while armed the cadence
+    // is suppressed so it can't burn another request inside the window.
+    if ((g_wxRetryAt == 0 && now - g_lastWeather >= WEATHER_REFRESH_MS) ||
+        (g_wxRetryAt && (long)(now - g_wxRetryAt) >= 0)) {
+      g_wxRetryAt = 0;
       g_lastWeather = now;
       netWantWeather = true;
       dirty = true;
     }
-    // Periodic pool temp refresh (only when a Govee device is selected)
+    // Periodic pool temp refresh (only when enabled and a Govee device is selected)
 #if POOL_FEATURE
-    if (g_poolDeviceId.length() > 0 && now - g_lastPool >= POOL_REFRESH_MS) {
+    if (g_poolEnabled && g_poolDeviceId.length() > 0 && now - g_lastPool >= POOL_REFRESH_MS) {
       g_lastPool = now;
       netWantPool = true;
       dirty = true;
