@@ -706,10 +706,12 @@ def draw_wxgraph(d):
     gx, gy, gw, gh = 10, 66, 300, 140
     rect(gx, gy, gw, gh, BTN, stroke="#fff", sw=1)
 
-    # Anchor the 24h window to the cached data's newest sample, not the wall
-    # clock: re-renders from mock_data.json stay identical however old the
-    # fetch is (a --refresh run's data is brand-new either way).
-    now = max((t for t, _ in d["wx_hist"]), default=int(time.time()))
+    # Anchor the 24h window to the data's own "now" (open-meteo current.time
+    # at fetch), not the wall clock: the series then ends at the same moment
+    # the footer prints as "now", and cached renders stay identical however
+    # old mock_data.json is.
+    now = int(((d.get("wx") or {}).get("current") or {}).get("time") or
+              max((t for t, _ in d["wx_hist"]), default=time.time()))
     win, t0 = 86400, now - 86400
     series = [(t, v) for t, v in d["wx_hist"] if t0 <= t <= now]
     if not series:
