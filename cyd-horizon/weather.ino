@@ -132,8 +132,21 @@ void fetchWeather() {
   if (WiFi.status() != WL_CONNECTED) return;
   // Inside a stored 429 window: covers the loop poll, boot, first-connect, and
   // deep-sleep wake paths alike. Keeps the last displayed data rather than
-  // churning a guaranteed failure.
-  if (g_wxNextEpoch && (unsigned long)time(nullptr) < g_wxNextEpoch) return;
+  // churning a guaranteed failure. Arm a retry for when the window lifts -
+  // otherwise the next attempt waits out the 10-min cadence, longer than a
+  // touch-wake stays awake. Time-synced only: with an unsynced clock the
+  // delta is meaningless (and the whole check self-corrects once SNTP lands).
+  if (g_wxNextEpoch && (unsigned long)time(nullptr) < g_wxNextEpoch) {
+    if (!g_wxRetryAt && time(nullptr) >= 1600000000L) {
+      unsigned long dtSec = g_wxNextEpoch - (unsigned long)time(nullptr);
+      g_wxRetryAt = millis() + min(dtSec, 172800UL) * 1000UL + 1000UL;
+      if (isDevBuild()) {
+        Serial.printf("[net] meteo suppressed until epoch %lu, retry armed\n",
+                      g_wxNextEpoch);
+      }
+    }
+    return;
+  }
 
   char url[320];
   snprintf(url, sizeof url,

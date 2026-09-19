@@ -516,6 +516,9 @@ const unsigned long POOL_REFRESH_MS = 300UL * 1000UL;  // 5 min (respect Govee A
 // UTC epoch of the Govee rate-limit window end (NVS "goveerl"); persisted so
 // deep-sleep wakes don't re-hit a long daily-limit window. 0 = not limited.
 unsigned long g_goveeRateReset = 0;
+// Millis deadline to retry when that window lifts - without it a suppressed
+// fetch waits out the 5-min cadence, longer than a touch-wake stays awake.
+unsigned long g_poolRetryAt = 0;
 
 // Pool temp history: tiered storage so Month/Year graphs have real range without
 // unbounded memory/flash use.
@@ -687,12 +690,32 @@ const unsigned long WEATHER_REFRESH_MS = 10UL * 60UL * 1000UL;
 int  g_wx429Streak = 0;
 unsigned long g_wxNextEpoch = 0;
 unsigned long g_wxRetryAt = 0;
+extern bool g_weatherValid;   // declared in weather.ino
 
-// First WiFi connect after boot: refresh everything needing the network right
-// away instead of waiting for the poll/countdown timers (matters when WiFi is
+// First data fetch of the boot: a random offset inside BOOT_FETCH_JITTER_MS
+// spreads the API calls of a fleet that powers up together (outage restore,
+// sleep-window end) so they don't hit in lockstep; each board still gets data
+// within ~1 min. The fetch also waits for SNTP-synced time (verified TLS fails
+// on future-dated certs, and logged samples need real epochs) up to
+// BOOT_TIME_WAIT_MS so broken NTP can't block it forever. Early in boot an
+// absent weather/pool result retries every g_bootFailRetryMs (a per-boot
+// random 55-65s) until BOOT_FAIL_GRACE_MS - a short touch-wake ends before
+// the 10/5-min cadences.
+#define BOOT_FETCH_JITTER_MS 30000UL
+#define BOOT_TIME_WAIT_MS    10000UL
+#define BOOT_FAIL_GRACE_MS   300000UL
+// In-sleep-window logger wakes get a smaller spread: boards that powered up
+// together share the same 5-min wake phase.
+#define SLEEP_WAKE_JITTER_MS 30000UL
+
+// First WiFi connect after boot: start NTP and kick the (jittered) first data
+// load instead of waiting for the poll/countdown timers (matters when WiFi is
 // slow to connect, since setup() couldn't fetch anything).
 bool g_wifiConnectedOnce = false;   // true once WiFi has been up since boot
-bool g_bootFetched = false;         // true if setup() already ran the boot fetches
+unsigned long g_firstConnectAt = 0; // millis of that first connect
+unsigned long g_bootFetchAt = 0;    // millis deadline for the first data fetch
+unsigned long g_bootFailRetryMs = 0; // per-boot random 55-65s absent-result retry
+bool g_bootFetched = false;         // true once the jittered boot fetch was requested
 bool g_firstBoot = false;           // true on first boot (no saved location yet)
 
 // First-boot wizard: if no touch calibration is saved we run it at boot, then
@@ -3558,7 +3581,11 @@ void setup() {
   g_poolEnabled = prefs.getBool("poolen", false);
   g_goveeRateReset = prefs.getULong("goveerl", 0);
   g_wxNextEpoch = prefs.getULong("wxrl", 0);
-  // First boot = no saved location; guess from IP in setup() when connected.
+  if (isDevBuild() && (g_goveeRateReset || g_wxNextEpoch)) {
+    Serial.printf("[boot] ratelimit wxrl=%lu goveerl=%lu\n",
+                  g_wxNextEpoch, g_goveeRateReset);
+  }
+  // First boot = no saved location; the first data load guesses it from IP.
   g_firstBoot = (g_lat == 0.0f && g_lon == 0.0f);
   if (isDevBuild()) {
     Serial.printf("[boot] location state firstBoot=%d lat=%.5f lon=%.5f\n",
@@ -3661,23 +3688,18 @@ void setup() {
     // TCPIP core functionality" crash on lwip.
     setupNTP();
     delay(100);            // let SNTP get a moment to start cleanly
-    // On first boot (no saved location) guess it from IP before fetching
-    // weather, so we don't query the wrong coordinates.
-    if (g_firstBoot) fetchIpLocation();
-    else fetchWeather();
-    // Pool temp: auto-load devices if a key is set but none selected yet,
-    // otherwise refresh the temperature of the saved device. Give SNTP a moment
-    // to sync first so the initial sample gets a real epoch (otherwise it would
-    // be invisible to the history graph).
-#if POOL_FEATURE
-    if (g_poolEnabled && g_goveeKey.length() > 0) {
-      unsigned long t0 = millis();
-      while (time(nullptr) < 1600000000L && millis() - t0 < 8000) delay(100);
-      if (g_poolDeviceId.length() == 0) fetchGoveeDevices();
-      else fetchGoveeTemp();
-    }
-#endif
-    g_bootFetched = true;   // setup() fetched the network data it could
+  }
+  // The first data fetch runs from loop() on the net task at a random offset
+  // within BOOT_FETCH_JITTER_MS, so boards that power up together (outage
+  // restore, sleep-window end) don't call the APIs in lockstep - and boot no
+  // longer blocks on synchronous TLS.
+  g_bootFetchAt = millis() + esp_random() % BOOT_FETCH_JITTER_MS;
+  // Absent-result retry interval for the post-boot grace window: drawn once
+  // per boot (55-65s) so boards that powered up together retry off-phase.
+  g_bootFailRetryMs = 55000UL + esp_random() % 10001UL;
+  if (isDevBuild()) {
+    Serial.printf("[net] boot fetch in %lums\n",
+                  (unsigned long)(g_bootFetchAt - millis()));
   }
   // Stay on the dashboard even if no WiFi is configured (users reach the WiFi
   // setup screen from Settings). If credentials are saved but the connection
@@ -3819,6 +3841,9 @@ bool sleeperRun() {
     // An alarm whose time passed since the last 5-minute wake wins over the
     // sleep schedule: boot normally and let loop()'s checkAlarms() fire it.
     if (alarmDueNow()) return true;
+    // Boards that powered up together (outage restore) share the same 5-min
+    // wake phase; a short random pause keeps their API calls out of lockstep.
+    delay(esp_random() % SLEEP_WAKE_JITTER_MS);
     if (g_poolEnabled && g_goveeKey.length() > 0 && g_poolDeviceId.length() > 0) {
       fetchGoveeTemp();                      // logs to flash via poolLog
     }
@@ -3949,13 +3974,12 @@ void loop() {
   }
   connected = wifiUp;
 
-  // First time WiFi is up since boot: refresh everything needing the network
-  // immediately. Boot no longer blocks on a connect/fetch, so this is also how
-  // NTP/time gets started and the initial weather/location/pool loads happen.
+  // First time WiFi is up since boot: start NTP here (doing it before the link
+  // is up triggers a lwip crash) and redraw the dashboard with whatever data
+  // we have. The initial data load fires on the jittered deadline below.
   if (wifiUp && !g_wifiConnectedOnce) {
     g_wifiConnectedOnce = true;
-    // WiFi is established now, so it's safe to start SNTP (doing it before the
-    // link is up triggers a lwip crash).
+    g_firstConnectAt = now;
     setupNTP();
     delay(100);
     if (isDevBuild()) {
@@ -3967,25 +3991,31 @@ void loop() {
                     (int)g_ipDhcp,
                     g_hostname.c_str());
     }
-    if (g_screen == SCR_DASH) {
-      // Draw the dashboard now (with whatever data we have) so the screen
-      // responds immediately, then the fetches below update it - a failed/slow
-      // fetch shouldn't leave the display blank and the UI frozen.
-      dirty = true;
-      // Flights are never fetched at boot, so always request them right away.
-      if (g_trackEnabled) { lastPoll = now; netWantFlights = true; }
-      // Weather/location/pool were not fetched by setup() when WiFi wasn't up,
-      // so request them here (g_bootFetched is true only if setup() did it).
-      if (!g_bootFetched) {
-        g_lastWeather = now;
-        if (g_firstBoot) netWantLocation = true;
-        else netWantWeather = true;
+    if (g_screen == SCR_DASH) dirty = true;
+  }
+
+  // First data load of this boot, spread over a random offset so a fleet that
+  // powers up together (outage restore, sleep-window end) doesn't hit the APIs
+  // in lockstep. Held until time is synced - verified TLS fails on
+  // future-dated certs and logged samples need real epochs - up to a cap so
+  // broken NTP can't block it forever; fires on connect if the offset already
+  // elapsed.
+  if (wifiUp && !g_bootFetched && (long)(now - g_bootFetchAt) >= 0
+      && (time(nullptr) >= 1600000000L || now - g_firstConnectAt >= BOOT_TIME_WAIT_MS)) {
+    g_bootFetched = true;
+    if (g_trackEnabled) { lastPoll = now; netWantFlights = true; }
+    g_lastWeather = now;
+    // No saved location (first boot): guess it from IP; fetchIpLocation()
+    // chains into fetchWeather() once it has coordinates.
+    if (g_firstBoot) netWantLocation = true;
+    else netWantWeather = true;
 #if POOL_FEATURE
-        if (g_poolEnabled && g_poolDeviceId.length() > 0) { g_lastPool = now; netWantPool = true; }
-#endif
-      }
-      dirty = true;
+    if (g_poolEnabled && g_goveeKey.length() > 0) {
+      if (g_poolDeviceId.length() > 0) { g_lastPool = now; netWantPool = true; }
+      else netWantPoolDevices = true;   // key set but no device: auto-pick one
     }
+#endif
+    dirty = true;
   }
 
   // --- Daily auto-update scan scheduling ---
@@ -4068,18 +4098,28 @@ void loop() {
       }
     }
     // Periodic weather refresh. An armed 429 retry (transient "concurrent" /
-    // minutely limits) fires sooner than the cadence; while armed the cadence
-    // is suppressed so it can't burn another request inside the window.
-    if ((g_wxRetryAt == 0 && now - g_lastWeather >= WEATHER_REFRESH_MS) ||
+    // minutely limits, or a stored window lifting) fires sooner than the
+    // cadence; while armed the cadence is suppressed so it can't burn another
+    // request inside the window. Early in boot an absent result retries every
+    // g_bootFailRetryMs - a short touch-wake ends before the 10-min cadence.
+    if ((g_wxRetryAt == 0 &&
+         (now - g_lastWeather >= WEATHER_REFRESH_MS ||
+          (!g_weatherValid && now <= BOOT_FAIL_GRACE_MS && now - g_lastWeather >= g_bootFailRetryMs))) ||
         (g_wxRetryAt && (long)(now - g_wxRetryAt) >= 0)) {
       g_wxRetryAt = 0;
       g_lastWeather = now;
       netWantWeather = true;
       dirty = true;
     }
-    // Periodic pool temp refresh (only when enabled and a Govee device is selected)
+    // Periodic pool temp refresh (only when enabled and a Govee device is
+    // selected); same armed-retry and post-boot grace pattern as weather.
 #if POOL_FEATURE
-    if (g_poolEnabled && g_poolDeviceId.length() > 0 && now - g_lastPool >= POOL_REFRESH_MS) {
+    if (g_poolEnabled && g_poolDeviceId.length() > 0 &&
+        ((g_poolRetryAt == 0 &&
+          (now - g_lastPool >= POOL_REFRESH_MS ||
+           (!g_poolValid && now <= BOOT_FAIL_GRACE_MS && now - g_lastPool >= g_bootFailRetryMs))) ||
+         (g_poolRetryAt && (long)(now - g_poolRetryAt) >= 0))) {
+      g_poolRetryAt = 0;
       g_lastPool = now;
       netWantPool = true;
       dirty = true;

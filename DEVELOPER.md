@@ -762,9 +762,16 @@ history is dropped.
 Data collection runs both while awake and while asleep. Pool logging happens
 only while the Pool Temp feature is enabled (`g_poolEnabled` gates every fetch
 path: boot, first-connect, the 5-min poll, and the sleep wake); the weather
-log has no toggle. While asleep the
+log has no toggle. The first data load of a boot (weather, pool, flights,
+and the IP-location guess on a first boot) fires from `loop()` at a random
+offset within `BOOT_FETCH_JITTER_MS` (30 s), gated on SNTP-synced time up to a
+10 s cap — verified TLS fails on future-dated certs before sync — so a fleet
+restored by the same outage spreads its calls while still landing data inside
+~1 min. While asleep the
 deep-sleep timer wakes every ~5 min (sooner if an alarm's `nextFire` lands
-first — see "Alarms"); the **same single wake** connects, logs
+first — see "Alarms"); the **same single wake** connects, pauses a random
+`SLEEP_WAKE_JITTER_MS` (boards that powered up together share the 5-min wake
+phase), logs
 the pool temp (when enabled) and the weather temp, and goes back to sleep —
 weather logging
 adds **no additional wake-ups**, only one extra HTTPS call within the wake the
@@ -779,7 +786,11 @@ persisted in NVS (`goveerl` / `wxrl`) so deep-sleep wakes honor it — with
 `esp_random()` jitter so boards sharing an API key / NAT IP don't resume in
 lockstep; Open-Meteo "concurrent"/minutely 429s arm a sooner-than-cadence
 retry (`g_wxRetryAt`), and an unparsed reason falls back to exponential
-backoff escalating to next-UTC-midnight after 5 strikes.
+backoff escalating to next-UTC-midnight after 5 strikes. A fetch suppressed by
+a stored window re-arms to fire when the deadline lifts (`g_wxRetryAt` /
+`g_poolRetryAt`) rather than waiting out the cadence, and an absent
+weather/pool result retries at a per-boot random 55–65 s for the first 5 min
+of uptime — either way a short touch-wake still gets data before re-sleeping.
 
 ### Power loss vs. deep sleep
 
