@@ -1,14 +1,16 @@
-# cyd-dashboard
+# cyd-horizon
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](LICENSE)
-[![PR - Lint & Build](https://github.com/improving-minnesota/cyd-dashboard/actions/workflows/pr.yml/badge.svg)](https://github.com/improving-minnesota/cyd-dashboard/actions/workflows/pr.yml)
-[![Release](https://img.shields.io/github/v/release/improving-minnesota/cyd-dashboard)](https://github.com/improving-minnesota/cyd-dashboard/releases)
+[![PR - Lint & Build](https://github.com/improving-minnesota/cyd-horizon/actions/workflows/pr.yml/badge.svg)](https://github.com/improving-minnesota/cyd-horizon/actions/workflows/pr.yml)
+[![Release](https://img.shields.io/github/v/release/improving-minnesota/cyd-horizon)](https://github.com/improving-minnesota/cyd-horizon/releases)
 
-A self-contained, AI Vibe-coded, **ESP32 touchscreen dashboard** for **Cheap
-Yellow Display (CYD)-family boards** — ESP32 boards with a built-in color
-touchscreen, like the 2.8" 2432S028R and the 4" E32R40T. It turns that little display into a live weather station, flight
-tracker, and Govee pool temp monitor. Once it's set up it runs on its own over your WiFi —
-no computer needed.
+<img src="docs/user-guide/cyd-horizon-guide-logo.png" width="800"
+     alt="cyd-horizon logo — slogan &quot;Live Flight Tracker &amp; Weather Station&quot; with bullets: Live ADS-B Flight Radar, Live Weather &amp; Forecasts, Pool Temperature Monitoring, 50 Alarms &amp; Melody Presets, Standalone WiFi · Auto-OTA">
+
+**Live flight tracker & weather station** for **Cheap Yellow Display (CYD)**
+boards — ESP32 boards with a built-in color touchscreen, like the
+**2.8" 2432S028R** and the **4" E32R40T**. A self-contained device: once
+it's set up it runs on your WiFi — no computer needed.
 
 > **Giving a device to a non-techie friend?** Grab the printable two-page
 > [User Guide (PDF)](docs/user-guide/DEVELOPER-USERGUIDE.pdf) — written for
@@ -23,7 +25,7 @@ no computer needed.
   </tr>
 </table>
 
-## What it does
+## What it shows
 
 - **Alarms** — up to 6 time-of-day alarms, each with its own days-of-week mask
   and notification pattern. Leaving all days off makes a one-time alarm. Fifty synchronized LED + speaker presets — blink
@@ -60,7 +62,7 @@ no computer needed.
   your home airport (ICAO), yellow when both origin and destination are your
   home airport. Red, green, and yellow stay lit while the live flight is
   displayed. A watched callsign instead alerts with its **Callsign
-  Notify** pattern — the same 49 presets as alarms, from a soft **Simple**
+  Notify** pattern — the same 50 presets as alarms, from a soft **Simple**
   beep to melodies like **Charge** and **Two Bits** — on the LED and speaker
   while its flight details are shown. The watch value matches any part of
   the callsign, so `DAL` catches `DAL1234` and `5432` catches `DAL5432` (`*`
@@ -190,7 +192,7 @@ Defaults for a freshly reset device are shown with each setting.
   callsign — `DAL` catches
   `DAL1234`, or `*` to match every flight) and its **Callsign Notify** pattern (LED + speaker
   alert while its flight details are shown — works even when LED blinking is
-  off — the same 49 presets as alarms), **Show IATA Airports** (display route
+  off — the same 50 presets as alarms), **Show IATA Airports** (display route
   airports as `ICAO | IATA` when ADSB.lol provides an IATA code), and
   whether to blink the LED for
   an overhead flight. Also where you
@@ -233,7 +235,7 @@ Defaults for a freshly reset device are shown with each setting.
   list once "Scanning" finishes, or enter it manually), plus **IP
   Setup**: addressing can stay on **DHCP** (the default, works as before) or be
   switched to **Static** with an IP address, subnet mask, gateway, and DNS
-  server, and you can set a device **hostname** (default `cyd-dashboard`) in
+  server, and you can set a device **hostname** (default `cyd-horizon`) in
   either mode. A blank DNS
   uses the gateway; incomplete static fields fall back to DHCP. Changes apply
   on the next connect.

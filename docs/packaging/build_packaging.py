@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Regenerate the printable packaging assets for cyd-dashboard.
+"""Regenerate the printable packaging assets for cyd-horizon.
 
 The cover SVGs in this folder are the hand-maintained source of truth. This
 script renders them to 300 DPI PNGs and rebuilds the cut-and-glue label
 sheets (US Letter, landscape) with crop ticks and dashed cut borders.
 
-    cyd-dashboard/.venv/bin/python docs/packaging/build_packaging.py
+    cyd-horizon/.venv/bin/python docs/packaging/build_packaging.py
 
 Requires: cairosvg and pymupdf in the repo venv.
 

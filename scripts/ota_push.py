@@ -19,9 +19,9 @@ What it does:
      [OTA]/CMD progress lines until the device reboots into the new image.
 
 Usage (from the repo root):
-  cyd-dashboard/.venv/bin/python scripts/ota_push.py \
+  cyd-horizon/.venv/bin/python scripts/ota_push.py \
       [--port /dev/cu.usbserial-XXXX] [--dir build/release] \
-      [--file cyd-dashboard.ino.bin] [--http-port 8080] \
+      [--file cyd-horizon.ino.bin] [--http-port 8080] \
       [--board e32r40t|2432s028r] [--all]
 
 With several boards plugged in, --board picks the right one via
@@ -281,7 +281,7 @@ def main():
     ap.add_argument("--port", help="serial port (default: sole /dev/cu.usbserial*)")
     ap.add_argument("--dir", default=os.path.join(here, "..", "build", "release"),
                     help="directory containing the .bin (default: ../build/release)")
-    ap.add_argument("--file", default="cyd-dashboard.ino.bin", help="bin filename")
+    ap.add_argument("--file", default="cyd-horizon.ino.bin", help="bin filename")
     ap.add_argument("--http-port", type=int, default=8080)
     ap.add_argument("--board", choices=KNOWN_BOARDS,
                     help="board variant to target (default: inferred from "

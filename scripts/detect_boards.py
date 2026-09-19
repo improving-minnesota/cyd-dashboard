@@ -10,7 +10,7 @@ Firmware predating the board marker reports board=unknown - fall back to the
 printed IP/version or pass an explicit --port to the update scripts.
 
 Usage (from the repo root):
-  cyd-dashboard/.venv/bin/python scripts/detect_boards.py [--json]
+  cyd-horizon/.venv/bin/python scripts/detect_boards.py [--json]
       [--wait-ip] [--timeout SECS]
 """
 

@@ -10,7 +10,7 @@ unreachable on WiFi - day-to-day iteration should use ota_push.py instead.
 Compile first (see DEVELOPER.md); this only uploads an existing build dir.
 
 Usage (from the repo root):
-  cyd-dashboard/.venv/bin/python scripts/flash.py --board e32r40t
+  cyd-horizon/.venv/bin/python scripts/flash.py --board e32r40t
       [--dir build/release-e32r40t] [--port /dev/cu.usbserial-XXXX]
 """
 
@@ -59,7 +59,7 @@ def main():
 
     cfg = BOARDS[board]
     bindir = os.path.abspath(args.dir or os.path.join(here, "..", cfg["dir"]))
-    if not os.path.isfile(os.path.join(bindir, "cyd-dashboard.ino.bin")):
+    if not os.path.isfile(os.path.join(bindir, "cyd-horizon.ino.bin")):
         sys.exit("no image in %s (compile first - see DEVELOPER.md)" % bindir)
     speed = args.speed or cfg["speed"]
 

@@ -12,8 +12,8 @@ logos already on the device. Steps:
 3. Write the image to the logos partition via esptool (skip if --no-flash).
 
 Usage:
-    cyd-dashboard/.venv/bin/python scripts/provision_logos.py [--port /dev/cu.usbserial-XXXX]
-    cyd-dashboard/.venv/bin/python scripts/provision_logos.py --no-flash   # only build the image
+    cyd-horizon/.venv/bin/python scripts/provision_logos.py [--port /dev/cu.usbserial-XXXX]
+    cyd-horizon/.venv/bin/python scripts/provision_logos.py --no-flash   # only build the image
 
 With no --port, every board found by detect_boards.py is flashed (the logos
 partition layout is identical on all variants). Each board's known-good

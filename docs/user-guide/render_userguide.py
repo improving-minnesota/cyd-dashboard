@@ -22,7 +22,7 @@ panels mark the folds; the flap (outside-left / inside-right) panel is
 ~1/16" narrower so it tucks without buckling.
 
 Usage:
-    cyd-dashboard/.venv/bin/python docs/user-guide/render_userguide.py
+    cyd-horizon/.venv/bin/python docs/user-guide/render_userguide.py
 Requires: the `markdown` package in the venv (`python -m pip install markdown`)
 and Google Chrome.
 """
@@ -179,7 +179,7 @@ def main():
         import markdown
     except ImportError:
         sys.exit("markdown package required: "
-                 "cyd-dashboard/.venv/bin/python -m pip install markdown")
+                 "cyd-horizon/.venv/bin/python -m pip install markdown")
     if not pathlib.Path(CHROME).exists():
         sys.exit(f"Chrome not found at {CHROME}")
     ensure_latest_manifest()

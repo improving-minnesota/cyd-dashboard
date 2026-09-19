@@ -4,7 +4,7 @@
 // selected via the Pool Temp settings screen. Falls back to "--" whenever a
 // reading is unavailable (feature disabled, no key, no device, or a failed
 // fetch). Globals (g_goveeKey, g_poolValid, the pool temp history ring buffers,
-// etc.) are declared in cyd-dashboard.ino so they're visible everywhere.
+// etc.) are declared in cyd-horizon.ino so they're visible everywhere.
 
 // ---- Govee Open API: Pool Temp integration ----
 

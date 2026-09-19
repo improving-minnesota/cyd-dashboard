@@ -32,7 +32,7 @@ people.
 ## Flashing: use local OTA, not USB
 
 - **If a dev build with the OTA flags is already running on the board**, push
-  updates with `cyd-dashboard/.venv/bin/python scripts/ota_push.py`
+  updates with `cyd-horizon/.venv/bin/python scripts/ota_push.py`
   (`--dir build/release-e32r40t` for the 4" board, or `--all` to update every
   detected board in parallel with its variant's binary).
   Do NOT run `arduino-cli upload` for iteration — it is ~80 s, holds the
@@ -48,21 +48,21 @@ people.
   CH340 — it drops at 921600). Always the same custom-partition FQBN.
 - Never flash `*.merged.bin` at `0x0` for a routine update — it wipes NVS
   (credentials, calibration) and the LittleFS partitions.
-- Serial console: `cyd-dashboard/.venv/bin/python scripts/serial_monitor.py`
+- Serial console: `cyd-horizon/.venv/bin/python scripts/serial_monitor.py`
   (`--reset` for a clean boot log). One process holds the port at a time.
 
 ## Provisioning
 
-- Credentials: `cyd-dashboard/.venv/bin/python scripts/provision_config.py --port /dev/cu.usbserial-XXXX`
-  (reads `cyd-dashboard/.env`, git-ignored).
+- Credentials: `cyd-horizon/.venv/bin/python scripts/provision_config.py --port /dev/cu.usbserial-XXXX`
+  (reads `cyd-horizon/.env`, git-ignored).
 - Airline logos partition:
-  `cyd-dashboard/.venv/bin/python scripts/provision_logos.py`
+  `cyd-horizon/.venv/bin/python scripts/provision_logos.py`
   (flashes every detected board; `--port` targets just one).
 
 ## Docs sync
 
 - User-facing changes must update three places together: `README.md`, the
-  on-device Help screen (`kHelpLines[]` in `cyd-dashboard/settings.ino`), and
+  on-device Help screen (`kHelpLines[]` in `cyd-horizon/settings.ino`), and
   `docs/user-guide/DEVELOPER-USERGUIDE.md` (then regenerate the PDF).
 
 ## Comments

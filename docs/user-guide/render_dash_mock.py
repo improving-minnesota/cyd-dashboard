@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render simulated cyd-dashboard screens to PNGs for the printable user guide.
+"""Render simulated cyd-horizon screens to PNGs for the printable user guide.
 
 Outputs three 960x720 screenshots:
 
@@ -16,7 +16,7 @@ Outputs three 960x720 screenshots:
 Fetches real data so the mock looks like the real thing:
 
 - OpenSky OAuth + /states/all (needs OPENSKY_CLIENT_ID/SECRET in
-  cyd-dashboard/.env) for live aircraft + the CRP credit readout.
+  cyd-horizon/.env) for live aircraft + the CRP credit readout.
 - adsb.lol vrs-standing-data for the featured flight's route (no key).
 - OpenSky /flights/aircraft + /tracks/all for the CRL/CFT credit readouts and
   the ground-track polyline. Planes are scanned until one has a track with
@@ -33,7 +33,7 @@ folder, so re-rendering the PDF doesn't hit the APIs every time. Pass
 --refresh to pull fresh data (which re-saves the cache).
 
 Usage:
-    cyd-dashboard/.venv/bin/python docs/user-guide/render_dash_mock.py [--monitor SECONDS] [--refresh]
+    cyd-horizon/.venv/bin/python docs/user-guide/render_dash_mock.py [--monitor SECONDS] [--refresh]
 """
 
 import json
@@ -52,9 +52,9 @@ OUT_GRAPH = ROOT / "DEVELOPER-USERGUIDE-wxgraph.png"
 OUT_FTRK = ROOT / "DEVELOPER-USERGUIDE-ftracker.png"
 OUT_ALRM = ROOT / "DEVELOPER-USERGUIDE-alarms.png"
 OUT_DATA = ROOT / "mock_data.json"
-ENV = REPO / "cyd-dashboard" / ".env"
+ENV = REPO / "cyd-horizon" / ".env"
 
-UA = {"User-Agent": "cyd-dashboard-userguide/1.0"}
+UA = {"User-Agent": "cyd-horizon-userguide/1.0"}
 RADIUS_MI = 3.5          # device default radar radius
 RADAR_CX, RADAR_CY, RADAR_R = 235, 155, 48
 

@@ -105,24 +105,24 @@ jobs:
           # downloads only the asset named for its board (see OTA_ASSET).
           arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
             --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=${{ needs.version.outputs.version }}" \
-            --output-dir build/release cyd-dashboard
+            --output-dir build/release cyd-horizon
           arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
             --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=${{ needs.version.outputs.version }} -DCYD_E32R40T=1" \
-            --output-dir build/release-e32r40t cyd-dashboard
+            --output-dir build/release-e32r40t cyd-horizon
           # Only board-named assets are published (OTA_ASSET). Firmware old
-          # enough to poll for the bare cyd-dashboard.ino.bin name can no
+          # enough to poll for the bare cyd-horizon.ino.bin name can no
           # longer see new releases and must be updated over USB.
-          mv build/release-e32r40t/cyd-dashboard.ino.bin \
-             build/release-e32r40t/cyd-dashboard-e32r40t.ino.bin
-          mv build/release/cyd-dashboard.ino.bin \
-             build/release/cyd-dashboard-2432s028r.ino.bin
+          mv build/release-e32r40t/cyd-horizon.ino.bin \
+             build/release-e32r40t/cyd-horizon-e32r40t.ino.bin
+          mv build/release/cyd-horizon.ino.bin \
+             build/release/cyd-horizon-2432s028r.ino.bin
 
       - name: Create draft release and attach .bin
         run: |
           VERSION="${{ needs.version.outputs.version }}"
           TAG="v${VERSION}"
-          ASSETS="build/release/cyd-dashboard-2432s028r.ino.bin \
-                  build/release-e32r40t/cyd-dashboard-e32r40t.ino.bin"
+          ASSETS="build/release/cyd-horizon-2432s028r.ino.bin \
+                  build/release-e32r40t/cyd-horizon-e32r40t.ino.bin"
           # create fails if a draft release already exists from a failed
           # previous run; in that case just attach the assets to it.
           gh release create "${TAG}" ${ASSETS} \
