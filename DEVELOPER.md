@@ -1176,3 +1176,22 @@ page count — if it ever exceeds 2, trim the guide or tighten the CSS in the
 script (panels clip with `overflow: hidden`, so a quiet overflow shows up as
 missing content at a panel's bottom edge — eyeball the PDF after editing).
 
+## Printable packaging
+
+[`docs/packaging/`](docs/packaging/README.md) holds printable box-cover
+labels for both boards: hand-maintained SVG artwork plus generated 300 DPI
+PNGs and Letter-landscape label sheets — 4.5" × 2.25" covers for the 2.8"
+2432S028R (6 per sheet) and 5.0" × 2.75" for the 4.0" E32R40T (4 per sheet).
+Print at Actual Size / 100% and cut along the dashed borders. Regenerate
+all PNGs and label PDFs with:
+
+```bash
+cyd-dashboard/.venv/bin/python docs/packaging/build_packaging.py
+```
+
+The guide's front-cover logo is a vertically-trimmed derivative of the
+2.8" cover — if the cover artwork changes, re-derive it (see
+`docs/user-guide/README.md`). `docs/packaging/README.md` documents the
+artwork conventions: layer order, radar clipping/fades, font sizes, and
+the rule that the two sizes stay in sync.
+

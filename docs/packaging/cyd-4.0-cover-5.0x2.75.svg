@@ -1,0 +1,311 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 825" width="1500" height="825">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="boxBg40" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141c2e" />
+      <stop offset="40%" stop-color="#0c1220" />
+      <stop offset="100%" stop-color="#04070d" />
+    </linearGradient>
+
+    <!-- Radar Clip to Middle Section -->
+    <clipPath id="middleSectionClip40">
+      <rect x="40" y="325" width="565" height="410" rx="14" />
+    </clipPath>
+
+    <linearGradient id="ringFade40" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.0" />
+      <stop offset="20%" stop-color="#38bdf8" stop-opacity="0.35" />
+      <stop offset="50%" stop-color="#38bdf8" stop-opacity="0.75" />
+      <stop offset="85%" stop-color="#38bdf8" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.0" />
+    </linearGradient>
+
+    <radialGradient id="scopeBackdrop40" cx="45%" cy="40%" r="55%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.35" />
+      <stop offset="40%" stop-color="#0284c7" stop-opacity="0.18" />
+      <stop offset="75%" stop-color="#0369a1" stop-opacity="0.0" />
+      <stop offset="100%" stop-color="#020617" stop-opacity="0.0" />
+    </radialGradient>
+
+    <linearGradient id="sweepPhosphor40" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.5" />
+      <stop offset="45%" stop-color="#0ea5e9" stop-opacity="0.25" />
+      <stop offset="85%" stop-color="#0284c7" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- CYD Gold -->
+    <linearGradient id="cydGold40" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="25%" stop-color="#facc15" />
+      <stop offset="65%" stop-color="#eab308" />
+      <stop offset="100%" stop-color="#a16207" />
+    </linearGradient>
+
+    <!-- Titanium Silver Body -->
+    <linearGradient id="titanium40" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#334155" />
+      <stop offset="25%" stop-color="#94a3b8" />
+      <stop offset="50%" stop-color="#ffffff" />
+      <stop offset="75%" stop-color="#94a3b8" />
+      <stop offset="100%" stop-color="#334155" />
+    </linearGradient>
+
+    <linearGradient id="stealthWing40" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#334155" />
+      <stop offset="35%" stop-color="#1e293b" />
+      <stop offset="75%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+
+    <linearGradient id="metalNacelle40" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc" />
+      <stop offset="40%" stop-color="#cbd5e1" />
+      <stop offset="80%" stop-color="#64748b" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+
+    <linearGradient id="canopyGlass40" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#67e8f9" />
+      <stop offset="30%" stop-color="#0284c7" />
+      <stop offset="75%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+
+    <linearGradient id="afterburner40" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="15%" stop-color="#67e8f9" />
+      <stop offset="40%" stop-color="#38bdf8" />
+      <stop offset="70%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#a855f7" stop-opacity="0" />
+    </linearGradient>
+
+    <filter id="glow40" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="5" result="b" />
+      <feMerge>
+        <feMergeNode in="b" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <filter id="highGlow40" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12" result="b1" />
+      <feGaussianBlur stdDeviation="4" result="b2" />
+      <feMerge>
+        <feMergeNode in="b1" />
+        <feMergeNode in="b2" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Box Canvas -->
+  <rect width="1500" height="825" fill="url(#boxBg40)" rx="28" />
+  
+  <!-- Outer Precision Border - THICK & HIGH VISIBILITY -->
+  <rect x="20" y="20" width="1460" height="785" rx="20" fill="none" stroke="#475569" stroke-width="4.5" />
+  <rect x="32" y="32" width="1436" height="761" rx="16" fill="none" stroke="#facc15" stroke-width="3.2" stroke-dasharray="16 10" opacity="0.9" />
+
+  <!-- Corner Precision Brackets -->
+  <g stroke="#facc15" stroke-width="5.0" fill="none">
+    <path d="M32,75 L32,32 L75,32" />
+    <path d="M1468,75 L1468,32 L1425,32" />
+    <path d="M32,750 L32,793 L75,793" />
+    <path d="M1468,750 L1468,793 L1425,793" />
+  </g>
+
+  <!-- ======================================================== -->
+  <!-- 1. TOP BAR: LEFT CAPSULE, RIGHT EDITION                  -->
+  <!-- ======================================================== -->
+  <g transform="translate(0, 65)">
+    <!-- Left Justified Capsule at x=55, tailored width 270px -->
+    <rect x="55" y="-22" width="325" height="44" rx="22" fill="#1e293b" stroke="#38bdf8" stroke-width="2.8" />
+    <circle cx="78" cy="0" r="7" fill="#facc15" />
+    <text x="98" y="8" font-family="'Futura', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" font-size="23" fill="#f8fafc" letter-spacing="1.5">
+      4.0" TOUCHSCREEN
+    </text>
+
+    <!-- Right Justified Edition Text at x=1440, larger 25pt -->
+    <text x="1440" y="8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" font-size="25" fill="#94a3b8" letter-spacing="2" text-anchor="end">
+      CYD E32R40T EDITION
+    </text>
+  </g>
+
+  <!-- Top Separator Line - THICKER 3.8px -->
+  <line x1="55" y1="98" x2="1445" y2="98" stroke="#334155" stroke-width="3.8" />
+
+  <!-- ======================================================== -->
+  <!-- 2. PREDOMINANT TITLE & LARGER SLOGAN                     -->
+  <!-- ======================================================== -->
+  <g transform="translate(542.5, 207)">
+    <g font-family="'Futura', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="900" font-size="104">
+      <text x="-26" y="0" fill="#facc15" text-anchor="end">cyd</text>
+      <text x="0" y="0" fill="#ffffff" text-anchor="middle">-</text>
+      <text x="26" y="0" fill="#ffffff" text-anchor="start">dashboard</text>
+    </g>
+  </g>
+
+  <!-- Larger Slogan spanning the horizontal area (36pt, bold) -->
+  <text x="750" y="278" font-family="'Futura', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" font-size="36" fill="#38bdf8" letter-spacing="8" text-anchor="middle">
+    LIVE FLIGHT TRACKER &amp; WEATHER STATION
+  </text>
+
+  <!-- Decorative Divider Bar below Title & Slogan - THICKER 3.8px -->
+  <g transform="translate(750, 311)">
+    <line x1="-680" y1="0" x2="-240" y2="0" stroke="#334155" stroke-width="3.8" />
+    <polygon points="-230,0 -220,-6 -210,0 -220,6" fill="#facc15" />
+    <line x1="-195" y1="0" x2="195" y2="0" stroke="#facc15" stroke-width="4.5" filter="url(#glow40)" />
+    <polygon points="210,0 220,-6 230,0 220,6" fill="#facc15" />
+    <line x1="240" y1="0" x2="680" y2="0" stroke="#334155" stroke-width="3.8" />
+  </g>
+
+  <!-- ======================================================== -->
+  <!-- 3. MIDDLE SECTION: RADAR + EMBLEM (LEFT) | BULLETS (RIGHT)-->
+  <!-- ======================================================== -->
+
+  <!-- SWEEPING RADAR SCOPE (Thicker lines & high visibility) -->
+  <g id="sweepingRadarGroup40" clip-path="url(#middleSectionClip40)">
+    <g transform="translate(322, 522)">
+      <circle cx="0" cy="0" r="255" fill="url(#scopeBackdrop40)" />
+
+      <!-- Concentric Range Rings - THICKER (3.0px / 2.2px) -->
+      <circle cx="0" cy="0" r="250" fill="none" stroke="url(#ringFade40)" stroke-width="3.0" />
+      <circle cx="0" cy="0" r="185" fill="none" stroke="url(#ringFade40)" stroke-width="2.2" stroke-dasharray="10 7" />
+      <circle cx="0" cy="0" r="122" fill="none" stroke="url(#ringFade40)" stroke-width="2.2" />
+      <circle cx="0" cy="0" r="60" fill="none" stroke="url(#ringFade40)" stroke-width="2.0" stroke-dasharray="5 5" />
+
+      <!-- Cardinal Crosshairs & Azimuth Rays - THICKER -->
+      <line x1="-250" y1="0" x2="250" y2="0" stroke="url(#ringFade40)" stroke-width="2.0" stroke-dasharray="6 6" />
+      <line x1="0" y1="-250" x2="0" y2="155" stroke="#38bdf8" stroke-width="2.0" stroke-dasharray="6 6" opacity="0.45" />
+      <line x1="-175" y1="-175" x2="175" y2="175" stroke="url(#ringFade40)" stroke-width="1.4" stroke-dasharray="4 6" />
+      <line x1="-175" y1="175" x2="175" y2="-175" stroke="url(#ringFade40)" stroke-width="1.4" stroke-dasharray="4 6" />
+
+      <!-- Range Distance Ticks on Crosshairs -->
+      <g stroke="#38bdf8" stroke-width="2.0" opacity="0.6">
+        <line x1="-60" y1="-6" x2="-60" y2="6" />
+        <line x1="-122" y1="-8" x2="-122" y2="8" />
+        <line x1="-185" y1="-6" x2="-185" y2="6" />
+        <line x1="60" y1="-6" x2="60" y2="6" />
+        <line x1="122" y1="-8" x2="122" y2="8" />
+        <line x1="185" y1="-6" x2="185" y2="6" />
+      </g>
+
+      <!-- Radar Sweeping Beam Sector -->
+      <path d="M0,0 L-165,170 A235,235 0 0,1 -232,38 Z" fill="url(#sweepPhosphor40)" />
+      <line x1="0" y1="0" x2="-232" y2="38" stroke="#67e8f9" stroke-width="3.2" filter="url(#glow40)" />
+
+      <!-- Radar Aircraft Targets / Blips -->
+      <circle cx="102" cy="-122" r="5" fill="#facc15" filter="url(#glow40)" />
+      <circle cx="102" cy="-122" r="10" fill="none" stroke="#facc15" stroke-width="1.4" opacity="0.75" />
+      <line x1="102" y1="-122" x2="120" y2="-138" stroke="#facc15" stroke-width="2.0" opacity="0.9" />
+      
+      <circle cx="-122" cy="-82" r="4.5" fill="#38bdf8" filter="url(#glow40)" />
+      <line x1="-122" y1="-82" x2="-142" y2="-74" stroke="#38bdf8" stroke-width="1.8" opacity="0.85" />
+      
+      <circle cx="-185" cy="58" r="5.5" fill="#22d3ee" filter="url(#glow40)" />
+      <circle cx="-185" cy="58" r="11" fill="none" stroke="#22d3ee" stroke-width="1.5" opacity="0.85" />
+      <line x1="-185" y1="58" x2="-208" y2="50" stroke="#22d3ee" stroke-width="2.0" />
+    </g>
+  </g>
+
+  <!-- PLANE-BIRD HERO EMBLEM (Compact scale 0.41, ample clearance) -->
+  <g id="heroEmblem" transform="translate(322, 522) scale(0.41)">
+    <g filter="url(#highGlow40)">
+      <polygon points="-75,150 -52,150 -63,290" fill="url(#afterburner40)" />
+      <polygon points="-70,150 -56,150 -63,220" fill="#ffffff" />
+      <polygon points="52,150 75,150 63,290" fill="url(#afterburner40)" />
+      <polygon points="56,150 70,150 63,220" fill="#ffffff" />
+    </g>
+
+    <g stroke="#090d16" stroke-width="1.8">
+      <path d="M0,105 L-125,210 L-78,225 L0,122 Z" fill="#1e293b" />
+      <path d="M0,112 L-72,238 L-30,252 L0,130 Z" fill="#334155" />
+      <path d="M0,120 L-20,265 L20,265 L0,120 Z" fill="#475569" />
+      <path d="M0,112 L72,238 L30,252 L0,130 Z" fill="#334155" />
+      <path d="M0,105 L125,210 L78,225 L0,122 Z" fill="#1e293b" />
+      <line x1="0" y1="120" x2="0" y2="265" stroke="#facc15" stroke-width="2.5" />
+    </g>
+
+    <polygon points="-75,95 -112,12 -82,12 -54,118" fill="url(#metalNacelle40)" stroke="#1e293b" stroke-width="1.8" />
+    <polygon points="-112,12 -82,12 -86,32 -108,32" fill="#facc15" />
+    <polygon points="75,95 112,12 82,12 54,118" fill="url(#metalNacelle40)" stroke="#1e293b" stroke-width="1.8" />
+    <polygon points="112,12 82,12 86,32 108,32" fill="#facc15" />
+
+    <g id="leftWing">
+      <path d="M0,-110 L-145,-65 L-380,60 C-370,90 -350,112 -315,125 C-300,105 -275,120 -250,132 C-230,120 -210,130 -185,140 L-55,145 L0,70 Z" fill="url(#stealthWing40)" stroke="#1e293b" stroke-width="2" />
+      <path d="M-145,-65 L-380,60 Q-335,100 -300,115 L-135,10 Z" fill="#334155" stroke="#0f172a" stroke-width="1.5" />
+      <path d="M0,-110 L-145,-65 L-380,60" stroke="#facc15" stroke-width="4.5" fill="none" filter="url(#glow40)" />
+      <circle cx="-380" cy="60" r="7" fill="#ef4444" filter="url(#glow40)" />
+      <circle cx="-380" cy="60" r="3" fill="#ffffff" />
+      <path d="M-82,80 C-94,80 -102,95 -102,120 C-102,145 -94,158 -82,158 L-54,158 C-42,158 -42,80 -54,80 Z" fill="url(#metalNacelle40)" stroke="#1e293b" stroke-width="1.8" />
+      <ellipse cx="-68" cy="82" rx="16" ry="6.5" fill="#0284c7" stroke="#ffffff" stroke-width="1.8" filter="url(#glow40)" />
+    </g>
+
+    <g id="rightWing">
+      <path d="M0,-110 L145,-65 L380,60 C370,90 350,112 315,125 C300,105 275,120 250,132 C230,120 210,130 185,140 L55,145 L0,70 Z" fill="url(#stealthWing40)" stroke="#1e293b" stroke-width="2" />
+      <path d="M145,-65 L380,60 Q335,100 300,115 L135,10 Z" fill="#334155" stroke="#0f172a" stroke-width="1.5" />
+      <path d="M0,-110 L145,-65 L380,60" stroke="#facc15" stroke-width="4.5" fill="none" filter="url(#glow40)" />
+      <circle cx="380" cy="60" r="7" fill="#10b981" filter="url(#glow40)" />
+      <circle cx="380" cy="60" r="3" fill="#ffffff" />
+      <path d="M82,80 C94,80 102,95 102,120 C102,145 94,158 82,158 L54,158 C42,158 42,80 54,80 Z" fill="url(#metalNacelle40)" stroke="#1e293b" stroke-width="1.8" />
+      <ellipse cx="68" cy="82" rx="16" ry="6.5" fill="#0284c7" stroke="#ffffff" stroke-width="1.8" filter="url(#glow40)" />
+    </g>
+
+    <path d="M0,-210 C32,-175 60,-105 60,-10 C60,70 45,120 0,142 C-45,120 -60,70 -60,-10 C-60,-105 -32,-175 0,-210 Z" fill="url(#titanium40)" stroke="#1e293b" stroke-width="2.5" />
+    <polygon points="0,-210 40,-105 36,70 0,135 -36,70 -40,-105" fill="#f8fafc" />
+    <polygon points="0,15 18,38 14,44 0,33 -14,44 -18,38" fill="#facc15" />
+    <polygon points="0,48 18,71 14,77 0,66 -14,77 -18,71" fill="#facc15" />
+    <polygon points="0,81 18,104 14,110 0,99 -14,110 -18,104" fill="#facc15" />
+    <path d="M0,-180 C18,-155 22,-105 15,-70 C8,-55 0,-50 0,-50 C0,-50 -8,-55 -15,-70 C-22,-105 -18,-155 0,-180 Z" fill="url(#canopyGlass40)" stroke="#38bdf8" stroke-width="2" filter="url(#glow40)" />
+    <circle cx="-24" cy="-125" r="4" fill="#38bdf8" filter="url(#glow40)" />
+    <circle cx="24" cy="-125" r="4" fill="#38bdf8" filter="url(#glow40)" />
+    
+    <!-- Beak -->
+    <path d="M0,-242 C14,-225 18,-198 14,-175 C8,-165 0,-162 0,-162 C0,-162 -8,-165 -14,-175 C-18,-198 -14,-225 0,-242 Z" fill="url(#cydGold40)" stroke="#a16207" stroke-width="1.8" />
+    <line x1="0" y1="-242" x2="0" y2="-162" stroke="#ffffff" stroke-width="2" />
+    <line x1="0" y1="-242" x2="0" y2="-275" stroke="#f8fafc" stroke-width="2.5" />
+    <circle cx="0" cy="-288" r="2.2" fill="#ffffff" filter="url(#glow40)" />
+  </g>
+
+  <!-- Clean Vertical Divider Line - THICKER 3.8px -->
+  <line x1="605" y1="330" x2="605" y2="705" stroke="#334155" stroke-width="3.8" />
+
+  <!-- RIGHT: 5 MUCH LARGER BOLD FEATURE BULLETS (42pt!) -->
+  <g id="bulletList" transform="translate(645, 0)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" font-size="42" fill="#f8fafc">
+    <g transform="translate(0, 390)">
+      <circle cx="18" cy="-13" r="9" fill="#38bdf8" />
+      <text x="48" y="0">Live ADS-B Flight Radar</text>
+    </g>
+
+    <g transform="translate(0, 465)">
+      <circle cx="18" cy="-13" r="9" fill="#facc15" />
+      <text x="48" y="0">Live Weather &amp; Forecasts</text>
+    </g>
+
+    <g transform="translate(0, 540)">
+      <circle cx="18" cy="-13" r="9" fill="#06b6d4" />
+      <text x="48" y="0">Pool Temperature Monitoring</text>
+    </g>
+
+    <g transform="translate(0, 615)">
+      <circle cx="18" cy="-13" r="9" fill="#a855f7" />
+      <text x="48" y="0">50 Alarms &amp; Melody Presets</text>
+    </g>
+
+    <g transform="translate(0, 690)">
+      <circle cx="18" cy="-13" r="9" fill="#10b981" />
+      <text x="48" y="0">Standalone WiFi · Auto-OTA</text>
+    </g>
+  </g>
+
+  <!-- 4. BOTTOM FOOTER - THICKER 3.8px LINE, LARGER 25pt TEXT -->
+  <line x1="55" y1="740" x2="1445" y2="740" stroke="#334155" stroke-width="3.8" />
+  <g transform="translate(0, 775)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" font-size="25" letter-spacing="1.5">
+    <text x="60" y="0" fill="#94a3b8" text-anchor="start">
+      ESP32 4.0" 480×320 COLOR TOUCHSCREEN
+    </text>
+    <text x="1440" y="0" fill="#facc15" text-anchor="end">
+      MPL-2.0 OPEN SOURCE
+    </text>
+  </g>
+
+</svg>

@@ -83,22 +83,36 @@ hr { border: none; border-top: 1px solid #999; margin: 5pt 0 3pt; }
         background: rgba(253, 240, 240, 0.85); color: #7a1f16;
         padding: 5pt 7pt; margin: 9pt 0; font-size: 8.2pt;
         border-radius: 4px; }
+/* Info card for hardware notes (e.g. the external-speaker requirement).
+   Light-blue fill + navy text — clearly a note, not a section heading. */
+.callout { color: #103a5c; background: linear-gradient(100deg, #e4eff8, #d0e2f0);
+           border: 1px solid #7da8c8; border-radius: 5px;
+           padding: 5pt 8pt; margin: 6pt 0; }
 .shot { margin: 8pt 0 4pt; }   /* a line of air between text and images */
 .shot img, img.hero { width: 100%; border: 1px solid #999;
                       border-radius: 4px; }
 /* Front cover: title block at the top, version+source footer pinned to the
    bottom, hero shots filling the middle — flexbox spreads the panel height. */
 .cover { text-align: center; height: 100%;
-         display: flex; flex-direction: column;
+         display: flex; flex-direction: column; justify-content: space-between;
          background-image: url("__ROOT__/bg-blur.png");
          background-size: cover; background-position: center;
-         margin: -0.28in -0.26in; padding: 0.32in 0.26in 0.28in; }
+         margin: -0.28in -0.26in; padding: 0.22in 0.24in 0.20in; }
+/* space-between distributes the gaps; every cover child needs zero vertical
+   margin so the spacing stays uniform. */
+.cover p { font-size: 8pt; margin: 0; }
+.cover img.logo { width: 88%; margin: 0 auto; display: block; }
 .cover h1 { border: none; margin-top: 0; }
-.cover > strong { font-size: 11pt; letter-spacing: 3px; color: #0b3d66; }
-.cover p { font-size: 9pt; }
-.cover p:not(.footer) { margin: 16pt 0; }
-.cover img.hero { width: 88%; margin: 7pt 0; }
-.cover .ver { margin-top: auto; }
+.cover .desc { width: 88%; margin: 0 auto; text-align: left;
+               line-height: 1.3; font-size: 8.4pt; box-sizing: border-box;
+               color: #103a5c; background: linear-gradient(100deg, #e4eff8, #d0e2f0);
+               border: 1px solid #7da8c8; border-radius: 5px; padding: 5pt 8pt; }
+.cover img.hero { width: 88%; margin: 0 auto; display: block;
+                  border: 1px solid #999; border-radius: 4px; }
+/* Version pill + repo link travel together as the last flex item so the
+   pill sits right above the link instead of taking its own spaced slot. */
+.cover-bottom { text-align: center; }
+.cover-bottom .ver { margin-bottom: 4pt; }
 .ver { display: inline-block; padding: 2pt 10pt;
        font-size: 8pt; color: #0b3d66; border: 1px solid #0b3d66;
        border-radius: 10px; }
@@ -210,8 +224,13 @@ def main():
 
     # Write into the repo's git-ignored build/; image srcs sit next to the
     # markdown, so point them at the real files.
-    html = re.sub(r'src="(DEVELOPER-USERGUIDE-[^"]+\.png)"',
-                  lambda m: f'src="{ROOT}/{m.group(1)}"', html)
+    def resolve_src(m):
+        src = m.group(1)
+        if src.startswith("http") or src.startswith("/"):
+            return m.group(0)
+        return f'src="{(ROOT / src).resolve()}"'
+
+    html = re.sub(r'src="([^"]+\.(?:png|svg|jpg))"', resolve_src, html)
     build = REPO / "build"
     build.mkdir(exist_ok=True)
     html_path = build / "userguide.html"
