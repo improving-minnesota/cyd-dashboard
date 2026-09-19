@@ -7,7 +7,7 @@
 <!-- SIDE:OUTSIDE -->
 
 <!-- inside flap: the welcome panel, first thing seen when opened -->
-## ✨ What it shows
+## ✨ What It Shows
 
 - **Alarms** — up to 6 weekday-scheduled alarms with an LED + sound alert.
 - **Clock & date** — always on top.
@@ -71,30 +71,37 @@ from a development computer.
 <!-- front cover -->
 <div class="cover" markdown="1">
 
-# cyd-dashboard
+<img class="logo" src="cyd-dashboard-guide-logo.png"
+     alt="cyd-dashboard logo">
 
-*Weather · Flights · Pool Temp · Alarms*
-
-A small self-contained touchscreen dashboard for **Cheap Yellow Display
-(CYD)** boards — the 2.8" 2432S028R or the 4" E32R40T. Once it's set up it
-runs on your WiFi — no computer needed.
+<div class="desc">
+<p>A small self-contained touchscreen dashboard for <strong>Cheap Yellow Display
+(CYD)</strong> boards:</p>
+<ul>
+<li><strong>2.8" 2432S028R</strong></li>
+<li><strong>4" E32R40T</strong></li>
+</ul>
+<p>Once it's set up it runs on your WiFi — no computer needed.</p>
+</div>
 
 <img class="hero" src="DEVELOPER-USERGUIDE-dashboard.png"
      alt="Simulated cyd-dashboard screen: a real flight overhead
      with callsign, route, live radar, ground track, and OpenSky credits">
+
 <img class="hero" src="DEVELOPER-USERGUIDE-wxgraph.png"
      alt="Weather temperature history graph showing the last day">
 
+<div class="cover-bottom">
 {{VERSION}}
-
 <p class="footer"><em><a href="https://github.com/improving-minnesota/cyd-dashboard">github.com/improving-minnesota/cyd-dashboard</a></em></p>
+</div>
 
 </div>
 
 <!-- SIDE:INSIDE -->
 
 <!-- inside spread, panel 1: setup -->
-## 🚀 Getting started
+## 🚀 Getting Started
 
 1. **Plug it in.** On a brand-new device (or after a Factory Reset) it first
    asks you to tap a few crosshairs to calibrate the touchscreen — this is
@@ -103,7 +110,7 @@ runs on your WiFi — no computer needed.
    keyboard. (Change it later under **Settings → Network**.)
 3. Done — the dashboard appears and starts loading weather and flights.
 
-## 📍 Set your location
+## 📍 Set Your Location
 
 Weather and flights need to know where you are. On first boot the device
 guesses your location from your internet connection — check that it's right:
@@ -114,7 +121,7 @@ Open **Settings → Location**, then use whichever is easiest:
 - **Set** — type your latitude and longitude directly.
 - **Find by IP** — guess again from your connection.
 
-## 🔑 OpenSky account (recommended)
+## 🔑 OpenSky Account (Recommended)
 
 Flights work out of the box, but a free OpenSky account raises your daily
 limit and removes the yellow "anonymous" warning.
@@ -129,7 +136,7 @@ The three small readouts in the header — **CRP**, **CRL**, **CFT** — show
 your remaining daily OpenSky credits (tap them for detail). Grey is healthy,
 yellow is low, pink is nearly out. Credits reset daily.
 
-## 🌡️ Govee pool thermometer (optional)
+## 🌡️ Govee Pool Thermometer (Optional)
 
 Only if you own a Govee pool thermometer:
 
@@ -141,7 +148,7 @@ Only if you own a Govee pool thermometer:
 <!-- PANEL -->
 
 <!-- inside spread, panel 2: daily use -->
-## 👆 Using the dashboard
+## 👆 Using the Dashboard
 
 The main screen isn't just a display — several spots are **buttons you can
 tap**:
@@ -170,11 +177,11 @@ When one fires: **Dismiss** stops it for today; **Snooze** refires in 5 min
 during Sleep Mode — the device wakes itself at the alarm time — and a
 snoozed or missed alarm still fires after a power loss.
 
-🔊 Sound requires an **external speaker** plugged into the board's small
+<p class="callout">🔊 Sound requires an <strong>external speaker</strong> plugged into the board's small
 JST port — the display has no built-in speaker, so without one alarms flash
-the LED only. Loudness comes from **Notify Volume** under
+the LED only. Loudness comes from <strong>Notify Volume</strong> under
 Settings → General; it applies to alarms, the callsign alert, and the boot
-chime.
+chime.</p>
 
 <div class="shot"><img src="DEVELOPER-USERGUIDE-alarms.png"
      alt="Alarms editor: enable toggle, time steppers, weekday pickers, Notify preset"></div>
@@ -182,7 +189,7 @@ chime.
 <!-- PANEL -->
 
 <!-- inside spread, panel 3: reference -->
-## ⚙️ Settings at a glance
+## ⚙️ Settings at a Glance
 
 Defaults shown in parentheses.
 
@@ -210,7 +217,7 @@ Defaults shown in parentheses.
 - **Sleep Mode** — enabled (on); sleeps 10:00 PM – 8:00 AM; a touch wakes it
   for 5 minutes.
 
-## 💡 LED & border colors
+## 💡 LED & Border Colors
 
 - **Red border / LED** — something needs attention: no WiFi, bad OpenSky
   credentials, exhausted OpenSky credits, or missing weather/pool data.
@@ -221,7 +228,7 @@ Defaults shown in parentheses.
   pattern on the LED and speaker
   while its details are shown — independent of the blink setting.
 
-## 📦 Firmware updates
+## 📦 Firmware Updates
 
 The device keeps its firmware current over WiFi. **Auto-Update** (on by
 default) checks once a day and installs new releases; to update
