@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.6.0](https://github.com/improving-minnesota/cyd-horizon/compare/v3.5.0...v3.6.0) (2026-09-19)
+
+
+### Features
+
+* rename project to cyd-horizon ([14283a8](https://github.com/improving-minnesota/cyd-horizon/commit/14283a831d29b14284a0aeec44881445f8a109d1))
+* rename project to cyd-horizon ([44825f9](https://github.com/improving-minnesota/cyd-horizon/commit/44825f95e71bb12b320e131c5d35d3232394f325))
+
 ## [3.5.0](https://github.com/improving-minnesota/cyd-horizon/compare/v3.4.0...v3.5.0) (2026-09-18)
 
 
