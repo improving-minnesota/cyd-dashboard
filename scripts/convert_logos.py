@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert the airline logo images in cyd-dashboard/airline-logos into
+"""Convert the airline logo images in cyd-horizon/airline-logos into
 RGB565 bitmaps.
 
 Two output modes:
@@ -18,8 +18,8 @@ RGB565.
   | w*h*2 bytes of RGB565
 
 Usage:
-    cyd-dashboard/.venv/bin/python scripts/convert_logos.py --out-dir build/logos
-    cyd-dashboard/.venv/bin/python scripts/convert_logos.py --header cyd-dashboard/airline_logos.h
+    cyd-horizon/.venv/bin/python scripts/convert_logos.py --out-dir build/logos
+    cyd-horizon/.venv/bin/python scripts/convert_logos.py --header cyd-horizon/airline_logos.h
 """
 import os
 import sys
@@ -28,7 +28,7 @@ import struct
 from PIL import Image
 
 # The logo sources and generated header live with the sketch, one dir up.
-SKETCH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cyd-dashboard")
+SKETCH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cyd-horizon")
 SRC_DIR = os.path.join(SKETCH_DIR, "airline-logos")
 DEFAULT_HDR = os.path.join(SKETCH_DIR, "airline_logos.h")
 LOGO_MAGIC = b"LGO1"

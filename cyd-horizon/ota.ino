@@ -19,19 +19,19 @@
 #include "mbedtls/sha256.h"
 
 // OTA verifies TLS against per-host trust stores (GitHub API via
-// kSectigoUSERTrustEccRootCAs, release assets via kIsrgRootCAs in cyd-dashboard.ino),
+// kSectigoUSERTrustEccRootCAs, release assets via kIsrgRootCAs in cyd-horizon.ino),
 // with a time-gated setInsecure() fallback once those roots expire (see
 // OTA_CA_EXPIRY) so a root rotation can't block updates.
 
-#define OTA_REPO    "improving-minnesota/cyd-dashboard"
+#define OTA_REPO    "improving-minnesota/cyd-horizon"
 // Release asset name per board variant: each board downloads only the binary
 // built for its hardware. Firmware that predates board-named assets polled
-// for the bare "cyd-dashboard.ino.bin"; that asset is no longer published,
+// for the bare "cyd-horizon.ino.bin"; that asset is no longer published,
 // so those builds cannot OTA and must be updated over USB.
 #ifdef CYD_E32R40T
-#define OTA_ASSET   "cyd-dashboard-e32r40t.ino.bin"
+#define OTA_ASSET   "cyd-horizon-e32r40t.ino.bin"
 #else
-#define OTA_ASSET   "cyd-dashboard-2432s028r.ino.bin"
+#define OTA_ASSET   "cyd-horizon-2432s028r.ino.bin"
 #endif
 #define OTA_API_URL "https://api.github.com/repos/" OTA_REPO "/releases/latest"
 

@@ -1,6 +1,6 @@
 # Packaging assets
 
-Printable box-cover labels for cyd-dashboard devices. The SVGs are the
+Printable box-cover labels for cyd-horizon devices. The SVGs are the
 hand-maintained source of truth; PNGs and label-sheet PDFs are generated.
 
 ## Files
@@ -18,7 +18,7 @@ hand-maintained source of truth; PNGs and label-sheet PDFs are generated.
 ## Regenerating
 
 ```sh
-cyd-dashboard/.venv/bin/python docs/packaging/build_packaging.py
+cyd-horizon/.venv/bin/python docs/packaging/build_packaging.py
 ```
 
 Run from the repo root. Requires `cairosvg` and `pymupdf` in the repo venv.
@@ -50,10 +50,11 @@ labels below the physical cover dimensions. Cut along the dashed borders.
   bullets 36/42 pt bold, slogan 31/36 pt, capsule 21/23 pt, edition and
   footer 23/25 pt (2.8"/4.0"). All text must stay inside the
   border/separator margins with breathing room.
-- Title `cyd-dashboard` is three `<text>` runs (`cyd` gold, `-` and
-  `dashboard` white) kerned so the hyphen is centered between the two `d`s.
+- Title `cyd-horizon` is three `<text>` runs (`cyd` gold, `-` and
+  `horizon` white) kerned so the hyphen is centered between `cyd` and
+  `horizon`.
 - Futura/Helvetica font stacks only (print-safe system fonts).
 
-The user-guide front-cover logo (`docs/user-guide/cyd-dashboard-guide-logo.svg`)
+The user-guide front-cover logo (`docs/user-guide/cyd-horizon-guide-logo.svg`)
 is a vertically-trimmed derivative of the 2.8" cover — same artwork rules
 apply. See `docs/user-guide/README.md`.

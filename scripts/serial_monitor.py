@@ -8,7 +8,7 @@ RTS deliberately). Pass --reset for a clean boot log from POWERON_RESET.
 Ctrl-C exits; no screen-style escape chords needed.
 
 Usage (from the repo root):
-  cyd-dashboard/.venv/bin/python scripts/serial_monitor.py \
+  cyd-horizon/.venv/bin/python scripts/serial_monitor.py \
       [--port /dev/cu.usbserial-XXXX] [--baud 115200] [--reset]
 """
 

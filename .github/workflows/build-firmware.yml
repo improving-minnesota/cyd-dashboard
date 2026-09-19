@@ -61,7 +61,7 @@ jobs:
           # Compile every board variant so a change that breaks one fails CI.
           arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
             --build-property "compiler.cpp.extra_flags=${FLAGS}" \
-            --output-dir build/release cyd-dashboard
+            --output-dir build/release cyd-horizon
           arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
             --build-property "compiler.cpp.extra_flags=${FLAGS} -DCYD_E32R40T=1" \
-            --output-dir build/release-e32r40t cyd-dashboard
+            --output-dir build/release-e32r40t cyd-horizon

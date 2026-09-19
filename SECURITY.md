@@ -41,7 +41,7 @@ authenticated at two independent layers:
   bundle (Sectigo / USERTrust ECC), and the firmware download
   (`objects.githubusercontent.com`) is verified against the `kIsrgRootCAs`
   bundle (ISRG / Let's Encrypt). Both bundles are embedded in
-  `cyd-dashboard.ino` and selected by `trustStoreForUrl()`. The device never
+  `cyd-horizon.ino` and selected by `trustStoreForUrl()`. The device never
   retries an unverified connection after a certificate-validation failure, so a
   man-in-the-middle cannot force it to skip verification.
 - **Content integrity (SHA-256).** The streamed firmware image is hashed and

@@ -1,4 +1,4 @@
-# Contributing to cyd-dashboard
+# Contributing to cyd-horizon
 
 Thanks for helping out! This project is an ESP32 touchscreen dashboard for the
 Cheap Yellow Display (CYD). For an end-user overview see the [README](README.md);
@@ -81,11 +81,11 @@ variant, the FQBN stays the same. To build locally:
 
 ```bash
 # 2.8" ESP32-2432S028R (default)
-arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom cyd-dashboard
+arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom cyd-horizon
 
 # 4.0" E32R40T
 arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
-  --build-property "compiler.cpp.extra_flags=-DCYD_E32R40T=1" cyd-dashboard
+  --build-property "compiler.cpp.extra_flags=-DCYD_E32R40T=1" cyd-horizon
 ```
 
 See [DEVELOPER.md](DEVELOPER.md) for hardware wiring, flashing/upload, partition

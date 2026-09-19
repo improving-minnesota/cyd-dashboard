@@ -1,4 +1,4 @@
-// cyd-dashboard: standalone dashboard for CYD-family boards
+// cyd-horizon: standalone dashboard for CYD-family boards
 // (see "Board variants" in DEVELOPER.md; pins in tft_setup.h).
 //
 // Fetches live aircraft positions from the OpenSky API over WiFi, filters
@@ -140,8 +140,8 @@ enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW, 
 const char kBuildTag[] = "CYD_TAG=" kVersionStr ", Build " STRINGIZE(BUILD_NUM);
 bool isDevBuild() { return strstr(kVersion, "-dev") != NULL; }
 // User-Agent sent on every network call so servers can identify the client,
-// e.g. "cyd-dashboard/v1.8.0" (dev builds carry the "-dev" suffix).
-String appUserAgent() { return "cyd-dashboard/v" + String(kVersion); }
+// e.g. "cyd-horizon/v1.8.0" (dev builds carry the "-dev" suffix).
+String appUserAgent() { return "cyd-horizon/v" + String(kVersion); }
 // ------------------------------------------------------
 
 // ---- Display wrapper: logical UI, optionally scaled to the panel ----
@@ -594,7 +594,7 @@ String g_staticIp   = "";
 String g_staticMask = "";
 String g_staticGw   = "";
 String g_staticDns  = "";
-String g_hostname   = "";   // STA hostname (default "cyd-dashboard", see loadNetCfg)
+String g_hostname   = "";   // STA hostname (default "cyd-horizon", see loadNetCfg)
 bool   g_netCfgDirty = false;  // set on IP-page edits; applied via reconnect on exit
 String g_osClientId = "";       // OpenSky OAuth2 client id (blank = anonymous)
 String g_osClientSecret = "";   // OpenSky OAuth2 client secret
@@ -1943,25 +1943,26 @@ uint16_t disabledCol() {
   return TFT_DARKGREY;
 }
 
+// Credit tier color shared by the header readouts and the OpenSky Credits
+// screen: tiered by absolute remaining amounts (no assumed daily budget) -
+// pink below 50, yellow below 500, grey otherwise. An unobserved bucket is
+// yellow too (awaiting a value, not yet an error).
+uint16_t creditTierColor(int value, bool known) {
+  if (!known)    return TFT_YELLOW;
+  if (value < 50)  return TFT_PINK;
+  if (value < 500) return TFT_YELLOW;
+  return TFT_LIGHTGREY;
+}
+
 // Draw one header credit bucket: a label (e.g. "CRP:") in the header text
-// color with its value. The value is color-tiered by absolute remaining
-// amounts (no assumed daily budget): pink below 50, yellow below 500, grey
-// otherwise. An unobserved bucket shows "?" in yellow (awaiting a value, not
-// yet an error). Drawn in FONT1 (6x8) so the three stacked rows fit inside
-// the 36px header band.
+// color with its tier-colored value. An unobserved bucket shows "?". Drawn
+// in FONT1 (6x8) so the three stacked rows fit inside the 36px header band.
 void drawHeaderCredit(int x, int y, const char* label, int value, bool known,
                       uint16_t bg) {
   tft.setTextColor(btnFg(bg), bg);
   tft.setCursor(x, y);
   tft.print(label);
-  uint16_t valCol = TFT_LIGHTGREY;
-  if (known && value >= 0) {
-    if (value < 50)        valCol = TFT_PINK;     // critical
-    else if (value < 500)  valCol = TFT_YELLOW;   // warning
-  } else if (!known) {
-    valCol = TFT_YELLOW;    // awaiting a value
-  }
-  tft.setTextColor(valCol, bg);
+  tft.setTextColor(creditTierColor(value, known), bg);
   tft.setCursor(x + 26, y);
   if (known) tft.printf("%d", value);
   else tft.print("?");
@@ -2030,13 +2031,13 @@ void drawHeaderBand() {
 }
 
 // One row of the OpenSky Credits screen: a bucket label + its last-known
-// remaining balance.
+// remaining balance in the same tier colors as the header readouts.
 void drawCreditsRow(int y, const char* label, int remaining, bool known) {
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
   tft.setTextFont(2);
   tft.setCursor(8, y);
   tft.print(label);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextColor(creditTierColor(remaining, known), TFT_BLACK);
   tft.setCursor(8, y + 20);
   if (known) tft.printf("%d", remaining);
   else tft.print("--");
@@ -2066,6 +2067,8 @@ void drawCredits() {
   tft.setTextFont(1);
   tft.setCursor(8, y + 158);
   tft.print("Last-known remaining per bucket.");
+  tft.setCursor(8, y + 170);
+  tft.print("Grey ok, yellow < 500, pink < 50.");
 }
 
 // Incremental 1-second update for the dashboard. Instead of clearing and

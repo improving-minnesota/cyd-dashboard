@@ -14,7 +14,7 @@
 //     ST7796 480x320; TFT on HSPI, same SPI pins, RST tied to board EN
 //     Touch SHARES the TFT bus (T_CS=33 T_IRQ=36); backlight on GPIO 27.
 //     The 360x240 logical UI is uniformly scaled x4/3 onto the panel by the
-//     tft wrapper (SCALEX/SCALEY in cyd-dashboard.ino) and uses FreeFonts.
+//     tft wrapper (SCALEX/SCALEY in cyd-horizon.ino) and uses FreeFonts.
 
 #ifdef CYD_E32R40T
 
@@ -70,7 +70,7 @@
 // GPIO 4 really is the panel reset on this unit. The esp32 core's variant file
 // claims GPIO 4 is the red LED (CYD_LED_RED), but on this board revision the
 // red channel is on GPIO 22 - verified by driving each free pin in turn (see
-// the LED pin defines in cyd-dashboard.ino).
+// the LED pin defines in cyd-horizon.ino).
 #define TFT_RST  4
 
 // ---- Backlight ----

@@ -71,8 +71,8 @@ from a development computer.
 <!-- front cover -->
 <div class="cover" markdown="1">
 
-<img class="logo" src="cyd-dashboard-guide-logo.png"
-     alt="cyd-dashboard logo">
+<img class="logo" src="cyd-horizon-guide-logo.png"
+     alt="cyd-horizon logo">
 
 <div class="desc">
 <p>A small self-contained touchscreen dashboard for <strong>Cheap Yellow Display
@@ -85,7 +85,7 @@ from a development computer.
 </div>
 
 <img class="hero" src="DEVELOPER-USERGUIDE-dashboard.png"
-     alt="Simulated cyd-dashboard screen: a real flight overhead
+     alt="Simulated cyd-horizon screen: a real flight overhead
      with callsign, route, live radar, ground track, and OpenSky credits">
 
 <img class="hero" src="DEVELOPER-USERGUIDE-wxgraph.png"
@@ -93,7 +93,7 @@ from a development computer.
 
 <div class="cover-bottom">
 {{VERSION}}
-<p class="footer"><em><a href="https://github.com/improving-minnesota/cyd-dashboard">github.com/improving-minnesota/cyd-dashboard</a></em></p>
+<p class="footer"><em><a href="https://github.com/improving-minnesota/cyd-horizon">github.com/improving-minnesota/cyd-horizon</a></em></p>
 </div>
 
 </div>

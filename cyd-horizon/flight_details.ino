@@ -119,7 +119,7 @@ bool airlineInfo(const char* callsign, String& name, uint16_t& color) {
 
 // findAirlineLogo() is defined in logos.ino: it loads logos from the dedicated
 // LittleFS "logos" partition at runtime (single reusable buffer, PSRAM-first),
-// and is declared at the top of cyd-dashboard.ino.
+// and is declared at the top of cyd-horizon.ino.
 
 
 

@@ -11,7 +11,7 @@ bottom-right corner; the script crops the bottom strip so it never reaches
 the PDF (background-size: cover absorbs the slight aspect change).
 
 Usage:
-    cyd-dashboard/.venv/bin/python docs/user-guide/fetch_backgrounds.py [--refresh] [--seed N]
+    cyd-horizon/.venv/bin/python docs/user-guide/fetch_backgrounds.py [--refresh] [--seed N]
 """
 
 import io

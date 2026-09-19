@@ -13,8 +13,8 @@ per side, six total).
 | `DEVELOPER-USERGUIDE.md` | Source content — edit this, never the PDF |
 | `render_userguide.py` | Markdown -> HTML -> PDF pipeline + all CSS |
 | `DEVELOPER-USERGUIDE.pdf` | Generated output (2 pages expected) |
-| `cyd-dashboard-guide-logo.svg` | Front-cover logo source — derived from the 2.8" packaging cover (middle band only: title, slogan, divider, radar/emblem, bullets; no top/bottom bars or separators) |
-| `cyd-dashboard-guide-logo.png` | Generated raster used by the guide |
+| `cyd-horizon-guide-logo.svg` | Front-cover logo source — derived from the 2.8" packaging cover (middle band only: title, slogan, divider, radar/emblem, bullets; no top/bottom bars or separators) |
+| `cyd-horizon-guide-logo.png` | Generated raster used by the guide |
 | `render_dash_mock.py` | Regenerates the simulated screenshots |
 | `mock_data.json` | Cached data for the mock screens (`--refresh` re-pulls) |
 | `fetch_backgrounds.py` | One-time generator for `bg-*.png` page art |
@@ -23,7 +23,7 @@ per side, six total).
 ## Regenerating
 
 ```sh
-cyd-dashboard/.venv/bin/python docs/user-guide/render_userguide.py
+cyd-horizon/.venv/bin/python docs/user-guide/render_userguide.py
 ```
 
 Run from the repo root. Requires the `markdown` package and Google Chrome
@@ -35,9 +35,9 @@ is stale vs `origin/main`, and warns if the PDF is not exactly 2 pages.
 After editing the cover logo SVG, re-render its PNG before rebuilding:
 
 ```sh
-cyd-dashboard/.venv/bin/python -c "import cairosvg; \
-  cairosvg.svg2png(url='docs/user-guide/cyd-dashboard-guide-logo.svg', \
-  write_to='docs/user-guide/cyd-dashboard-guide-logo.png', \
+cyd-horizon/.venv/bin/python -c "import cairosvg; \
+  cairosvg.svg2png(url='docs/user-guide/cyd-horizon-guide-logo.svg', \
+  write_to='docs/user-guide/cyd-horizon-guide-logo.png', \
   output_width=2700, output_height=1220)"
 ```
 
@@ -79,4 +79,4 @@ cyd-dashboard/.venv/bin/python -c "import cairosvg; \
   cover panel — the CSS keeps them single-line spaced; if the PDF grows
   past 2 pages, tighten `.cover` margins/font, not the panel order.
 - Per AGENTS.md: user-facing guide changes ride along with `README.md` and
-  `kHelpLines[]` in `cyd-dashboard/settings.ino`.
+  `kHelpLines[]` in `cyd-horizon/settings.ino`.

@@ -136,11 +136,11 @@
   <!-- ======================================================== -->
   <!-- 2. PREDOMINANT TITLE & LARGER SLOGAN                     -->
   <!-- ======================================================== -->
-  <g transform="translate(542.5, 207)">
+  <g transform="translate(633.0, 207)">
     <g font-family="'Futura', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="900" font-size="104">
       <text x="-26" y="0" fill="#facc15" text-anchor="end">cyd</text>
       <text x="0" y="0" fill="#ffffff" text-anchor="middle">-</text>
-      <text x="26" y="0" fill="#ffffff" text-anchor="start">dashboard</text>
+      <text x="26" y="0" fill="#ffffff" text-anchor="start">horizon</text>
     </g>
   </g>
 

@@ -1,8 +1,8 @@
 // settings.ino - Settings screen and its sub-screens (Flight Tracker config,
 // Sleep Mode config, Reset confirmation) plus their small drawing helpers.
-// Part of the cyd-dashboard sketch; shares globals/helpers (prefs, dirty,
+// Part of the cyd-horizon sketch; shares globals/helpers (prefs, dirty,
 // g_screen, inRect(), rowMinus()/rowPlus(), saveFloat()/saveInt(), etc.)
-// declared in cyd-dashboard.ino.
+// declared in cyd-horizon.ino.
 
 // The Settings screen is a pure navigation list - it holds no settings itself;
 // each row jumps to a dedicated sub-page. Settings live on those pages.
@@ -21,7 +21,7 @@ void drawSettings() {
   // 2-column grid, alphabetical: About, Calibrate Touch, Flight Tracker,
   // General, Help, Location, Network, Pool Temp, Reset, Sleep Mode. Reset is
   // kept at the bottom-left cell and drawn red (it is destructive). Touch
-  // handling in handleTouch() (cyd-dashboard.ino) mirrors this layout.
+  // handling in handleTouch() (cyd-horizon.ino) mirrors this layout.
   const char* items[] = { "About", "Calibrate Touch", "Flight Tracker", "General",
                           "Help", "Location", "Network", "Pool Temp",
                           "Reset", "Sleep Mode" };
@@ -57,7 +57,7 @@ void drawAbout() {
   tft.setTextFont(2);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setCursor(8, 40);
-  tft.print("CYD (Cheap Yellow Display) Dashboard");
+  tft.print("cyd-horizon (Cheap Yellow Display)");
 
   tft.setTextFont(1);
   tft.setCursor(8, 62);
@@ -68,7 +68,7 @@ void drawAbout() {
 
   tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
   tft.setCursor(8, 92);
-  tft.print("github.com/improving-minnesota/cyd-dashboard");
+  tft.print("github.com/improving-minnesota/cyd-horizon");
 
   tft.setTextFont(2);
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
@@ -139,20 +139,25 @@ void handleAboutTouch(uint16_t x, uint16_t y) {
 #define HELP_LINEH  9
 
 static const char* const kHelpLines[] = {
-  "CYD Dashboard",
-  "---------------",
-  "ESP32 touchscreen dashboard",
-  "for the Cheap Yellow Display",
-  "(CYD) boards with a built-in",
-  "color touchscreen - like the",
-  "2.8\" 2432S028R and the 4\"",
-  "E32R40T.",
-  "Live weather, flight tracker,",
-  "and Govee pool temp monitor.",
-  "Once set up, it runs on its",
-  "own over WiFi - no computer",
-  "needed. Made for this board",
-  "only (wiring is CYD-specific)."
+  "cyd-horizon",
+  "-----------",
+  "Live flight tracker &",
+  "weather station for Cheap",
+  "Yellow Display (CYD) boards",
+  "- ESP32 boards with a built-",
+  "in color touchscreen, like",
+  "the 2.8\" 2432S028R and the",
+  "4\" E32R40T. Once set up it",
+  "runs on your WiFi - no",
+  "computer needed. Made for",
+  "this board only (wiring is",
+  "CYD-specific).",
+  "",
+  "  - Live ADS-B flight radar",
+  "  - Live weather & forecasts",
+  "  - Pool temperature monitor",
+  "  - 50 alarm & melody presets",
+  "  - Standalone WiFi; auto-OTA",
   "",
   "FEATURES",
   "Clock: big time and date.",
@@ -179,7 +184,7 @@ static const char* const kHelpLines[] = {
   "alerts with its",
   "Callsign Notify pattern on the",
   "LED + speaker while shown - the",
-  "same 49 presets as alarms, from",
+  "same 50 presets as alarms, from",
   "Simple's soft beep to melodies",
   "like Charge. The LED also glows",
   "red for a critical error (No WiFi,",
@@ -236,7 +241,7 @@ static const char* const kHelpLines[] = {
   "Alarms: tap the header clock.",
   "  Up to 6 alarms with weekday",
   "  masks (all off = one-time)",
-  "  and a Notify pattern: 49",
+  "  and a Notify pattern: 50",
   "  LED + sound alerts: blinks,",
   "  chimes, sirens, sweeps, Morse,",
   "  and tunes (Nokia, Tetris,",
@@ -1201,7 +1206,7 @@ void drawEditRow(int y, const char* label, const String& value) {
 // Stepping the hour wraps through AM/PM, so there's no separate meridiem
 // control. Used by the Alarms editor and the Sleep Mode start/end times. The
 // row is ~30px tall; give it ~40px of vertical space.
-// TADJ_* column geometry is #defined in cyd-dashboard.ino (alarms.ino is
+// TADJ_* column geometry is #defined in cyd-horizon.ino (alarms.ino is
 // concatenated before this file, so shared defines must live there).
 
 // One horizontal [▼][▲] stepper pair in the theme color: ▼ (decrement) at

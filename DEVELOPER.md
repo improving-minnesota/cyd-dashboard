@@ -1,6 +1,6 @@
 # Developer / Advanced Details
 
-Advanced setup for the `cyd-dashboard` firmware. For an end-user overview and
+Advanced setup for the `cyd-horizon` firmware. For an end-user overview and
 the settings guide, see the [README](README.md).
 
 ## Author
@@ -45,7 +45,7 @@ to be shippable.
 > **Keep the README and the on-device Help screen in sync.** Every user-facing
 > change to `README.md` (features, settings, credentials, troubleshooting, etc.)
 > must also be mirrored in the on-device Help screen (`kHelpLines[]` in
-> `cyd-dashboard/settings.ino`) — and vice versa. They are not generated from one
+> `cyd-horizon/settings.ino`) — and vice versa. They are not generated from one
 > another. The Help screen is a fixed-width, pre-wrapped string array, so keep
 > each line short (≤ ~32 chars) and update it whenever the README's user-facing
 > guidance changes.
@@ -74,7 +74,7 @@ above.
 
 ## The sketch
 
-The `cyd-dashboard/` sketch targets CYD-family boards via the
+The `cyd-horizon/` sketch targets CYD-family boards via the
 `esp32:esp32:jczn_2432s028r` FQBN (it covers every supported variant — the
 board differences come from `-DCYD_*` flags, see "Board variants"). It uses a
 custom partition table (see
@@ -82,7 +82,7 @@ custom partition table (see
 
 ```bash
 arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
-  --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.[\".\"]' .release-please-manifest.json)" cyd-dashboard
+  --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.[\".\"]' .release-please-manifest.json)" cyd-horizon
 ```
 
 ### Board variants
@@ -94,8 +94,8 @@ rest.
 
 | Flag | Board | Panel | OTA release asset | Build dir |
 |---|---|---|---|---|
-| *(none)* | 2.8" ESP32-2432S028R | ILI9341 320x240, touch on VSPI | `cyd-dashboard-2432s028r.ino.bin` | `build/release` |
-| `-DCYD_E32R40T=1` | 4.0" E32R40T | ST7796 480x320, touch shares the TFT's HSPI, backlight GPIO 27, speaker amp enable GPIO 4 | `cyd-dashboard-e32r40t.ino.bin` | `build/release-e32r40t` |
+| *(none)* | 2.8" ESP32-2432S028R | ILI9341 320x240, touch on VSPI | `cyd-horizon-2432s028r.ino.bin` | `build/release` |
+| `-DCYD_E32R40T=1` | 4.0" E32R40T | ST7796 480x320, touch shares the TFT's HSPI, backlight GPIO 27, speaker amp enable GPIO 4 | `cyd-horizon-e32r40t.ino.bin` | `build/release-e32r40t` |
 
 All layout code targets a logical DISP_W x 240 screen: 320x240 on the 2.8"
 board, 360x240 on the E32R40T. The `tft` object is a scaling wrapper that
@@ -117,8 +117,8 @@ Build + push the 4" variant:
 ```bash
 arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
   --build-property "compiler.cpp.extra_flags=-DCYD_E32R40T=1 -DAPP_VERSION=...-dev -DBUILD_NUM=N -DENABLE_LOCAL_OTA=1 -DENABLE_SERIAL_PROVISION=1" \
-  --output-dir build/release-e32r40t cyd-dashboard
-cyd-dashboard/.venv/bin/python scripts/ota_push.py --dir build/release-e32r40t
+  --output-dir build/release-e32r40t cyd-horizon
+cyd-horizon/.venv/bin/python scripts/ota_push.py --dir build/release-e32r40t
 ```
 
 > The E32R40T's CH340 also fails at 921600 baud but tolerates 460800, so a
@@ -127,7 +127,7 @@ cyd-dashboard/.venv/bin/python scripts/ota_push.py --dir build/release-e32r40t
 Release assets are named per board (`OTA_ASSET` in `ota.ino`); `release.yml`
 builds each variant and `build-firmware.yml` compiles all of them on every
 PR. Only board-named assets are published: firmware old enough to poll for
-the bare `cyd-dashboard.ino.bin` name (before board-named assets existed) can
+the bare `cyd-horizon.ino.bin` name (before board-named assets existed) can
 no longer see new releases and must be updated over USB.
 
 #### Identifying boards on serial ports
@@ -138,7 +138,7 @@ parallel and reports which board each holds (plus version/build, and IP with
 `--wait-ip`):
 
 ```bash
-cyd-dashboard/.venv/bin/python scripts/detect_boards.py [--wait-ip] [--json]
+cyd-horizon/.venv/bin/python scripts/detect_boards.py [--wait-ip] [--json]
 ```
 
 Both update scripts use it:
@@ -157,7 +157,7 @@ Pick by **device state**, not by habit:
 
 | Device state | How to flash |
 |---|---|
-| Dev build with the OTA flags already running (board on WiFi) | **`cyd-dashboard/.venv/bin/python scripts/ota_push.py`** — serves `build/release`, resets the board, waits for `[net] ip=`, sends `OTA_URL`, and streams `[OTA]` progress to reboot. ~5 s over WiFi. `--all` updates **every** detected board in parallel, each with its variant's binary from `build/release*` (serial output is prefixed per-board). |
+| Dev build with the OTA flags already running (board on WiFi) | **`cyd-horizon/.venv/bin/python scripts/ota_push.py`** — serves `build/release`, resets the board, waits for `[net] ip=`, sends `OTA_URL`, and streams `[OTA]` progress to reboot. ~5 s over WiFi. `--all` updates **every** detected board in parallel, each with its variant's binary from `build/release*` (serial output is prefixed per-board). |
 | Fresh board, or first flash after changing the OTA flags | `arduino-cli upload` (below) **once** — then switch to `ota_push.py` |
 | Device can't reach WiFi / serial OTA path | `arduino-cli upload` (below) |
 
@@ -171,7 +171,7 @@ Pick by **device state**, not by habit:
 First flash over USB (only the cases in the table above):
 
 ```bash
-arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 cyd-dashboard
+arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 cyd-horizon
 ```
 
 > **Keep the upload FQBN identical to the compile FQBN.** `PartitionScheme` is
@@ -197,7 +197,7 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > `--clean` to force a full rebuild:
 > ```bash
 > arduino-cli compile --clean --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
->   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.[\".\"]' .release-please-manifest.json)-dev" cyd-dashboard
+>   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.[\".\"]' .release-please-manifest.json)-dev" cyd-horizon
 > ```
 > A `--clean` build also surfaces compile errors that a stale cache would hide
 > (e.g. a call to a method that doesn't exist in the installed core), so it's a
@@ -210,7 +210,7 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > suffix (as in the blocks below) for a development build — `isDevBuild()`
 > keys off it to enable serial diagnostics and dev-only features. If you
 > compile without it (e.g. from the Arduino IDE), `kVersion` falls back to a
-> hardcoded literal in `cyd-dashboard.ino` that can drift out of date - prefer
+> hardcoded literal in `cyd-horizon.ino` that can drift out of date - prefer
 > the `arduino-cli` command above.
 >
 > **Build number:** `BUILD_NUM` is optional and can be passed the same way
@@ -233,8 +233,8 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > ```bash
 > arduino-cli compile --clean --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
 >   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.[\".\"]' .release-please-manifest.json)-dev -DBUILD_NUM=1 -DENABLE_LOCAL_OTA=1 -DENABLE_SERIAL_PROVISION=1" \
->   --output-dir build/release cyd-dashboard
-> arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 --input-dir build/release cyd-dashboard
+>   --output-dir build/release cyd-horizon
+> arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 --input-dir build/release cyd-horizon
 > ```
 >
 > **Iteration: after the first USB flash, use triggered local OTA for every
@@ -249,7 +249,7 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > line (so WiFi is up before triggering — avoiding the `code=-1` race noted
 > below), sends `OTA_URL`, and streams `[OTA]` progress until reboot:
 > ```bash
-> cyd-dashboard/.venv/bin/python scripts/ota_push.py   # --board e32r40t or --port /dev/cu.usbserial-XXXX if ambiguous
+> cyd-horizon/.venv/bin/python scripts/ota_push.py   # --board e32r40t or --port /dev/cu.usbserial-XXXX if ambiguous
 > ```
 >
 > Manual alternative: serve the `.bin` over HTTP from a machine the board can
@@ -259,7 +259,7 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > python3 -m http.server 8080 --directory build/release
 > ```
 > ```text
-> OTA_URL=http://<host-ip>:8080/cyd-dashboard.ino.bin
+> OTA_URL=http://<host-ip>:8080/cyd-horizon.ino.bin
 > ```
 > Alternatively, a server that maps `GET /firmware?file=<name>` to `build/release/<name>`
 > on port 8080 supports the `OTA_IP`/`OTA_FILE`/`OTA_GO` form (see
@@ -267,7 +267,7 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > rarely changes:
 > ```text
 > OTA_IP=192.168.4.137
-> OTA_FILE=cyd-dashboard.ino.bin
+> OTA_FILE=cyd-horizon.ino.bin
 > OTA_GO
 > ```
 >
@@ -275,7 +275,7 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > label the OTA progress screen shows after "Updating to v" — send it before
 > the trigger command. `ota_push.py` does this automatically: it extracts the
 > `CYD_TAG=...` string the firmware embeds in the binary (`kBuildTag` in
-> `cyd-dashboard.ino`, built from the same `APP_VERSION`/`BUILD_NUM` flags)
+> `cyd-horizon.ino`, built from the same `APP_VERSION`/`BUILD_NUM` flags)
 > and sends it ahead of `OTA_URL`. Without it the screen falls back to "dev".
 >
 > **Avoid a reset before sending the command.** Many serial terminals and
@@ -299,7 +299,7 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > actual USB-serial port the board is on; on macOS this is typically
 > `/dev/cu.usbserial-XXXX`, on Linux `/dev/ttyUSB0` or `/dev/ttyACM0`:
 > ```bash
-> cyd-dashboard/.venv/bin/python scripts/serial_monitor.py   # --reset for a clean boot log
+> cyd-horizon/.venv/bin/python scripts/serial_monitor.py   # --reset for a clean boot log
 > # or:
 > arduino-cli monitor -p /dev/cu.usbserial-XXXX --config baudrate=115200
 > ```
@@ -318,7 +318,7 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > next OTA trigger.
 
 > **Important:** the display pinout is configured in the sketch's own
-> `cyd-dashboard/tft_setup.h`. TFT_eSPI auto-detects a `tft_setup.h` in the
+> `cyd-horizon/tft_setup.h`. TFT_eSPI auto-detects a `tft_setup.h` in the
 > sketch folder and uses it instead of its `User_Setup_Select.h`, so **no edits
 > to the installed TFT_eSPI library are needed** and the build is identical
 > locally and in CI. It sets the correct CYD wiring (TFT on HSPI, touch on VSPI,
@@ -377,7 +377,7 @@ GitHub Actions builds and releases the firmware on standard hosted runners
      `autorelease: published` so the next release cycle is not blocked.
 
 The version shown on the About screen comes from the `APP_VERSION` compile-time
-macro (`kVersion` in `cyd-dashboard.ino`); it falls back to a hardcoded
+macro (`kVersion` in `cyd-horizon.ino`); it falls back to a hardcoded
 `0.0.0-dev` literal when the flag isn't set, so local builds work without it —
 pass the flag as shown above so About shows the real version. Any `-dev`
 version is treated as a **dev build** that never auto-updates (see below). OTA
@@ -395,12 +395,12 @@ version is treated as a **dev build** that never auto-updates (see below). OTA
 ## OTA updates (firmware delivery)
 
 The device updates itself over WiFi from this repository's public GitHub
-releases. All of this lives in `cyd-dashboard/ota.ino`.
+releases. All of this lives in `cyd-horizon/ota.ino`.
 
 ### How it works
 
 1. **Check.** `fetchLatestRelease()` GETs
-   `https://api.github.com/repos/improving-minnesota/cyd-dashboard/releases/latest`
+   `https://api.github.com/repos/improving-minnesota/cyd-horizon/releases/latest`
    (no auth — the repo is public), parses the `tag_name` (e.g. `v1.0.1`), and
    finds the board's `OTA_ASSET` asset URL.
 2. **Compare.** `compareVersions()` / `isNewerThanRunning()` strip the leading
@@ -409,7 +409,7 @@ releases. All of this lives in `cyd-dashboard/ota.ino`.
    to the inactive OTA slot via `Update.write()` (`U_FLASH`), shows a progress
    screen, then `Update.end()` + `ESP.restart()`. On success it never returns.
    It runs on a **dedicated 12 KB-stack task** (`otaTaskEntry`, `g_otaTask` in
-   `cyd-dashboard.ino`), created once at boot and left idle until an OTA is
+   `cyd-horizon.ino`), created once at boot and left idle until an OTA is
    requested, because the mbedtls TLS handshake overflows the ~8 KB default
    `loopTask`. The OTA task owns the display, so the main loop yields while it
    runs. It is **not** subscribed to the task watchdog, so there is no
@@ -505,7 +505,7 @@ A mismatch aborts the update without touching the running slot.
 ### HTTP body streaming and JSON parsing
 
 Large OpenSky responses (`/states/all`, `/tracks/all`) are no longer fully
-buffered into a single `JsonDocument`. `cyd-dashboard/http_body.h` provides a
+buffered into a single `JsonDocument`. `cyd-horizon/http_body.h` provides a
 framing-aware `HttpBodyStream` wrapper that:
 
 - Buffers reads in 512-byte chunks (ArduinoJson otherwise asks one byte at a
@@ -515,7 +515,7 @@ time, each triggering a full `mbedtls_ssl_read()` round trip).
 being treated as an empty response.
 
 `HttpBodyStream` is paired with `seekArray()` and `nextElement()` helpers so
-`fetchFlights()` in `cyd-dashboard.ino` and `fetchTrack()` in
+`fetchFlights()` in `cyd-horizon.ino` and `fetchTrack()` in
 `flight_details.ino` parse the `states` and `path` arrays one element at a time.
 Peak parse heap for a 50 KB response drops from ~48 KB to a few kilobytes (one
 state row or one track point at a time).
@@ -526,7 +526,7 @@ from a legitimate `{"states":null}` response for a small area. The location
 shown in Settings and the location used for a request should therefore be
 compared with the `[boot] NVS location` and `[net] flights query` lines.
 
-`BoundedAllocator` in `cyd-dashboard.ino` caps the working set for each parse
+`BoundedAllocator` in `cyd-horizon.ino` caps the working set for each parse
 using `malloc_usable_size()`-based accounting, so the cap is a real working-set
 limit rather than a churn counter. Weather, Govee, token, IP location,
 geocoding, route, and release metadata parsing also uses bounded allocators and
@@ -605,7 +605,7 @@ Behavior notes:
 
 ## Partition table
 
-`cyd-dashboard/partitions.csv` is a custom partition table (the Arduino
+`cyd-horizon/partitions.csv` is a custom partition table (the Arduino
 build system picks up a `partitions.csv` in the sketch folder automatically).
 It keeps two OTA-capable app slots, trims the app slots from the stock
 "default" size, and carves out a dedicated LittleFS **logos** partition so
@@ -681,7 +681,7 @@ shown above.
 > app image** to the active app slot:
 > ```bash
 > esptool.py --chip esp32 --port /dev/cu.usbserial-XXXX --baud 460800 \
->   write_flash 0x10000 <build>/cyd-dashboard.ino.bin
+>   write_flash 0x10000 <build>/cyd-horizon.ino.bin
 > ```
 > (or use `arduino-cli upload` / OTA, both of which write only the app).
 > Reserve a full `0x0` merged flash for a deliberate clean re-provision /
@@ -799,7 +799,7 @@ backoff escalating to next-UTC-midnight after 5 strikes.
 ## Provisioning credentials
 
 WiFi/OpenSky/Govee credentials are **not compiled into the firmware**. Put them
-in the git-ignored `cyd-dashboard/.env` file (`WIFI_SSID`, `WIFI_PASSWORD`,
+in the git-ignored `cyd-horizon/.env` file (`WIFI_SSID`, `WIFI_PASSWORD`,
 `OPENSKY_CLIENT_ID`, `OPENSKY_CLIENT_SECRET`, `GOVEE_KEY`), then stream them
 into the device's NVS over USB serial. Network addressing can also be
 provisioned this way (`WIFI_MODE=static`, `WIFI_IP`, `WIFI_SUBNET`,
@@ -807,10 +807,10 @@ provisioned this way (`WIFI_MODE=static`, `WIFI_IP`, `WIFI_SUBNET`,
 Network → IP Setup** on the device:
 
 ```bash
-cyd-dashboard/.venv/bin/python scripts/provision_config.py --port /dev/cu.usbserial-XXXX
+cyd-horizon/.venv/bin/python scripts/provision_config.py --port /dev/cu.usbserial-XXXX
 ```
 
-First-time setup: `python3 -m venv cyd-dashboard/.venv && cyd-dashboard/.venv/bin/pip install pyserial`
+First-time setup: `python3 -m venv cyd-horizon/.venv && cyd-horizon/.venv/bin/pip install pyserial`
 
 ### How provisioning works
 
@@ -821,7 +821,7 @@ script — no firmware re-flash needed.
 
 > **Testing-only code, disabled by default:** the provisioning listener is a
 > temporary aid and is compiled **out** by default (`ENABLE_SERIAL_PROVISION`
-> is `0` in `cyd-dashboard.ino`), so the serial `.env` flow above only works
+> is `0` in `cyd-horizon.ino`), so the serial `.env` flow above only works
 > after you set it to `1` and re-flash. Credentials persist in NVS, so once
 > provisioned the board works without the listener. To ship production code,
 > leave `ENABLE_SERIAL_PROVISION` at `0` (or delete the guarded block in
@@ -868,7 +868,7 @@ never embeds logos.
 
 ### Adding a new airline logo
 
-1. **Add a PNG icon** — drop the logo into `cyd-dashboard/airline-logos/`,
+1. **Add a PNG icon** — drop the logo into `cyd-horizon/airline-logos/`,
    e.g. `FedEx Icon.png`.
 2. **Map it in `scripts/convert_logos.py`** — add an entry to the `AIRLINES` list:
    `("FedEx", "FDX", "FedEx Express")`. The first item is a keyword matched
@@ -886,7 +886,7 @@ never embeds logos.
    # writes <ICAO>.bin files, packs a LittleFS image, and flashes it to the
    # logos partition of every board detect_boards.py finds (use --port to
    # target just one; --no-flash only builds the image).
-   cyd-dashboard/.venv/bin/python scripts/provision_logos.py
+   cyd-horizon/.venv/bin/python scripts/provision_logos.py
    ```
    The script fails loudly if any `AIRLINES` keyword matches zero or more than
    one source file. The logos partition layout is identical on every board
@@ -897,7 +897,7 @@ never embeds logos.
 ## Settings & status indicators
 
 Settings are stored in NVS under the `"flight"` namespace (see `setup()` in
-`cyd-dashboard.ino` for the load, and the Reset confirmation in
+`cyd-horizon.ino` for the load, and the Reset confirmation in
 `handleTouch` for the wipe). Notable keys:
 
 | Key | Type | Default | Meaning |
@@ -913,7 +913,7 @@ Settings are stored in NVS under the `"flight"` namespace (see `setup()` in
 | `ntfvol` | int | `100` | Notify Volume (General → Notify Volume): one of 10 levels — 1/2/3/4/5/15/25/50/75/100 percent (`kNtfVolLevels`; the 1% floor keeps notifications audible). The UI shows the level number (1–10); NVS stores the percent. Non-level values stored by older builds snap to the nearest level on load. Scales the LEDC duty cycle for every speaker sound — alarm/callsign patterns, the volume-test beep, and the boot chime (`playBootChime()` at the end of `setup()`). `tone()` can't be used for volume: it fixes duty at ~50%, so `toneWrite()` in `alarms.ino` drives `ledcWrite()` directly. |
 | `ipdhcp` | bool | `true` | Network addressing mode (Network → IP Setup). `true` = DHCP; `false` = static using the keys below. |
 | `ipaddr` / `ipmask` / `ipgw` / `ipdns` | string | `""` | Static IP, subnet mask, gateway, DNS. Applied via `WiFi.config()`; blank DNS falls back to the gateway, and an incomplete/invalid set falls back to DHCP. |
-| `hostname` | string | `"cyd-dashboard"` | STA hostname via `WiFi.setHostname()`; applies in both DHCP and static modes. |
+| `hostname` | string | `"cyd-horizon"` | STA hostname via `WiFi.setHostname()`; applies in both DHCP and static modes. |
 
 The onboard RGB LED blinks for every new overhead flight when **Blink for Flight**
 is on (`g_blinkForFlight`, persisted as `blinkf`). `fetchFlights()` recomputes
@@ -939,7 +939,7 @@ OpenSky/weather/pool temp
 data) or solid yellow when OpenSky is running anonymously. The blink and status
 handling is performed in `loop()` after the flight view is drawn.
 
-The onboard RGB LED pin mapping is set in `cyd-dashboard.ino`: **GPIO 22 is the red
+The onboard RGB LED pin mapping is set in `cyd-horizon.ino`: **GPIO 22 is the red
 channel** on the verified unit, not the value claimed in the `jczn_2432s028r` variant
 file. GPIO 4 is the panel reset, so do not change `CYD_LED_RED` to 4 on this hardware.
 
@@ -954,7 +954,7 @@ Reset" and "Settings" resets (the "Settings" reset only re-writes the four
 touch-calibration keys afterwards).
 
 The dashboard draws a colored screen border and tints the clock bar to flag
-state (`drawAuthBorder` / `drawStatusBorder` in `cyd-dashboard.ino`):
+state (`drawAuthBorder` / `drawStatusBorder` in `cyd-horizon.ino`):
 
 - **Red** (critical): no WiFi, invalid OpenSky credentials, the OpenSky
   **radar-polling** credits exhausted, or weather/pool data rate-limited or
@@ -1014,7 +1014,7 @@ differs from the standard anonymous/token quotas.
 
 The periodic flight poll is gated **only** by the Radar Polling bucket: while the
 `/states/*` credits are exhausted, the normal poll cadence backs off to a
-15-minute recovery check (`CREDIT_RECOVERY_MS` in `cyd-dashboard.ino`) so the
+15-minute recovery check (`CREDIT_RECOVERY_MS` in `cyd-horizon.ino`) so the
 device notices once the credits refill (OpenSky resets daily) without hammering
 the API. The Route Lookup and Flight Tracking buckets don't affect the poll
 cadence.
@@ -1130,8 +1130,8 @@ left-to-right order). The cover shows the firmware version, injected from
 ~1/16" narrower so it tucks inside the fold cleanly.
 
 ```bash
-# needs the `markdown` package once: cyd-dashboard/.venv/bin/python -m pip install markdown
-cyd-dashboard/.venv/bin/python docs/user-guide/render_userguide.py
+# needs the `markdown` package once: cyd-horizon/.venv/bin/python -m pip install markdown
+cyd-horizon/.venv/bin/python docs/user-guide/render_userguide.py
 ```
 
 `render_userguide.py` first runs `render_dash_mock.py` (same folder), which
@@ -1153,7 +1153,7 @@ draws four simulated screens as SVG → PNG via CairoSVG, all populated with
   footer) showing a second alarm so all three footer buttons render.
 
 Data sources: OpenSky `/states/all` + `/tracks/all` and the adsb.lol callsign
-route using `cyd-dashboard/.env` creds, Open-Meteo weather, the Govee device
+route using `cyd-horizon/.env` creds, Open-Meteo weather, the Govee device
 state API, and a fixed header date/time (`MOCK_DT`) so the screenshots stay
 stable between renders. Fetched data is cached in `mock_data.json` (same
 folder) — renders reuse it, so the PDF doesn't hit the APIs each time; pass
@@ -1186,7 +1186,7 @@ Print at Actual Size / 100% and cut along the dashed borders. Regenerate
 all PNGs and label PDFs with:
 
 ```bash
-cyd-dashboard/.venv/bin/python docs/packaging/build_packaging.py
+cyd-horizon/.venv/bin/python docs/packaging/build_packaging.py
 ```
 
 The guide's front-cover logo is a vertically-trimmed derivative of the

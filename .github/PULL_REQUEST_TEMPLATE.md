@@ -15,5 +15,5 @@ The subject should start with a letter (upper or lower case).
 
 ## Test plan
 
-- [ ] Compiled with `arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom cyd-dashboard`
+- [ ] Compiled with `arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom cyd-horizon`
 - [ ] Verified on device (upload result, screenshots, etc.)

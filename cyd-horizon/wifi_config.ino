@@ -1,6 +1,6 @@
 // wifi_config.ino - on-device network provisioning via the touchscreen.
 //
-// Part of the cyd-dashboard sketch. Provides these sub-screens:
+// Part of the cyd-horizon sketch. Provides these sub-screens:
 //   0 = network list (scan results) + "enter manually" + "IP Setup"
 //   1 = keyboard to type an SSID
 //   2 = keyboard to type a password, then save & connect
@@ -24,7 +24,7 @@ int  g_netScroll = 0;
 bool g_scanning = false;   // an async WiFi scan is in flight
 String g_ssid = "";
 String g_pass = "";
-// g_latLonStr is defined in cyd-dashboard.ino (concatenation order)
+// g_latLonStr is defined in cyd-horizon.ino (concatenation order)
 
 // Switch to the list screen and kick off an async scan - the list shows
 // "Scanning..." until pollWifiScan() harvests the results.
@@ -246,7 +246,7 @@ void loadNetCfg() {
   g_staticMask = prefs.getString("ipmask", "");
   g_staticGw   = prefs.getString("ipgw", "");
   g_staticDns  = prefs.getString("ipdns", "");
-  g_hostname   = prefs.getString("hostname", "cyd-dashboard");
+  g_hostname   = prefs.getString("hostname", "cyd-horizon");
 }
 
 void saveNetCfg() {
@@ -751,7 +751,7 @@ void commitAlarmTime() {
 // compiling them into firmware or touching the filesystem. Host side:
 // scripts/provision_config.py. "@END" exits the window early.
 // Production strips this via ENABLE_SERIAL_PROVISION=0 (defined in
-// cyd-dashboard.ino so it's visible first in Arduino's alphabetical
+// cyd-horizon.ino so it's visible first in Arduino's alphabetical
 // concatenation); credentials stay in NVS, so the board keeps working.
 #if ENABLE_SERIAL_PROVISION
 #define PROVISION_WINDOW_MS 4000UL
@@ -869,7 +869,7 @@ done:
 // Supports:
 //   OTA_URL=http://server:port/firmware.bin   (full URL, legacy)
 //   OTA_IP=192.168.x.x                        (server IP)
-//   OTA_FILE=cyd-dashboard.ino.bin            (firmware filename)
+//   OTA_FILE=cyd-horizon.ino.bin            (firmware filename)
 //   OTA_VER=1.18.0-dev, Build 25              (label shown on the OTA screen)
 //   OTA_GO                                      (trigger with OTA_IP + OTA_FILE)
 void handleSerialCommands() {

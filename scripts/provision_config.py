@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Provision credentials to the cyd-dashboard directly into NVS over serial.
+"""Provision credentials to the cyd-horizon directly into NVS over serial.
 
-Reads the git-ignored `cyd-dashboard/.env` file and streams the credential
+Reads the git-ignored `cyd-horizon/.env` file and streams the credential
 keys to the device's USB serial port. The firmware's `serialProvision()` (in
 wifi_config.ino) listens for a few seconds at boot and writes each KEY=VALUE line
 straight into NVS via Preferences.
@@ -13,7 +13,7 @@ provisioning window (`PROV: listen`), then sends the keys and confirms the
 firmware.
 
 Usage:
-    cyd-dashboard/.venv/bin/python scripts/provision_config.py [--port /dev/cu.usbserial-XXXX]
+    cyd-horizon/.venv/bin/python scripts/provision_config.py [--port /dev/cu.usbserial-XXXX]
 """
 
 import argparse
@@ -94,7 +94,7 @@ def main():
     args = ap.parse_args()
 
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            "..", "cyd-dashboard", ".env")
+                            "..", "cyd-horizon", ".env")
     if not os.path.exists(env_path):
         sys.exit(f".env not found at {env_path}")
     creds = load_env(env_path)

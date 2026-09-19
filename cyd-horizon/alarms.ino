@@ -55,7 +55,7 @@ extern int g_wifiSub;             // defined in wifi_config.ino (concatenated la
 // and speaker from the same table keeps light and sound in sync and makes
 // every preset a readable line of (freq, ms, rgb) notes. rgb bits: 1=red,
 // 2=green, 4=blue (7=white); the LED channels are active-low.
-// struct NtfStep is declared in cyd-dashboard.ino (with ntfStepAt's explicit
+// struct NtfStep is declared in cyd-horizon.ino (with ntfStepAt's explicit
 // prototype) so the Arduino-generated prototypes can reference it.
 
 static const NtfStep kPatBlink[] = {   // white flash + beep ~1Hz

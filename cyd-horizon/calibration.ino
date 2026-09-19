@@ -5,12 +5,12 @@
 // crosshairs and asks the user to tap each one, then computes and stores the
 // linear raw->display transform in NVS.
 //
-// The transform is used by touchReadXY() (cyd-dashboard.ino) via the globals
+// The transform is used by touchReadXY() (cyd-horizon.ino) via the globals
 // here. Defaults are the factory-measured values for this unit; calibration
 // overrides them once run.
 
 // Calibration parameters (g_calScaleX/OffX/Y, g_calState, CalState enum) are
-// defined in cyd-dashboard.ino so they are visible to the touch code there.
+// defined in cyd-horizon.ino so they are visible to the touch code there.
 
 int   g_calIdx = 0;
 bool  g_calCollect = false;   // true while waiting for the user to tap a target
