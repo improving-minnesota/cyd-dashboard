@@ -12,7 +12,7 @@ boards — ESP32 boards with a built-in color touchscreen, like the
 **2.8" 2432S028R** and the **4" E32R40T**. A self-contained device: once
 it's set up it runs on your WiFi — no computer needed.
 
-> **Giving a device to a non-techie friend?** Grab the printable two-page
+> **Giving a device to a non-techie friend?** Grab the printable
 > [User Guide (PDF)](docs/user-guide/DEVELOPER-USERGUIDE.pdf) — written for
 > non-technical users.
 
