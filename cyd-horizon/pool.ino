@@ -38,9 +38,24 @@ static void noteGoveeRateLimit(HTTPClient& http) {
   if (isDevBuild()) Serial.printf("[net] govee rate limited until epoch %lu\n", until);
 }
 
-// True while inside a stored Govee rate-limit window.
+// True while inside a stored Govee rate-limit window. Arms g_poolRetryAt for
+// when the window lifts so a suppressed fetch retries at the deadline instead
+// of waiting out the 5-min cadence - longer than a touch-wake stays awake.
+// With an unsynced clock any stored epoch looks active, so it just re-asks in
+// 60s; SNTP landing turns the deadline into a real one.
 bool goveeRateLimited() {
-  return g_goveeRateReset != 0 && (unsigned long)time(nullptr) < g_goveeRateReset;
+  if (!g_goveeRateReset || (unsigned long)time(nullptr) >= g_goveeRateReset) return false;
+  if (!g_poolRetryAt) {
+    unsigned long nowSec = (unsigned long)time(nullptr);
+    g_poolRetryAt = millis() + 1000UL
+        + (nowSec >= 1600000000UL ? min(g_goveeRateReset - nowSec, 172800UL) * 1000UL
+                                  : 60000UL);
+    if (isDevBuild()) {
+      Serial.printf("[net] govee suppressed until epoch %lu, retry armed\n",
+                    g_goveeRateReset);
+    }
+  }
+  return true;
 }
 
 // A successful response lifts the deadline (persisted too, so the next
@@ -48,6 +63,7 @@ bool goveeRateLimited() {
 static void clearGoveeRateLimit() {
   if (!g_goveeRateReset) return;
   g_goveeRateReset = 0;
+  g_poolRetryAt = 0;   // window lifted early -> no pending retry needed
   prefs.begin("flight", false); prefs.putULong("goveerl", 0); prefs.end();
 }
 
