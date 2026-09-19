@@ -520,8 +520,10 @@ unsigned long g_goveeRateReset = 0;
 // Pool temp history: tiered storage so Month/Year graphs have real range without
 // unbounded memory/flash use.
 //   - raw (5-min samples): covers Day/Week views, ~8.7 days retained
-//   - hourly rollups (avg per hour): covers Month view, ~33 days retained
-//   - daily rollups (avg per day): covers Year view, >1 year retained
+//   - hourly rollups (avg/lo/hi per hour): covers Month view, ~33 days retained
+//   - daily rollups (avg/lo/hi per day): covers Year view, >1 year retained
+// The rolled-up tiers keep each bucket's low/high alongside the average so the
+// Month/Year graphs can scale to the true extremes instead of min/max-of-avgs.
 #define MAX_POOL_LOG 2048
 float g_poolLogTemp[MAX_POOL_LOG];
 unsigned long g_poolLogTime[MAX_POOL_LOG];
@@ -530,20 +532,28 @@ int g_poolLogCount = 0;
 
 #define MAX_POOL_HOUR 800
 float g_poolHourTemp[MAX_POOL_HOUR];
+float g_poolHourMin[MAX_POOL_HOUR];
+float g_poolHourMax[MAX_POOL_HOUR];
 unsigned long g_poolHourTime[MAX_POOL_HOUR];
 int g_poolHourNext = 0;
 int g_poolHourCount = 0;
 long g_curHourBucket = -1;   // epoch/3600 of the in-progress hour
 float g_curHourSum = 0;
+float g_curHourMin = 0;
+float g_curHourMax = 0;
 int   g_curHourN = 0;
 
 #define MAX_POOL_DAY 400
 float g_poolDayTemp[MAX_POOL_DAY];
+float g_poolDayMin[MAX_POOL_DAY];
+float g_poolDayMax[MAX_POOL_DAY];
 unsigned long g_poolDayTime[MAX_POOL_DAY];
 int g_poolDayNext = 0;
 int g_poolDayCount = 0;
 long g_curDayBucket = -1;    // epoch/86400 of the in-progress day
 float g_curDaySum = 0;
+float g_curDayMin = 0;
+float g_curDayMax = 0;
 int   g_curDayN = 0;
 
 // Pool graph screen state
@@ -555,8 +565,8 @@ int g_poolTF = TF_WEEK;
 // half the pool's 5-min rate - so the same tiers need roughly half the raw
 // samples for the same retained time range. Always-on (no enable toggle).
 //   - raw (10-min samples): covers Day/Week views, ~8.3 days retained
-//   - hourly rollups (avg per hour): covers Month view, ~30 days retained
-//   - daily rollups (avg per day): covers Year view, ~1 year retained
+//   - hourly rollups (avg/lo/hi per hour): covers Month view, ~30 days retained
+//   - daily rollups (avg/lo/hi per day): covers Year view, ~1 year retained
 #define MAX_WX_LOG 1200
 float g_wxLogTemp[MAX_WX_LOG];
 unsigned long g_wxLogTime[MAX_WX_LOG];
@@ -565,20 +575,28 @@ int g_wxLogCount = 0;
 
 #define MAX_WX_HOUR 720
 float g_wxHourTemp[MAX_WX_HOUR];
+float g_wxHourMin[MAX_WX_HOUR];
+float g_wxHourMax[MAX_WX_HOUR];
 unsigned long g_wxHourTime[MAX_WX_HOUR];
 int g_wxHourNext = 0;
 int g_wxHourCount = 0;
 long g_wxHourBucket = -1;   // epoch/3600 of the in-progress hour
 float g_wxHourSum = 0;
+float g_wxCurHourMin = 0;   // "Cur" prefix: g_wxHourMin/Max are the ring arrays
+float g_wxCurHourMax = 0;
 int   g_wxHourN = 0;
 
 #define MAX_WX_DAY 365
 float g_wxDayTemp[MAX_WX_DAY];
+float g_wxDayMin[MAX_WX_DAY];
+float g_wxDayMax[MAX_WX_DAY];
 unsigned long g_wxDayTime[MAX_WX_DAY];
 int g_wxDayNext = 0;
 int g_wxDayCount = 0;
 long g_wxDayBucket = -1;    // epoch/86400 of the in-progress day
 float g_wxDaySum = 0;
+float g_wxCurDayMin = 0;
+float g_wxCurDayMax = 0;
 int   g_wxDayN = 0;
 
 // Weather graph screen state

@@ -309,12 +309,24 @@ unsigned long poolWindowSec() {
 
 // Day/Week plot from the raw (5-min) tier; Month from hourly rollups; Year
 // from daily rollups. This keeps each view populated well beyond what a
-// single fixed-size raw buffer could hold.
-void poolSeriesForTF(unsigned long** times, float** temps, int* count) {
+// single fixed-size raw buffer could hold. The rolled-up tiers also return
+// their per-bucket low/high arrays (mins/maxs); the raw tier has none
+// (nullptr) since every raw sample is already a true reading.
+void poolSeriesForTF(unsigned long** times, float** temps,
+                     float** mins, float** maxs, int* count) {
   switch (g_poolTF) {
-    case TF_MONTH: *times = g_poolHourTime; *temps = g_poolHourTemp; *count = g_poolHourCount; break;
-    case TF_YEAR:  *times = g_poolDayTime;  *temps = g_poolDayTemp;  *count = g_poolDayCount;  break;
-    default:       *times = g_poolLogTime;  *temps = g_poolLogTemp;  *count = g_poolLogCount;  break;
+    case TF_MONTH:
+      *times = g_poolHourTime; *temps = g_poolHourTemp;
+      *mins = g_poolHourMin; *maxs = g_poolHourMax;
+      *count = g_poolHourCount; break;
+    case TF_YEAR:
+      *times = g_poolDayTime; *temps = g_poolDayTemp;
+      *mins = g_poolDayMin; *maxs = g_poolDayMax;
+      *count = g_poolDayCount; break;
+    default:
+      *times = g_poolLogTime; *temps = g_poolLogTemp;
+      *mins = nullptr; *maxs = nullptr;
+      *count = g_poolLogCount; break;
   }
 }
 
@@ -326,11 +338,16 @@ void poolSeriesForTF(unsigned long** times, float** temps, int* count) {
 // toDisp converts stored temps to the display unit for labels (tempDisp for
 // weather, poolDisp for pool). The plotted curve is scale-invariant, so the
 // data points are plotted in stored units and only labels are converted.
-bool plotSeries(unsigned long* times, float* temps, int count,
+// mins/maxs (rolled-up tiers only) carry each bucket's true low/high: the
+// y-axis scale and the Lo/Hi labels then reflect the real extremes (e.g. the
+// annual high), while the plotted line stays the per-bucket average.
+bool plotSeries(unsigned long* times, float* temps, float* mins, float* maxs,
+                int count,
                 unsigned long t0, unsigned long nowSec, unsigned long win,
                 int gx, int gy, int gw, int gh,
                 float& dataMin, float& dataMax,
                 float (*toDisp)(float)) {
+  bool hasRange = (mins != nullptr && maxs != nullptr);
   float vmin = 1e9f, vmax = -1e9f;
   float sum = 0.0f;
   int cnt = 0;
@@ -338,8 +355,10 @@ bool plotSeries(unsigned long* times, float* temps, int count,
     unsigned long t = times[i];
     if (t < t0 || t > nowSec) continue;
     float v = temps[i];
-    if (v < vmin) vmin = v;
-    if (v > vmax) vmax = v;
+    float lo = hasRange ? mins[i] : v;
+    float hi = hasRange ? maxs[i] : v;
+    if (lo < vmin) vmin = lo;
+    if (hi > vmax) vmax = hi;
     sum += v;
     cnt++;
   }
@@ -392,11 +411,12 @@ bool plotSeries(unsigned long* times, float* temps, int count,
 }
 
 // Pool temp series wrapper. Weather uses plotWeatherSeries below.
-bool plotPoolSeries(unsigned long* times, float* temps, int count,
+bool plotPoolSeries(unsigned long* times, float* temps, float* mins, float* maxs,
+                    int count,
                     unsigned long t0, unsigned long nowSec, unsigned long win,
                     int gx, int gy, int gw, int gh,
                     float& dataMin, float& dataMax) {
-  return plotSeries(times, temps, count, t0, nowSec, win, gx, gy, gw, gh,
+  return plotSeries(times, temps, mins, maxs, count, t0, nowSec, win, gx, gy, gw, gh,
                     dataMin, dataMax, poolDisp);
 }
 
@@ -448,10 +468,10 @@ void drawPoolGraph() {
   unsigned long win = poolWindowSec();
   unsigned long t0 = (nowSec > win) ? (nowSec - win) : 0;
 
-  unsigned long* times; float* temps; int count;
-  poolSeriesForTF(&times, &temps, &count);
+  unsigned long* times; float* temps; float* mins; float* maxs; int count;
+  poolSeriesForTF(&times, &temps, &mins, &maxs, &count);
   float lo, hi;
-  bool plotted = plotPoolSeries(times, temps, count, t0, nowSec, win, gx, gy, gw, gh, lo, hi);
+  bool plotted = plotPoolSeries(times, temps, mins, maxs, count, t0, nowSec, win, gx, gy, gw, gh, lo, hi);
 
   if (!plotted) {
     tft.setTextColor(btnFg(gbg), gbg);

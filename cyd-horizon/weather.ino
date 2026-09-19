@@ -365,21 +365,33 @@ unsigned long wxWindowSec() {
 }
 
 // Day/Week plot from the raw (10-min) tier; Month from hourly rollups; Year
-// from daily rollups.
-void wxSeriesForTF(unsigned long** times, float** temps, int* count) {
+// from daily rollups. Rolled-up tiers also return their per-bucket low/high
+// arrays (see poolSeriesForTF).
+void wxSeriesForTF(unsigned long** times, float** temps,
+                   float** mins, float** maxs, int* count) {
   switch (g_wxTF) {
-    case WX_MONTH: *times = g_wxHourTime; *temps = g_wxHourTemp; *count = g_wxHourCount; break;
-    case WX_YEAR:  *times = g_wxDayTime;  *temps = g_wxDayTemp;  *count = g_wxDayCount;  break;
-    default:       *times = g_wxLogTime;  *temps = g_wxLogTemp;  *count = g_wxLogCount;  break;
+    case WX_MONTH:
+      *times = g_wxHourTime; *temps = g_wxHourTemp;
+      *mins = g_wxHourMin; *maxs = g_wxHourMax;
+      *count = g_wxHourCount; break;
+    case WX_YEAR:
+      *times = g_wxDayTime; *temps = g_wxDayTemp;
+      *mins = g_wxDayMin; *maxs = g_wxDayMax;
+      *count = g_wxDayCount; break;
+    default:
+      *times = g_wxLogTime; *temps = g_wxLogTemp;
+      *mins = nullptr; *maxs = nullptr;
+      *count = g_wxLogCount; break;
   }
 }
 
 // Weather series wrapper; the generic plotter is in pool.ino.
-bool plotWeatherSeries(unsigned long* times, float* temps, int count,
+bool plotWeatherSeries(unsigned long* times, float* temps, float* mins, float* maxs,
+                       int count,
                        unsigned long t0, unsigned long nowSec, unsigned long win,
                        int gx, int gy, int gw, int gh,
                        float& dataMin, float& dataMax) {
-  return plotSeries(times, temps, count, t0, nowSec, win, gx, gy, gw, gh,
+  return plotSeries(times, temps, mins, maxs, count, t0, nowSec, win, gx, gy, gw, gh,
                     dataMin, dataMax, tempDisp);
 }
 
@@ -430,10 +442,10 @@ void drawWxGraph() {
   unsigned long win = wxWindowSec();
   unsigned long t0 = (nowSec > win) ? (nowSec - win) : 0;
 
-  unsigned long* times; float* temps; int count;
-  wxSeriesForTF(&times, &temps, &count);
+  unsigned long* times; float* temps; float* mins; float* maxs; int count;
+  wxSeriesForTF(&times, &temps, &mins, &maxs, &count);
   float lo, hi;
-  bool plotted = plotWeatherSeries(times, temps, count, t0, nowSec, win, gx, gy, gw, gh, lo, hi);
+  bool plotted = plotWeatherSeries(times, temps, mins, maxs, count, t0, nowSec, win, gx, gy, gw, gh, lo, hi);
 
   if (!plotted) {
     tft.setTextColor(btnFg(gbg), gbg);
