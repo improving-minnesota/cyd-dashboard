@@ -82,7 +82,7 @@ custom partition table (see
 
 ```bash
 arduino-cli compile --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
-  --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.[\".\"]' .release-please-manifest.json)" cyd-horizon
+  --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.["."]' .release-please-manifest.json)" cyd-horizon
 ```
 
 ### Board variants
@@ -197,7 +197,7 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > `--clean` to force a full rebuild:
 > ```bash
 > arduino-cli compile --clean --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
->   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.[\".\"]' .release-please-manifest.json)-dev" cyd-horizon
+>   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.["."]' .release-please-manifest.json)-dev" cyd-horizon
 > ```
 > A `--clean` build also surfaces compile errors that a stale cache would hide
 > (e.g. a call to a method that doesn't exist in the installed core), so it's a
@@ -232,7 +232,7 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > A typical dev build and first flash (`build/release` is git-ignored):
 > ```bash
 > arduino-cli compile --clean --fqbn esp32:esp32:jczn_2432s028r:PartitionScheme=custom \
->   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.[\".\"]' .release-please-manifest.json)-dev -DBUILD_NUM=1 -DENABLE_LOCAL_OTA=1 -DENABLE_SERIAL_PROVISION=1" \
+>   --build-property "compiler.cpp.extra_flags=-DAPP_VERSION=$(jq -r '.["."]' .release-please-manifest.json)-dev -DBUILD_NUM=1 -DENABLE_LOCAL_OTA=1 -DENABLE_SERIAL_PROVISION=1" \
 >   --output-dir build/release cyd-horizon
 > arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:PartitionScheme=custom --upload-property upload.speed=115200 --input-dir build/release cyd-horizon
 > ```
@@ -717,10 +717,10 @@ files and sampling rates.
 
 - `/pool.csv` — raw `epoch,temp` samples, logged roughly every 5 minutes. Feeds
   the Day & Week graphs. Compacts to keep the newest ~2500 lines (~8.7 days).
-- `/pool_hour.csv` — hourly averages. Feeds the Month graph. Compacts to keep
-  the newest ~900 lines (~37 days).
-- `/pool_day.csv` — daily averages. Feeds the Year graph. Compacts to keep the
-  newest ~800 lines (~2.2 years).
+- `/pool_hour.csv` — hourly `epoch,avg,lo,hi` rollups. Feeds the Month graph.
+  Compacts to keep the newest ~900 lines (~37 days).
+- `/pool_day.csv` — daily `epoch,avg,lo,hi` rollups. Feeds the Year graph.
+  Compacts to keep the newest ~800 lines (~2.2 years).
 - `/pool_rollup.bin` — the in-progress hour/day accumulators, saved right
   before each deep sleep and restored at boot (see below).
 
@@ -730,10 +730,10 @@ rate — so roughly half the raw samples for the same retained time range):
 - `/weather.csv` — raw `epoch,temp` samples, logged on each weather fetch
   (every ~10 min while awake). Feeds the Day & Week graphs. Compacts to keep
   the newest ~1200 lines (~8.3 days).
-- `/weather_hour.csv` — hourly averages. Feeds the Month graph. Compacts to
-  keep the newest ~900 lines (~37 days).
-- `/weather_day.csv` — daily averages. Feeds the Year graph. Compacts to keep
-  the newest ~800 lines (~2.2 years).
+- `/weather_hour.csv` — hourly `epoch,avg,lo,hi` rollups. Feeds the Month
+  graph. Compacts to keep the newest ~900 lines (~37 days).
+- `/weather_day.csv` — daily `epoch,avg,lo,hi` rollups. Feeds the Year graph.
+  Compacts to keep the newest ~800 lines (~2.2 years).
 - `/weather_rollup.bin` — the in-progress hour/day accumulators, saved before
   each deep sleep and restored at boot.
 
