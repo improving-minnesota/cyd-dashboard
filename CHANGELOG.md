@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.7.1](https://github.com/improving-minnesota/cyd-horizon/compare/v3.7.0...v3.7.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* jitter the boot data fetch and retry absent weather/pool data ([d5dde0c](https://github.com/improving-minnesota/cyd-horizon/commit/d5dde0c15552d8c00cbdc5ed86d63274cea7d483))
+* jitter the boot data fetch and retry absent weather/pool data ([bf65cc2](https://github.com/improving-minnesota/cyd-horizon/commit/bf65cc2fe658c9c302aa7eb013bc86f01a8106ea))
+
 ## [3.7.0](https://github.com/improving-minnesota/cyd-horizon/compare/v3.6.0...v3.7.0) (2026-09-19)
 
 
