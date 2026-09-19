@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.8.0](https://github.com/improving-minnesota/cyd-horizon/compare/v3.7.1...v3.8.0) (2026-09-19)
+
+
+### Features
+
+* include pending + finer-tier extremes in history graph ranges ([8954fc6](https://github.com/improving-minnesota/cyd-horizon/commit/8954fc6cf9649cf8b2ee204ae0cae4d68ae36ebb))
+* include pending + finer-tier extremes in history graph ranges ([23f11d5](https://github.com/improving-minnesota/cyd-horizon/commit/23f11d5e78b2b0828cdc8c6e8ef5a1234cd16fda))
+
 ## [3.7.1](https://github.com/improving-minnesota/cyd-horizon/compare/v3.7.0...v3.7.1) (2026-09-19)
 
 
