@@ -1,39 +1,19 @@
-// logos.ino - runtime airline-logo loading from a dedicated LittleFS partition.
-//
-// Logos are NOT compiled into the firmware. They live as <ICAO>.bin files in a
-// dedicated LittleFS partition (label "logos", see partitions.csv). The
-// firmware mounts it once at boot and reads logo bitmaps on demand through a
-// single reusable buffer, so:
-//   - OTA app slots never embed the brand bitmaps (firmware stays logo-less).
-//   - Logos can be updated / added / removed by rewriting files on the
-//     partition - no firmware rebuild, and OTA never touches that partition.
-//   - If the partition is missing or a logo file is absent, we simply draw no
-//     logo (same behavior as the old empty-fallback header).
-//
-// The CYD has no PSRAM, so every logo would land on the internal heap shared
-// by WiFi/TLS/JSON. The old 16-entry lazy cache parked up to ~110 KB of
-// mid-heap blocks and eroded the largest contiguous block until the mbedTLS
-// handshake could no longer allocate its ~32 KB buffers. This implementation
-// allocates one buffer once during logosInit(), before WiFi/TLS/JSON have
-// fragmented the heap, and reuses it for the one logo that is drawn at a time.
-//
-// .bin file layout (little-endian), produced by scripts/convert_logos.py --out-dir:
-//   "LGO1" (4) | w (u16) | h (u16) | transparent (u16) | reserved (2) | w*h*2
+// logos.ino - airline logos loaded at runtime from the dedicated "logos"
+// LittleFS partition (firmware stays logo-less; DEVELOPER.md "Airline logos").
+// One boot-time buffer is reused for the one logo drawn at a time - a lazy
+// cache fragmented the PSRAM-less heap enough to break mbedTLS.
+// .bin layout (LE, from convert_logos.py): "LGO1" | w u16 | h u16 | transparent u16 | reserved 2 | w*h*2
 
 #include <LittleFS.h>
 #include "esp_heap_caps.h"
 
 static const char LOGO_MAGIC[4] = {'L', 'G', 'O', '1'};
 
-// Logo size as produced by scripts/convert_logos.py (BOX_W x BOX_H). Pre-allocate one
-// buffer of this size up front instead of caching many decoded logos lazily,
-// which fragments the internal heap on the PSRAM-less CYD.
+// Logo size produced by convert_logos.py (BOX_W x BOX_H) - the buffer's size.
 #define LOGO_MAX_W 72
 #define LOGO_MAX_H 48
 
-// Prefer PSRAM for logo buffers (keeps them off the internal heap used by
-// WiFi/HTTP/JSON). Falls back to internal malloc when there is no PSRAM or the
-// PSRAM allocation fails.
+// Prefer PSRAM (keeps logos off the internal heap); fall back to malloc.
 static void* logoAlloc(size_t bytes) {
   void* p = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
   return p ? p : malloc(bytes);
@@ -91,9 +71,8 @@ bool logosInit() {
   return true;
 }
 
-// Look up a logo by callsign (3-letter ICAO prefix). Returns a pointer to a
-// reusable RuntimeLogo that stays valid until the next call. Callers should
-// draw immediately; logoRelease() is a no-op. Returns nullptr if unavailable.
+// Logo by callsign ICAO prefix; the reusable buffer stays valid until the next
+// call (draw immediately; logoRelease() is a no-op).
 const RuntimeLogo* findAirlineLogo(const char* callsign) {
   if (!s_logosOk || !s_logoBuf || !callsign || callsign[0] == 0) return nullptr;
 

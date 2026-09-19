@@ -12,7 +12,10 @@ What it does:
   2. Opens the serial console and pulses RTS to force a fresh boot, then
      waits for the "[net] ip=" line so the WiFi link is up before
      triggering - avoiding the code=-1 connect race described in
-     DEVELOPER.md ("Avoid a reset before sending the command").
+     DEVELOPER.md ("Avoid a reset before sending the command"). If the boot
+     log reports a release build ("[boot] version=" without -dev), the push
+     exits immediately - release firmware has no serial-OTA listener, so the
+     board needs one USB flash (scripts/flash.py) to get a dev build on.
   3. Sends OTA_VER=<version label> (extracted from the binary's embedded
      CYD_TAG= string) so the OTA screen shows the real version, then
      OTA_URL=http://<host-ip>:<http-port>/<bin>, and streams the
@@ -155,9 +158,8 @@ def run_ota(port, board, url_path, tag, http_port, results):
         log(label, "serial %s @ %d (resetting board; waiting for WiFi)"
             % (port, BAUD))
         ser = serial.Serial(port, BAUD, timeout=0.25)
-        # Force a fresh boot: the open does not reliably reset the board, and
-        # we need the "[net] ip=" line that only prints right after WiFi
-        # connects. DTR stays released so it boots normally (not download mode).
+        # Force a fresh boot for the "[net] ip=" line (only prints right after
+        # WiFi connects); DTR stays released so it boots normally.
         ser.dtr = False
         ser.rts = True
         time.sleep(0.1)
@@ -177,6 +179,15 @@ def run_ota(port, board, url_path, tag, http_port, results):
                     if not line:
                         continue
                     log(label, line)
+                    # A release build never prints "[net] ip=" and ignores OTA
+                    # commands - bail instead of the WiFi timeout. (Pre-trigger
+                    # only: post-`sent`, version= marks the new image's boot.)
+                    mv = re.search(r"\[boot\] version=(\S+)", line)
+                    if mv and not sent and "-dev" not in mv.group(1):
+                        results[port] = ("board runs release build %s - serial "
+                                         "OTA needs a dev build; flash once "
+                                         "with scripts/flash.py" % mv.group(1))
+                        return
                     m = re.search(r"\[net\] ip=(\S+)", line)
                     if m and not sent:
                         board_ip = m.group(1)
@@ -236,11 +247,19 @@ def push_all(args):
     jobs = []   # (port, board, url_path, tag)
     for p in ports:
         board = info.get(p, {}).get("board", "unknown")
-        print("  %s -> %s" % (p, board))
+        ver = info.get(p, {}).get("version")
+        print("  %s -> %s%s" % (p, board,
+                                (" v" + ver) if ver else ""))
         if args.board and board != args.board:
             continue
         if board not in KNOWN_BOARDS:
             print("  skipping %s (unknown board - can't pick a binary)" % p)
+            continue
+        # Release firmware has no serial-OTA listener - only dev builds accept
+        # OTA_URL. Boards too old to print version= fall through to the WiFi wait.
+        if ver and "-dev" not in ver:
+            print("  skipping %s (release build %s - flash once with "
+                  "scripts/flash.py)" % (p, ver))
             continue
         binpath = os.path.join(build_root, variant_subdir(board), args.file)
         if not os.path.isfile(binpath):

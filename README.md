@@ -8,9 +8,12 @@
      alt="cyd-horizon logo — slogan &quot;Live Flight Tracker &amp; Weather Station&quot; with bullets: Live ADS-B Flight Radar, Live Weather &amp; Forecasts, Pool Temperature Monitoring, 50 Alarms &amp; Melody Presets, Standalone WiFi · Auto-OTA">
 
 **Live flight tracker & weather station** for **Cheap Yellow Display (CYD)**
-boards — ESP32 boards with a built-in color touchscreen, like the
-**2.8" 2432S028R** and the **4" E32R40T**. A self-contained device: once
-it's set up it runs on your WiFi — no computer needed.
+boards:
+
+- **2.8" 2432S028R**
+- **4" E32R40T**
+
+Once it's set up it runs on your WiFi — no computer needed.
 
 > **Giving a device to a non-techie friend?** Grab the printable
 > [User Guide (PDF)](docs/user-guide/DEVELOPER-USERGUIDE.pdf) — written for

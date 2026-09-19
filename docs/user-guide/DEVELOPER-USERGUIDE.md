@@ -75,8 +75,8 @@ from a development computer.
      alt="cyd-horizon logo">
 
 <div class="desc">
-<p>A small self-contained touchscreen dashboard for <strong>Cheap Yellow Display
-(CYD)</strong> boards:</p>
+<p><strong>Live flight tracker &amp; weather station</strong> for <strong>Cheap
+Yellow Display (CYD)</strong> boards:</p>
 <ul>
 <li><strong>2.8" 2432S028R</strong></li>
 <li><strong>4" E32R40T</strong></li>

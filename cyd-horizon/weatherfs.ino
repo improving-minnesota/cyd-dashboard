@@ -1,24 +1,18 @@
-// weatherfs.ino - persistent, tiered weather temperature history on LittleFS
-// (flash). Mirrors the pool temp storage in poolfs.ino (same CSV tiers, same
-// hourly/daily rollup scheme) but for the Open-Meteo current temperature,
-// which is sampled every 10 minutes instead of every 5.
-//   /weather.csv       raw 10-min samples  (epoch,temp)        - Day & Week views
-//   /weather_hour.csv  hourly rollups      (epoch,avg,lo,hi)   - Month view
-//   /weather_day.csv   daily rollups       (epoch,avg,lo,hi)   - Year view
-// The rolled-up tiers store each bucket's low/high alongside the average so
-// the Month/Year graphs can scale to the true extremes (see poolfs.ino).
-// Each tier is mirrored in a RAM ring buffer for fast graph drawing and is
-// loaded back from flash at boot. If LittleFS is unavailable, everything
-// degrades gracefully to RAM-only for the current session. The generic
-// loadCsvRing/appendTier/compactCsvFile helpers are shared with poolfs.ino.
+// weatherfs.ino - persistent, tiered weather temperature history on LittleFS.
+// Mirrors poolfs.ino (same tiers + rollup scheme) for the Open-Meteo current
+// temperature, sampled every 10 min instead of 5.
+//   /weather.csv       raw 10-min samples  (epoch,temp)      - Day & Week views
+//   /weather_hour.csv  hourly rollups      (epoch,avg,lo,hi) - Month view
+//   /weather_day.csv   daily rollups       (epoch,avg,lo,hi) - Year view
+// Per-bucket lo/hi lets Month/Year scale to true extremes. RAM rings mirror
+// each tier; no LittleFS = RAM-only session. Helpers shared with poolfs.ino.
 
 unsigned long g_persistWxCount = 0;      // lines currently in /weather.csv
 unsigned long g_persistWxHourCount = 0;  // lines currently in /weather_hour.csv
 unsigned long g_persistWxDayCount = 0;   // lines currently in /weather_day.csv
 
-// Load all persisted weather history into the RAM ring buffers at boot.
-// Both pool and weather share the same LittleFS partition, mounted by
-// poolfsInit(), so just make sure that happened first.
+// Load persisted weather history into the RAM rings at boot; the partition is
+// shared with pool and mounted by poolfsInit(), which must run first.
 void weatherfsInit() {
   if (!poolFsOk) return;
 
@@ -36,11 +30,9 @@ void weatherfsInit() {
   loadWxRollupState();
 }
 
-// The in-progress hour/day rollup accumulators, persisted to flash right before
-// each deep sleep and restored at boot. Without this, every deep-sleep wake is
-// a fresh boot that resets g_wxHourBucket/g_wxDayBucket to -1, so the hour/day
-// buckets never "change" within a one-sample boot and the hourly/daily tiers
-// would never flush during the night (starving Month/Year).
+// In-progress hour/day accumulators, persisted before each deep sleep and
+// restored at boot - otherwise every wake resets the bucket ids to -1 and the
+// hourly/daily tiers never flush overnight.
 typedef struct {
   long  hourBucket;   // epoch/3600 of the in-progress hour (-1 = none)
   float hourSum;
@@ -91,9 +83,8 @@ void loadWxRollupState() {
 // Append a fresh weather temperature reading to the raw tier, then roll it
 // into the hourly and daily accumulators (see poolLog() for the scheme).
 void weatherLog(float temp, unsigned long epoch) {
-  // Require synced time (epoch after ~2020): otherwise the sample would be
-  // invisible to the history graph (it filters to the current window) and
-  // would corrupt the hourly/daily rollups below.
+  // Require synced time (epoch after ~2020) - an unsynced sample is invisible
+  // to the window-filtered graph and would corrupt the rollups below.
   if (epoch < 1600000000L) return;
 
   appendTier("/weather.csv", g_wxLogTime, g_wxLogTemp, nullptr, nullptr,
