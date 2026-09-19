@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.7.0](https://github.com/improving-minnesota/cyd-horizon/compare/v3.6.0...v3.7.0) (2026-09-19)
+
+
+### Features
+
+* keep per-bucket low/high in temp history rollups ([63a66cc](https://github.com/improving-minnesota/cyd-horizon/commit/63a66cc6a5efc9006cb933f43168b8ab4276733c))
+* keep per-bucket low/high in temp history rollups ([8b007d1](https://github.com/improving-minnesota/cyd-horizon/commit/8b007d1e45ff4f9dbd57e4ce135df5511fd37aff))
+
 ## [3.6.0](https://github.com/improving-minnesota/cyd-horizon/releases/tag/v3.6.0) (2026-09-19)
 
 
