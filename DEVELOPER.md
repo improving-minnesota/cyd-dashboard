@@ -65,7 +65,9 @@ worse than none.
 - Document **non-obvious constraints**: ordering, concurrency, why a workaround
   exists, what a magic number means, and edge cases you're guarding against.
 - **Prefer clear names** so most code needs no comment at all.
-- Keep inline `//` notes to a few words.
+- Keep inline `//` notes to a few words — normally one line. When a constraint
+  genuinely needs more than ~2 lines, move the explanation into this file (or
+  the relevant `docs/` README) and leave a one-line pointer in the code.
 
 Good: the `configTime()` lwip-crash note, the `collectHeaders()` header-drop
 note, the `g_timeReady` timezone gotcha, and section headers that group a
@@ -132,7 +134,8 @@ no longer see new releases and must be updated over USB.
 
 #### Identifying boards on serial ports
 
-Every build prints `[boot] board=<model>` (not dev-gated) right after reset.
+Every build prints `[boot] board=<model>` and `[boot] version=<v> build=<n>`
+right after reset (neither is dev-gated; releases report `build=0`).
 `scripts/detect_boards.py` resets every `/dev/cu.usbserial-*` port in
 parallel and reports which board each holds (plus version/build, and IP with
 `--wait-ip`):
@@ -251,6 +254,14 @@ arduino-cli upload -p /dev/cu.usbserial-XXXX -b esp32:esp32:jczn_2432s028r:Parti
 > ```bash
 > cyd-horizon/.venv/bin/python scripts/ota_push.py   # --board e32r40t or --port /dev/cu.usbserial-XXXX if ambiguous
 > ```
+>
+> If the board's boot log reports a release build (`[boot] version=` without
+> `-dev` — printed on every build now), the push exits immediately instead of
+> waiting out the WiFi timeout: release firmware has no serial-OTA listener,
+> so that board needs one USB flash (`scripts/flash.py`) before OTA works.
+> `--all` skips release boards the same way. Boards running firmware old
+> enough to not print `version=` at all can't be distinguished up front and
+> still hit the timeout — flash them once.
 >
 > Manual alternative: serve the `.bin` over HTTP from a machine the board can
 > reach (a static server at the build directory's root), then pass the full
@@ -743,7 +754,16 @@ Weather history is **always on** (no enable toggle). It's logged from
 Each tier's `*_rollup.bin` holds the in-progress hour/day accumulators, saved
 right before each deep sleep and restored at boot. Each 5-minute deep-sleep
 wake is a fresh boot, so without this the hourly/daily tiers would never flush
-during the night (starving the Month/Year graphs of overnight data).
+during the night (starving the Month/Year graphs of overnight data). The
+Month/Year graphs also fold that in-progress bucket into the displayed range
+(`plotSeries`' `pend` param): its lo/hi widen the Lo/Hi labels and y-scale and
+its partial average counts toward the avg line, so today's extremes — the
+current reading included — count before the bucket flushes. It is not drawn
+as a point; the plotted line still ends at the last flushed bucket. Both
+views additionally widen the range with the finer tiers' in-window extremes
+(`widenRange()` — Month reads the raw ring, Year reads the hourly + raw
+rings), so the shown Lo/Hi are the true extremes of all retained data, not
+just the plotted tier's.
 
 At boot the CSV tiers are loaded back into RAM ring buffers (keeping the
 newest samples) so the graphs can draw them immediately. The graphs show

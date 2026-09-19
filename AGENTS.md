@@ -37,8 +37,8 @@ people.
   detected board in parallel with its variant's binary).
   Do NOT run `arduino-cli upload` for iteration — it is ~80 s, holds the
   serial port, and is the wrong tool once OTA-capable firmware is up.
-- Multiple boards plugged in: every build prints `[boot] board=<model>` at
-  reset; `scripts/detect_boards.py` maps ports to boards and both update
+- Multiple boards plugged in: every build prints `[boot] board=<model>` and
+  `version=` at reset; `scripts/detect_boards.py` maps ports to boards and both update
   scripts use it — `ota_push.py --board e32r40t` (inferred from `--dir` too),
   `scripts/flash.py --board e32r40t` for USB uploads. Boards running firmware
   older than the marker report `unknown` — pass `--port` once.
@@ -69,4 +69,5 @@ people.
 
 - Say **why**, not what; use short section-header comments (`// ---- X ----`)
   to organize long functions. Document non-obvious constraints, workarounds,
-  and magic numbers. Don't narrate the code. See DEVELOPER.md "Code comments".
+  and magic numbers. Don't narrate the code — function headers get ~one line,
+  not parameter-by-parameter docs. See DEVELOPER.md "Code comments".

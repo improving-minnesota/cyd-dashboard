@@ -1,13 +1,6 @@
-// calibration.ino - on-device touch calibration.
-//
-// Lets the user recalibrate the touchscreen if buttons ever drift. A long press
-// (10s) anywhere on the dashboard enters calibration; it draws a series of
-// crosshairs and asks the user to tap each one, then computes and stores the
-// linear raw->display transform in NVS.
-//
-// The transform is used by touchReadXY() (cyd-horizon.ino) via the globals
-// here. Defaults are the factory-measured values for this unit; calibration
-// overrides them once run.
+// calibration.ino - on-device touch calibration: a 10s dashboard long-press
+// starts it; 5 crosshair taps produce a raw->display transform stored in NVS
+// (used by touchReadXY(); factory defaults until run).
 
 // Calibration parameters (g_calScaleX/OffX/Y, g_calState, CalState enum) are
 // defined in cyd-horizon.ino so they are visible to the touch code there.
@@ -29,6 +22,10 @@ static const CalPt g_calTargets[5] = {
 // Raw readings captured at each target.
 uint16_t g_calRaw[5][2];   // [i][0]=rawX, [i][1]=rawY
 
+// Screen calBegin() was entered from - the loading-screen Back aborts to it
+// (the boot wizard doesn't offer an abort).
+static Screen g_calReturn = SCR_SETTINGS;
+
 void calDrawTarget(int i) {
   const CalPt& p = g_calTargets[i];
   tft.fillScreen(TFT_BLACK);
@@ -43,16 +40,14 @@ void calDrawTarget(int i) {
   tft.print(String(i + 1) + "/5");
 }
 
-// Begin calibration. Returns immediately; the state machine runs in calPoll()
-// from loop(). Because calibration is triggered by a long-press, the user's
-// finger is still on the screen when this fires - so we first wait ~2s
-// (CAL_LOADING) for them to lift, then show the first target so its tap is not
-// mistaken for the still-held calibration trigger.
+// Begin calibration (async - calPoll() runs the state machine). CAL_LOADING
+// waits ~2s for the still-held long-press to lift so it isn't read as a tap.
 #define CAL_LOADING_MS 2000UL
 
 void calBegin() {
   g_calIdx = 0;
   g_calCollect = false;
+  g_calReturn = g_screen;
   g_calState = CAL_LOADING;
   g_calCollectStart = millis();
   g_screen = SCR_CALIB;   // run calibration on its own screen
@@ -62,6 +57,8 @@ void calBegin() {
   tft.setTextFont(2);
   tft.setCursor(30, 100);
   tft.print("Prepare for Calibration...");
+  // Abort affordance for a stray tap; the wizard has nowhere to go back to.
+  if (g_bootStage != BOOT_CALIB) backBtn("Back");
 }
 
 // Called every loop while in a calibration screen. Handles tap collection,
@@ -70,6 +67,20 @@ void calPoll() {
   if (g_calState == CAL_NONE) return;
 
   if (g_calState == CAL_LOADING) {
+    // Back aborts during the countdown (handleTouch defers to us while cal is
+    // active). Rising edge only - the finger that started this may still be held.
+    if (g_bootStage != BOOT_CALIB) {
+      uint16_t x, y;
+      static bool prevAbortPressed = false;
+      bool pressed = touchReadXY(x, y);
+      if (pressed && !prevAbortPressed && inRect(x, y, RX(265), 4, RX(315), 24)) {
+        g_calState = CAL_NONE;
+        g_screen = g_calReturn;
+        dirty = true;
+        return;
+      }
+      prevAbortPressed = pressed;
+    }
     // Wait out the delay so the still-held long-press is released before the
     // first target is shown and tapped.
     if (millis() - g_calCollectStart >= CAL_LOADING_MS) {
@@ -111,9 +122,8 @@ void calPoll() {
       doneAt = 0;
       g_calState = CAL_NONE;
       if (g_bootStage == BOOT_CALIB) {
-        // Boot-time calibration (fresh device / after a full factory reset).
-        // Continue the first-boot wizard: gather WiFi if none is saved, else
-        // finish up on the dashboard.
+        // Boot-time calibration: continue the wizard - WiFi if none saved,
+        // else the dashboard.
         if (g_savedSsid.length() == 0) {
           enterWifiScreen();
           g_bootStage = BOOT_WIFI;
@@ -138,10 +148,8 @@ void calCompute() {
     ryMin = min(ryMin, g_calRaw[i][1]); ryMax = max(ryMax, g_calRaw[i][1]);
   }
 
-  // Targets are drawn in logical coords and land at scaled panel positions
-  // through the tft wrapper, so the fit maps raw -> panel coords (SCALEX/Y
-  // span); touchReadXY() then converts panel -> logical. On the 2.8" board
-  // the scale is the identity and this is unchanged.
+  // Targets land at scaled panel positions, so the fit maps raw -> panel
+  // (SCALEX/Y span); touchReadXY() converts panel -> logical after.
   long spanX = SCALEX(DISP_W - 20) - SCALEX(20);
   long spanY = SCALEY(220) - SCALEY(20);
   if (ryMax - ryMin > 100) {
@@ -163,10 +171,8 @@ void calCompute() {
   prefs.end();
 }
 
-// Load calibration parameters from NVS (or leave defaults).
-// NOTE: setup() already opened the "flight" namespace, so we must NOT call
-// prefs.begin/end here - doing so would close the namespace and make setup()'s
-// later prefs.get() reads (e.g. the WiFi ssid/pass) fail/return defaults.
+// Load calibration from NVS (or defaults). No prefs.begin/end here - setup()
+// already holds the "flight" namespace open.
 void calLoad() {
   g_calScaleX = prefs.getInt("calsx", g_calScaleX);
   g_calOffX   = prefs.getLong("calox", g_calOffX);

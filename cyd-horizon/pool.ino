@@ -1,28 +1,22 @@
 // pool.ino - Pool Temp settings screen, history graph, and Govee Open API
-// integration. Requires a free Govee API key from developer.govee.com;
-// thermometers are detected by their "sensorTemperature" capability and
-// selected via the Pool Temp settings screen. Falls back to "--" whenever a
-// reading is unavailable (feature disabled, no key, no device, or a failed
-// fetch). Globals (g_goveeKey, g_poolValid, the pool temp history ring buffers,
-// etc.) are declared in cyd-horizon.ino so they're visible everywhere.
+// integration. Thermometers are detected by their "sensorTemperature"
+// capability; any unavailable reading shows "--". History globals are declared
+// in cyd-horizon.ino so they're visible everywhere.
 
 // ---- Govee Open API: Pool Temp integration ----
 
-// Govee enforces two rate-limit tiers, each returning *-Remaining and *-Reset
-// (UTC epoch seconds) headers: per-day X-RateLimit-* (10000/day per key) and
-// per-minute API-RateLimit-* (per endpoint/device), plus a Retry-After on 429.
-// Response headers to capture - without collectHeaders() HTTPClient discards
-// everything except a small built-in set.
+// Govee rate limits: per-day X-RateLimit-* (10000/day per key) and per-minute
+// API-RateLimit-* plus Retry-After on 429; *-Reset is a UTC epoch. Headers must
+// be collectHeaders()'d - HTTPClient discards everything else.
 static const char* kGoveeRlKeys[] = {
   "X-RateLimit-Remaining", "X-RateLimit-Reset",
   "API-RateLimit-Remaining", "API-RateLimit-Reset", "Retry-After"
 };
 static const int kGoveeRlKeyCount = sizeof(kGoveeRlKeys) / sizeof(kGoveeRlKeys[0]);
 
-// Park all Govee requests until the server's stated reset deadline. The jitter
-// on each candidate desynchronizes boards that share one API key - a shared
-// 429 hands every board the same reset epoch, so without it they'd all resume
-// in one burst.
+// Park all Govee requests until the server's reset deadline; jitter
+// desynchronizes boards sharing one API key (a shared 429 hands every board
+// the same reset epoch, so they'd resume in one burst without it).
 static void noteGoveeRateLimit(HTTPClient& http) {
   long nowSec = (long)time(nullptr);
   if (nowSec < 1600000000L) nowSec = (long)(millis() / 1000UL);  // pre-NTP fallback
@@ -38,11 +32,9 @@ static void noteGoveeRateLimit(HTTPClient& http) {
   if (isDevBuild()) Serial.printf("[net] govee rate limited until epoch %lu\n", until);
 }
 
-// True while inside a stored Govee rate-limit window. Arms g_poolRetryAt for
-// when the window lifts so a suppressed fetch retries at the deadline instead
-// of waiting out the 5-min cadence - longer than a touch-wake stays awake.
-// With an unsynced clock any stored epoch looks active, so it just re-asks in
-// 60s; SNTP landing turns the deadline into a real one.
+// True while inside a stored Govee rate-limit window; arms g_poolRetryAt so a
+// suppressed fetch retries at the deadline (the 5-min cadence outlives a
+// touch-wake). With an unsynced clock it just re-asks in 60s.
 bool goveeRateLimited() {
   if (!g_goveeRateReset || (unsigned long)time(nullptr) >= g_goveeRateReset) return false;
   if (!g_poolRetryAt) {
@@ -96,9 +88,9 @@ void selectGoveeDevice() {
   if (g_poolEnabled) netWantPool = true;   // fetch the newly-selected device's temp async
 }
 
-// Fetch the list of thermometers on the account into g_goveeDevs.
-// Response shape: data is an array of {sku, device, deviceName, type, capabilities}.
-// Thermometers have type "devices.types.thermometer" / a "sensorTemperature" capability.
+// Fetch the account's thermometers into g_goveeDevs. Response: data[] of
+// {sku, device, deviceName, type, capabilities}; thermometers have type
+// "devices.types.thermometer" / a "sensorTemperature" capability.
 bool fetchGoveeDevices() {
   if (WiFi.status() != WL_CONNECTED || g_goveeKey.length() == 0 || goveeRateLimited()) { g_goveeAuthBad = false; return false; }
   // Govee's Open API is Amazon-signed (Amazon Root CA 1 is in the global store).
@@ -143,9 +135,9 @@ bool fetchGoveeDevices() {
   return g_goveeCount > 0;
 }
 
-// Fetch the current temperature of the selected device.
-// POST /device/state with body {requestId, payload:{sku, device}}; the
-// temperature is in payload.capabilities[] where instance=="sensorTemperature".
+// Fetch the selected device's temperature. POST /device/state with
+// {requestId, payload:{sku, device}}; temp is in payload.capabilities[] where
+// instance=="sensorTemperature".
 bool fetchGoveeTemp() {
   if (!g_poolEnabled || WiFi.status() != WL_CONNECTED || g_goveeKey.length() == 0
       || g_poolDeviceId.length() == 0) {
@@ -292,9 +284,8 @@ void handlePoolTouch(uint16_t x, uint16_t y) {
   if (inRect(x, y, RX(230), 36, RX(312), 60)) {  // Enabled toggle
     g_poolEnabled = !g_poolEnabled;
     prefs.begin("flight", false); prefs.putBool("poolen", g_poolEnabled); prefs.end();
-    // On: kick an immediate fetch instead of waiting out the poll cadence.
-    // Off: drop the stale reading so "Current" shows -- (capture is stopped
-    // everywhere, so nothing refreshes it).
+    // On: kick an immediate fetch. Off: drop the stale reading so "Current"
+    // shows -- (capture is stopped everywhere, so nothing refreshes it).
     if (g_poolEnabled) {
       if (g_poolDeviceId.length() > 0) netWantPool = true;
     } else {
@@ -323,22 +314,34 @@ unsigned long poolWindowSec() {
   }
 }
 
-// Day/Week plot from the raw (5-min) tier; Month from hourly rollups; Year
-// from daily rollups. This keeps each view populated well beyond what a
-// single fixed-size raw buffer could hold. The rolled-up tiers also return
-// their per-bucket low/high arrays (mins/maxs); the raw tier has none
-// (nullptr) since every raw sample is already a true reading.
+// Day/Week = raw tier, Month = hourly, Year = daily (each view spans further
+// than one raw buffer). mins/maxs = per-bucket lo/hi (nullptr on raw); pend =
+// the in-progress bucket (t==0 = none).
 void poolSeriesForTF(unsigned long** times, float** temps,
-                     float** mins, float** maxs, int* count) {
+                     float** mins, float** maxs, int* count,
+                     PendingRollup* pend) {
+  pend->t = 0;
   switch (g_poolTF) {
     case TF_MONTH:
       *times = g_poolHourTime; *temps = g_poolHourTemp;
       *mins = g_poolHourMin; *maxs = g_poolHourMax;
-      *count = g_poolHourCount; break;
+      *count = g_poolHourCount;
+      if (g_curHourN > 0) {
+        pend->t = (unsigned long)g_curHourBucket * 3600UL;
+        pend->avg = g_curHourSum / g_curHourN;
+        pend->lo = g_curHourMin; pend->hi = g_curHourMax;
+      }
+      break;
     case TF_YEAR:
       *times = g_poolDayTime; *temps = g_poolDayTemp;
       *mins = g_poolDayMin; *maxs = g_poolDayMax;
-      *count = g_poolDayCount; break;
+      *count = g_poolDayCount;
+      if (g_curDayN > 0) {
+        pend->t = (unsigned long)g_curDayBucket * 86400UL;
+        pend->avg = g_curDaySum / g_curDayN;
+        pend->lo = g_curDayMin; pend->hi = g_curDayMax;
+      }
+      break;
     default:
       *times = g_poolLogTime; *temps = g_poolLogTemp;
       *mins = nullptr; *maxs = nullptr;
@@ -346,19 +349,24 @@ void poolSeriesForTF(unsigned long** times, float** temps,
   }
 }
 
-// Plot one series into the given graph rect. Returns true if any point fell
-// inside the [t0, nowSec] window. Outputs the actual data low/high for the
-// window via dataMin/dataMax (before any y-axis padding). Also draws the padded
-// y-axis scale labels (max/min in the chart corners) and a dotted average line
-// with an "avg" label. Colors come from graphBgCol/graphLineCol/graphAvgCol.
-// toDisp converts stored temps to the display unit for labels (tempDisp for
-// weather, poolDisp for pool). The plotted curve is scale-invariant, so the
-// data points are plotted in stored units and only labels are converted.
-// mins/maxs (rolled-up tiers only) carry each bucket's true low/high: the
-// y-axis scale and the Lo/Hi labels then reflect the real extremes (e.g. the
-// annual high), while the plotted line stays the per-bucket average.
+// Widen [lo,hi] with a tier's in-window extremes (stored units). mins/maxs
+// null means a raw tier - each sample is its own lo/hi.
+void widenRange(const unsigned long* times, const float* temps,
+                const float* mins, const float* maxs, int count,
+                unsigned long t0, unsigned long nowSec, float& lo, float& hi) {
+  bool hasRange = (mins != nullptr && maxs != nullptr);
+  for (int i = 0; i < count; i++) {
+    if (times[i] < t0 || times[i] > nowSec) continue;
+    float l = hasRange ? mins[i] : temps[i];
+    float h = hasRange ? maxs[i] : temps[i];
+    if (l < lo) lo = l;
+    if (h > hi) hi = h;
+  }
+}
+
+// Plot one series + avg/scale labels; outputs the window's data low/high.
 bool plotSeries(unsigned long* times, float* temps, float* mins, float* maxs,
-                int count,
+                int count, const PendingRollup* pend, float exLo, float exHi,
                 unsigned long t0, unsigned long nowSec, unsigned long win,
                 int gx, int gy, int gw, int gh,
                 float& dataMin, float& dataMax,
@@ -377,6 +385,17 @@ bool plotSeries(unsigned long* times, float* temps, float* mins, float* maxs,
     if (hi > vmax) vmax = hi;
     sum += v;
     cnt++;
+  }
+  // Only ever widens the range: the flushed buckets' lo/hi stay the basis.
+  if (pend && pend->t >= t0 && pend->t <= nowSec) {
+    if (pend->lo < vmin) vmin = pend->lo;
+    if (pend->hi > vmax) vmax = pend->hi;
+    sum += pend->avg;
+    cnt++;
+  }
+  if (exLo <= exHi) {
+    if (exLo < vmin) vmin = exLo;
+    if (exHi > vmax) vmax = exHi;
   }
   if (cnt == 0) return false;
 
@@ -413,10 +432,8 @@ bool plotSeries(unsigned long* times, float* temps, float* mins, float* maxs,
   tft.setCursor(gx + 2, avgY - 8);
   tft.print(abuf);
 
-  // Labels for the chart's padded y-axis scale (padded max top-right, padded
-  // min bottom-right), so the vertical range of the graph is readable. Drawn
-  // inside the chart corners - there is no room above the graph (timeframe
-  // buttons sit right above it).
+  // Padded y-axis scale labels (max top-right, min bottom-right), drawn inside
+  // the chart corners - no room above the graph (timeframe buttons sit there).
   tft.setTextColor(btnFg(graphBgCol()), graphBgCol());
   char sbuf[16];
   snprintf(sbuf, sizeof sbuf, "%.0f", toDisp(vmax));
@@ -428,11 +445,12 @@ bool plotSeries(unsigned long* times, float* temps, float* mins, float* maxs,
 
 // Pool temp series wrapper. Weather uses plotWeatherSeries below.
 bool plotPoolSeries(unsigned long* times, float* temps, float* mins, float* maxs,
-                    int count,
+                    int count, const PendingRollup* pend, float exLo, float exHi,
                     unsigned long t0, unsigned long nowSec, unsigned long win,
                     int gx, int gy, int gw, int gh,
                     float& dataMin, float& dataMax) {
-  return plotSeries(times, temps, mins, maxs, count, t0, nowSec, win, gx, gy, gw, gh,
+  return plotSeries(times, temps, mins, maxs, count, pend, exLo, exHi,
+                    t0, nowSec, win, gx, gy, gw, gh,
                     dataMin, dataMax, poolDisp);
 }
 
@@ -470,9 +488,8 @@ void drawPoolGraph() {
 
   unsigned long nowSec = (unsigned long)time(nullptr);
 
-  // Time not synced yet (right after a boot/deep-sleep wake). The window filter
-  // would compare every real sample against nowSec==0 and wrongly reject them
-  // all, so show an explicit "waiting" message instead of "No data".
+  // Time not synced yet: the window filter would compare every real sample
+  // against nowSec==0 and reject them all, so show "waiting" not "No data".
   if (nowSec < 1600000000UL) {
     tft.setTextColor(btnFg(gbg), gbg);
     tft.setTextFont(1);
@@ -485,9 +502,21 @@ void drawPoolGraph() {
   unsigned long t0 = (nowSec > win) ? (nowSec - win) : 0;
 
   unsigned long* times; float* temps; float* mins; float* maxs; int count;
-  poolSeriesForTF(&times, &temps, &mins, &maxs, &count);
+  PendingRollup pend;
+  poolSeriesForTF(&times, &temps, &mins, &maxs, &count, &pend);
+
+  // Finer tiers may hold extremes the plotted tier lacks. Month <- raw;
+  // Year <- hourly + raw.
+  float exLo = 1e9f, exHi = -1e9f;
+  if (g_poolTF == TF_MONTH || g_poolTF == TF_YEAR)
+    widenRange(g_poolLogTime, g_poolLogTemp, nullptr, nullptr,
+               g_poolLogCount, t0, nowSec, exLo, exHi);
+  if (g_poolTF == TF_YEAR)
+    widenRange(g_poolHourTime, g_poolHourTemp, g_poolHourMin, g_poolHourMax,
+               g_poolHourCount, t0, nowSec, exLo, exHi);
+
   float lo, hi;
-  bool plotted = plotPoolSeries(times, temps, mins, maxs, count, t0, nowSec, win, gx, gy, gw, gh, lo, hi);
+  bool plotted = plotPoolSeries(times, temps, mins, maxs, count, &pend, exLo, exHi, t0, nowSec, win, gx, gy, gw, gh, lo, hi);
 
   if (!plotted) {
     tft.setTextColor(btnFg(gbg), gbg);
@@ -495,9 +524,8 @@ void drawPoolGraph() {
     tft.setCursor(gx + 20, gy + gh / 2);
     tft.print("No data in this period yet");
   } else {
-    // Bottom strip below the chart: actual data low (left), current temp
-    // (center), actual data high (right) for the timeframe shown. Sits on the
-    // black screen, not on the graph fill.
+    // Bottom strip: data low (left), current temp (center), data high (right)
+    // for the timeframe; sits on the black screen, not the graph fill.
     tft.setTextColor(TFT_CYAN, TFT_BLACK);
     tft.setTextFont(2);
     tft.setCursor(gx, gy + gh + 6);

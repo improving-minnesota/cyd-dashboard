@@ -1,7 +1,5 @@
-// settings.ino - Settings screen and its sub-screens (Flight Tracker config,
-// Sleep Mode config, Reset confirmation) plus their small drawing helpers.
-// Part of the cyd-horizon sketch; shares globals/helpers (prefs, dirty,
-// g_screen, inRect(), rowMinus()/rowPlus(), saveFloat()/saveInt(), etc.)
+// settings.ino - Settings screen + sub-screens (Flight Tracker, Sleep Mode,
+// Reset, Help, color picker) and their drawing helpers. Shares globals/helpers
 // declared in cyd-horizon.ino.
 
 // The Settings screen is a pure navigation list - it holds no settings itself;
@@ -19,9 +17,8 @@ void drawSettings() {
   backBtn("Back");
 
   // 2-column grid, alphabetical: About, Calibrate Touch, Flight Tracker,
-  // General, Help, Location, Network, Pool Temp, Reset, Sleep Mode. Reset is
-  // kept at the bottom-left cell and drawn red (it is destructive). Touch
-  // handling in handleTouch() (cyd-horizon.ino) mirrors this layout.
+  // General, Help, Location, Network, Pool Temp, Reset, Sleep Mode. Reset sits
+  // bottom-left drawn red (destructive); handleTouch() mirrors this layout.
   const char* items[] = { "About", "Calibrate Touch", "Flight Tracker", "General",
                           "Help", "Location", "Network", "Pool Temp",
                           "Reset", "Sleep Mode" };
@@ -143,12 +140,12 @@ static const char* const kHelpLines[] = {
   "-----------",
   "Live flight tracker &",
   "weather station for Cheap",
-  "Yellow Display (CYD) boards",
-  "- ESP32 boards with a built-",
-  "in color touchscreen, like",
-  "the 2.8\" 2432S028R and the",
-  "4\" E32R40T. Once set up it",
-  "runs on your WiFi - no",
+  "Yellow Display (CYD)",
+  "boards:",
+  "  - 2.8\" 2432S028R",
+  "  - 4\" E32R40T",
+  "Once it's set up it runs",
+  "on your WiFi - no",
   "computer needed. Made for",
   "this board only (wiring is",
   "CYD-specific).",
@@ -458,11 +455,9 @@ void handleHelpTouch(uint16_t x, uint16_t y) {
 
 // ---- General page ----
 // ---- Clock Color picker (SCR_COLORPICK) ----
-// Swatch palette built for tap-only resistive touch: three rows of large
-// cells - hue, shades of the picked hue (pale -> pure -> dark), and a
-// greyscale ramp. Any color lands in at most two taps and a live
-// header-band preview shows the result. The pick is stored as the RGB565
-// hex value in NVS ("clkcol") and also drives every theme-colored button.
+// Tap-only palette: hue row, shades of the picked hue (pale->pure->dark), and
+// a greyscale ramp - any color in <=2 taps, live header-band preview. Stored
+// as RGB565 in NVS "clkcol" and drives every theme-colored button.
 int g_pickH = 210;    // 0-359
 int g_pickS = 255;    // 0-255
 int g_pickV = 220;    // 0-255
@@ -487,9 +482,8 @@ uint16_t hsv565(int h, int s, int v) {
   return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
-// Seed the picker's axes from the current RGB565 theme color. A pure grey
-// has no hue — keep the last one so the hue row's marker doesn't jump to
-// red.
+// Seed the picker's axes from the current RGB565 theme color; a pure grey has
+// no hue, so keep the last one (else the hue marker jumps to red).
 void colorPickEnter() {
   int h, s; colorHS(g_clockCol, h, s);
   if (s) g_pickH = h;
@@ -614,9 +608,8 @@ void drawGeneral() {
 
   backBtn("Back");
 
-  // Clock Color: label + a swatch of the current color; tapping the swatch
-  // opens the swatch-row color picker. The picked color is also the theme
-  // color for ordinary buttons across the UI.
+  // Clock Color: label + swatch of the current color (tap opens the picker);
+  // the pick is also the theme color for ordinary buttons.
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextFont(2);
   tft.setCursor(8, 40);
@@ -639,10 +632,8 @@ void drawGeneral() {
   tft.setCursor(RX(250), 75);
   tft.print("Toggle");
 
-  // Notify Volume: stepper over kNtfVolLevels driving every speaker sound -
-  // alarms, the callsign alert, the boot chime - via the LEDC duty. Shown as
-  // the level number (1-10). Stepping plays a short
-  // beep at the new level (see notifyTestBeep).
+  // Notify Volume: stepper over kNtfVolLevels (shown 1-10) driving all speaker
+  // sounds via LEDC duty; stepping plays a test beep (notifyTestBeep).
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextFont(2);
   tft.setCursor(8, 104);
@@ -1201,17 +1192,13 @@ void drawEditRow(int y, const char* label, const String& value) {
 }
 
 // ---- shared time-of-day editor ----
-// One compact row: label, a [▲][▼] hour stepper, a large tappable
-// "H:MM AM/PM" (opens the HHMM keyboard), then a [▲][▼] minute stepper.
-// Stepping the hour wraps through AM/PM, so there's no separate meridiem
-// control. Used by the Alarms editor and the Sleep Mode start/end times. The
-// row is ~30px tall; give it ~40px of vertical space.
-// TADJ_* column geometry is #defined in cyd-horizon.ino (alarms.ino is
-// concatenated before this file, so shared defines must live there).
+// One ~30px row (allow ~40px): label, hour stepper, tappable "H:MM AM/PM"
+// (opens the HHMM keyboard), minute stepper; hour wraps AM/PM. Used by the
+// Alarms editor and Sleep Mode start/end. TADJ_* geometry lives in
+// cyd-horizon.ino (alarms.ino concats before this file).
 
-// One horizontal [▼][▲] stepper pair in the theme color: ▼ (decrement) at
-// (x, y), ▲ (increment) TADJ_BW+4 to its right. 24px-tall horizontal targets
-// are easier to hit than small stacked arrows.
+// One horizontal [▼][▲] stepper pair: ▼ at (x,y), ▲ TADJ_BW+4 to its right;
+// 24px horizontal targets hit easier than stacked arrows.
 void adjPair(int x, int y) {
   uint16_t fg = btnFg(btnCol());
   themeBtn(x, y, TADJ_BW, 24, 5);
@@ -1240,10 +1227,8 @@ void drawTimeAdj(int y, const char* label, int h24, int m) {
   snprintf(tb, sizeof tb, "%d:%02d", hDisp, m);
   tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
   tft.drawCentreString(tb, (TADJ_HX + 2 * TADJ_BW + 4 + TADJ_MX - 4) / 2, y + 3, 4);
-  // Stacked AM/PM indicator like the header's (12-hour mode only): the active
-  // meridiem is drawn bright in its slot (AM top, PM bottom) and the other
-  // dimmed, so the position itself shows which is active. Flips automatically
-  // at hour wrap.
+  // Stacked AM/PM indicator like the header's (12h only): active meridiem
+  // bright in its slot (AM top), other dimmed; flips at hour wrap.
   if (!g_clock24) {
     tft.setTextFont(1);
     tft.setTextColor(h24 < 12 ? TFT_GREENYELLOW : TFT_DARKGREY, TFT_BLACK);
@@ -1267,9 +1252,8 @@ int timeAdjHit(uint16_t x, uint16_t y, int rowY) {
   return 0;
 }
 
-// Apply a timeAdjHit to the sleep start (which=0) or end (which=1) time:
-// hour/minute steps wrap in 12h display, AM/PM flips the 24h value, and the
-// time-text tap opens the manual HHMM keyboard (subs 6/7).
+// Apply a timeAdjHit to the sleep start (which=0) or end (which=1); the
+// time-text tap opens the HHMM keyboard (subs 6/7).
 void applySleepTimeAdj(int which, int hit) {
   int& H = which ? g_sleepEndH : g_sleepStartH;
   int& M = which ? g_sleepEndM : g_sleepStartM;

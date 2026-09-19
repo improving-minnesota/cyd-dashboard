@@ -16,17 +16,15 @@ extern unsigned long g_lastWeather;
 void setupNTP() {
   // US Central (UTC-6, DST +1)
   configTime(-6 * 3600, 3600, "pool.ntp.org", "time.nist.gov");
-  // From this point on getLocalTime() applies the correct local offset.
-  // Before this call it would report UTC, which could land inside the sleep
-  // window right after a soft reset (OTA) and cause an unwanted deep sleep.
+  // After this call getLocalTime() applies the local offset; before it the
+  // clock reads UTC, which can land inside the sleep window post-OTA.
   g_timeReady = true;
 }
 
 String fmtClock() {
   struct tm t;
-  // Explicit 0ms timeout: this is called every ~1s from the main loop, and
-  // getLocalTime()'s default 5s timeout would block the whole loop (touch +
-  // drawing) for that long on every call while time isn't synced yet.
+  // Explicit 0ms timeout - called every ~1s from the main loop, and
+  // getLocalTime()'s default 5s timeout would block touch + drawing.
   if (!getLocalTime(&t, 0)) return "--:--";
   char b[12];
   strftime(b, sizeof b, g_clock24 ? "%H:%M" : "%I:%M", &t);
@@ -41,9 +39,8 @@ String fmtDate() {
   return String(b);
 }
 
-// Convert an "HH:MM" (24h) string for display: 12-hour gets a one-letter
-// period marker ("07:47" -> "7:47A"), 24-hour stays as-is ("19:47").
-// Used for sunrise/sunset.
+// "HH:MM" (24h) for display: 12-hour gets a one-letter marker ("7:47A"),
+// 24-hour stays as-is. Used for sunrise/sunset.
 String fmtHm12(const char* hm) {
   if (!hm || hm[0] == 0 || hm[1] == 0 || hm[3] == 0 || hm[4] == 0) return "--:--";
   int h = atoi(hm);
@@ -80,13 +77,9 @@ const char* wdName(int offset) {
   return nms[w];
 }
 
-// Open-Meteo 429 handling. The free API limits per client IP (600/min, 5000/hr,
-// 10000/day) and to 1 concurrent request per IP - several boards behind one
-// NAT share the quota. Each 429 body names the exceeded bucket in its "reason"
-// ("Minutely/Hourly/Daily API request limit exceeded" or "Too many concurrent
-// requests"), and every bucket resets on its UTC boundary: next minute, top of
-// the next hour, next midnight. Jitter on each deadline keeps boards that hit
-// a shared limit from resuming in lockstep.
+// Open-Meteo 429 handling: free tier limits per client IP (600/min, 5000/hr,
+// 10000/day, 1 concurrent) shared across a NAT. Each 429's "reason" names the
+// bucket; all reset on their UTC boundary. Jitter avoids lockstep retries.
 static void noteWxRateLimit(HTTPClient& http) {
   long nowSec = (long)time(nullptr);
   if (nowSec < 1600000000L) nowSec = (long)(millis() / 1000UL);  // pre-NTP fallback
@@ -130,12 +123,9 @@ static void noteWxRateLimit(HTTPClient& http) {
 // Open-Meteo weather fetch (free, no API key)
 void fetchWeather() {
   if (WiFi.status() != WL_CONNECTED) return;
-  // Inside a stored 429 window: covers the loop poll, boot, first-connect, and
-  // deep-sleep wake paths alike. Keeps the last displayed data rather than
-  // churning a guaranteed failure. Arm a retry for when the window lifts -
-  // otherwise the next attempt waits out the 10-min cadence, longer than a
-  // touch-wake stays awake. Time-synced only: with an unsynced clock the
-  // delta is meaningless (and the whole check self-corrects once SNTP lands).
+  // Inside a stored 429 window: keep the last data instead of churning a
+  // guaranteed failure, and arm a retry for when the window lifts (the 10-min
+  // cadence outlives a touch-wake). Unsynced clock: re-ask; SNTP self-corrects.
   if (g_wxNextEpoch && (unsigned long)time(nullptr) < g_wxNextEpoch) {
     if (!g_wxRetryAt && time(nullptr) >= 1600000000L) {
       unsigned long dtSec = g_wxNextEpoch - (unsigned long)time(nullptr);
@@ -297,9 +287,8 @@ void drawIdle() {
   tft.setTextColor(TFT_ORANGE, TFT_BLACK);
   tft.setCursor(8, top + 90); tft.print("Suns "); tft.print(fmtHm12(g_sunset));
 
-  // Pool temperature (from Govee; only shown when the feature is enabled).
-  // Tapping this region opens the pool temp history graph. Same layout as Sunr/Suns:
-  // label and value on one line, below the sunset row.
+  // Pool temp (Govee; only when enabled). Tapping opens the pool history
+  // graph; same one-line layout as Sunr/Suns, below the sunset row.
 #if POOL_FEATURE
   if (g_poolEnabled) {
     tft.setTextFont(2);
@@ -339,9 +328,8 @@ void drawIdle() {
     tft.setCursor(x + 28, y + 44);
     tft.printf("%d", (int)round(tempDisp(g_low[i])));
 
-    // rain probability, centered under the temps block (the widest element -
-    // the cell is wider than its left-anchored content on the 4" layout, so
-    // centering on w/2 reads as right-of-center)
+    // rain probability centered under the temps block (the widest element -
+    // on the 4" layout the cell is wider than its left-anchored content)
     tft.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
     char rbuf[8]; snprintf(rbuf, sizeof rbuf, "%d%%", g_rain[i]);
     char lobuf[8]; snprintf(lobuf, sizeof lobuf, "%d", (int)round(tempDisp(g_low[i])));
@@ -350,8 +338,7 @@ void drawIdle() {
   }
 
   // status line: a pending alarm snooze counts down here instead of the
-  // aircraft count (flight polls are suppressed during a snooze, so the
-  // count would be stale)
+  // aircraft count (flight polls are suppressed during a snooze = stale count)
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setTextFont(FONT_AUX);
   tft.setCursor(8, 224);
@@ -363,9 +350,8 @@ void drawIdle() {
 }
 
 // ---- Weather temp history graph ----
-// Mirrors the pool temp history graph (pool.ino), but plots the Open-Meteo
-// current temperature that we log to flash every ~10 min via weatherLog().
-// Opened by tapping the weather temperature on the idle screen.
+// Mirrors the pool graph (pool.ino) for the Open-Meteo temperature logged to
+// flash every ~10 min; opened by tapping the weather temp on the idle screen.
 
 // Window (seconds) for the current weather graph timeframe
 unsigned long wxWindowSec() {
@@ -377,20 +363,32 @@ unsigned long wxWindowSec() {
   }
 }
 
-// Day/Week plot from the raw (10-min) tier; Month from hourly rollups; Year
-// from daily rollups. Rolled-up tiers also return their per-bucket low/high
-// arrays (see poolSeriesForTF).
+// Weather twin of poolSeriesForTF (raw/hourly/daily tiers + pend).
 void wxSeriesForTF(unsigned long** times, float** temps,
-                   float** mins, float** maxs, int* count) {
+                   float** mins, float** maxs, int* count,
+                   PendingRollup* pend) {
+  pend->t = 0;
   switch (g_wxTF) {
     case WX_MONTH:
       *times = g_wxHourTime; *temps = g_wxHourTemp;
       *mins = g_wxHourMin; *maxs = g_wxHourMax;
-      *count = g_wxHourCount; break;
+      *count = g_wxHourCount;
+      if (g_wxHourN > 0) {
+        pend->t = (unsigned long)g_wxHourBucket * 3600UL;
+        pend->avg = g_wxHourSum / g_wxHourN;
+        pend->lo = g_wxCurHourMin; pend->hi = g_wxCurHourMax;
+      }
+      break;
     case WX_YEAR:
       *times = g_wxDayTime; *temps = g_wxDayTemp;
       *mins = g_wxDayMin; *maxs = g_wxDayMax;
-      *count = g_wxDayCount; break;
+      *count = g_wxDayCount;
+      if (g_wxDayN > 0) {
+        pend->t = (unsigned long)g_wxDayBucket * 86400UL;
+        pend->avg = g_wxDaySum / g_wxDayN;
+        pend->lo = g_wxCurDayMin; pend->hi = g_wxCurDayMax;
+      }
+      break;
     default:
       *times = g_wxLogTime; *temps = g_wxLogTemp;
       *mins = nullptr; *maxs = nullptr;
@@ -400,11 +398,12 @@ void wxSeriesForTF(unsigned long** times, float** temps,
 
 // Weather series wrapper; the generic plotter is in pool.ino.
 bool plotWeatherSeries(unsigned long* times, float* temps, float* mins, float* maxs,
-                       int count,
+                       int count, const PendingRollup* pend, float exLo, float exHi,
                        unsigned long t0, unsigned long nowSec, unsigned long win,
                        int gx, int gy, int gw, int gh,
                        float& dataMin, float& dataMax) {
-  return plotSeries(times, temps, mins, maxs, count, t0, nowSec, win, gx, gy, gw, gh,
+  return plotSeries(times, temps, mins, maxs, count, pend, exLo, exHi,
+                    t0, nowSec, win, gx, gy, gw, gh,
                     dataMin, dataMax, tempDisp);
 }
 
@@ -456,9 +455,20 @@ void drawWxGraph() {
   unsigned long t0 = (nowSec > win) ? (nowSec - win) : 0;
 
   unsigned long* times; float* temps; float* mins; float* maxs; int count;
-  wxSeriesForTF(&times, &temps, &mins, &maxs, &count);
+  PendingRollup pend;
+  wxSeriesForTF(&times, &temps, &mins, &maxs, &count, &pend);
+
+  // Same widening as drawPoolGraph: Month <- raw; Year <- hourly + raw.
+  float exLo = 1e9f, exHi = -1e9f;
+  if (g_wxTF == WX_MONTH || g_wxTF == WX_YEAR)
+    widenRange(g_wxLogTime, g_wxLogTemp, nullptr, nullptr,
+               g_wxLogCount, t0, nowSec, exLo, exHi);
+  if (g_wxTF == WX_YEAR)
+    widenRange(g_wxHourTime, g_wxHourTemp, g_wxHourMin, g_wxHourMax,
+               g_wxHourCount, t0, nowSec, exLo, exHi);
+
   float lo, hi;
-  bool plotted = plotWeatherSeries(times, temps, mins, maxs, count, t0, nowSec, win, gx, gy, gw, gh, lo, hi);
+  bool plotted = plotWeatherSeries(times, temps, mins, maxs, count, &pend, exLo, exHi, t0, nowSec, win, gx, gy, gw, gh, lo, hi);
 
   if (!plotted) {
     tft.setTextColor(btnFg(gbg), gbg);
@@ -466,9 +476,8 @@ void drawWxGraph() {
     tft.setCursor(gx + 20, gy + gh / 2);
     tft.print("No data in this period yet");
   } else {
-    // Bottom strip below the chart: actual data low (left), current weather
-    // temp (center), actual data high (right) for the timeframe shown. Sits on
-    // the black screen, not on the graph fill.
+    // Bottom strip: data low (left), current temp (center), data high (right)
+    // for the timeframe; sits on the black screen, not the graph fill.
     tft.setTextColor(TFT_CYAN, TFT_BLACK);
     tft.setTextFont(2);
     tft.setCursor(gx, gy + gh + 6);

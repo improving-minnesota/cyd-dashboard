@@ -1,15 +1,10 @@
-// poolfs.ino - persistent, tiered pool temperature history on LittleFS (flash).
-//
-// Three tiers are kept so the Day/Week/Month/Year graphs all have real data:
-//   /pool.csv       raw 5-min samples   (epoch,temp)        - Day & Week views
-//   /pool_hour.csv  hourly rollups      (epoch,avg,lo,hi)   - Month view
-//   /pool_day.csv   daily rollups       (epoch,avg,lo,hi)   - Year view
-// The rolled-up tiers store each bucket's low/high alongside the average so
-// the Month/Year graphs can scale to the true extremes (e.g. the actual
-// annual high) instead of min/max-of-averages.
-// Each tier is mirrored in a RAM ring buffer for fast graph drawing and is
-// loaded back from flash at boot. If LittleFS is unavailable, everything
-// degrades gracefully to RAM-only for the current session.
+// poolfs.ino - persistent, tiered pool temperature history on LittleFS.
+//   /pool.csv       raw 5-min samples   (epoch,temp)      - Day & Week views
+//   /pool_hour.csv  hourly rollups      (epoch,avg,lo,hi) - Month view
+//   /pool_day.csv   daily rollups       (epoch,avg,lo,hi) - Year view
+// Per-bucket lo/hi lets Month/Year scale to true extremes, not min/max-of-avgs.
+// Each tier is mirrored in a RAM ring loaded at boot; without LittleFS the
+// session degrades gracefully to RAM-only.
 
 #include <LittleFS.h>
 
@@ -18,15 +13,11 @@ unsigned long g_persistCount = 0;      // lines currently in /pool.csv
 unsigned long g_persistHourCount = 0;  // lines currently in /pool_hour.csv
 unsigned long g_persistDayCount = 0;   // lines currently in /pool_day.csv
 
-// Generic loader: reads CSV lines from `path` into the given ring buffer
-// arrays, returning how many lines were in the file. Raw tiers are
-// "epoch,temp" (pass mins/maxs as nullptr); rolled-up tiers are
-// "epoch,avg,lo,hi". Legacy 2-field rollup lines load with lo=hi=avg.
-// The CSV is append-only (newest at the end) and compaction retains more
-// lines than the RAM buffer can hold, so the loader must keep the NEWEST
-// `cap` entries, not the oldest: otherwise the most recent samples
-// (including today's) would be dropped from RAM and the Day/Week graphs
-// would look empty after a boot.
+// Generic loader: CSV lines from `path` into the ring arrays, returning the
+// line count. Raw tiers are "epoch,temp" (mins/maxs nullptr); rollups are
+// "epoch,avg,lo,hi" (legacy 2-field lines load with lo=hi=avg).
+// Compaction retains more lines than the RAM buffer holds, so keep the NEWEST
+// `cap` entries - else the most recent samples drop and graphs look empty.
 unsigned long loadCsvRing(const char* path, unsigned long* times, float* temps,
                            float* mins, float* maxs,
                            int cap, int &outCount, int &outNext) {
@@ -66,9 +57,7 @@ unsigned long loadCsvRing(const char* path, unsigned long* times, float* temps,
     float avg = atof(rest.c_str());
     temps[outCount] = avg;
     if (mins && maxs) {
-      // Rolled-up tier: "epoch,avg,lo,hi". Legacy 2-field lines have no
-      // second comma (or a missing hi) - treat them as a point sample so
-      // old history still draws correctly (lo=hi=avg).
+      // Rolled-up tier "epoch,avg,lo,hi"; legacy 2-field lines get lo=hi=avg.
       float lo = avg, hi = avg;
       if (comma2 > 0) {
         String hiStr = rest.substring(comma2 + 1);
@@ -83,15 +72,15 @@ unsigned long loadCsvRing(const char* path, unsigned long* times, float* temps,
     outCount++;
   }
   f.close();
-  outNext = outCount;
+  // % cap: a full ring wraps the next append to slot 0, not one past the end.
+  outNext = outCount % cap;
   return total;
 }
 
 // Load all persisted history into the RAM ring buffers at boot.
 void poolfsInit() {
-  // begin(true) formats the spiffs partition on first use. Sketch-only flashes
-  // never write the data partition, so without this the mount would fail on
-  // every boot and silently disable pool temp history persistence.
+  // begin(true) formats on first use - sketch-only flashes never write the
+  // data partition, so without this the mount fails on every boot.
   poolFsOk = LittleFS.begin(true);
   if (!poolFsOk) return;
 
@@ -105,15 +94,13 @@ void poolfsInit() {
                                    g_poolDayMin, g_poolDayMax,
                                    MAX_POOL_DAY, g_poolDayCount, g_poolDayNext);
   // Restore the in-progress hour/day accumulators saved before the last deep
-  // sleep, so the rollups keep accumulating across deep-sleep wakes instead of
-  // restarting at every boot (which would starve the Month/Year tiers overnight).
+  // sleep, so rollups accumulate across wakes instead of starving Month/Year.
   loadRollupState();
 }
 
-// Append one line to a ring buffer + its backing file, then compact the file
-// once it grows past `compactAt` lines, keeping `keep`. Raw tiers store
-// "epoch,temp" (pass mins/maxs as nullptr; lo/hi are ignored). Rolled-up
-// tiers store "epoch,avg,lo,hi" in both the ring and the file.
+// Append one line to a ring + its backing file, compacting the file past
+// `compactAt` lines down to `keep`. Raw tiers store "epoch,temp" (mins/maxs
+// nullptr); rollups store "epoch,avg,lo,hi" in both.
 void appendTier(const char* path, unsigned long* times, float* temps,
                  float* mins, float* maxs, int cap,
                  int &count, int &next, unsigned long &persistCount,
@@ -161,11 +148,9 @@ void compactCsvFile(const char* path, unsigned long &persistCount, unsigned long
   persistCount = keep;
 }
 
-// The in-progress hour/day rollup accumulators. Persisted to flash right before
-// each deep sleep and restored at boot. Without this, every deep-sleep wake is
-// a fresh boot that resets g_curHourBucket/g_curDayBucket to -1, so the hour/
-// day buckets never "change" within a single one-sample boot and the hourly/
-// daily tiers would never flush during the night (starving Month/Year).
+// In-progress hour/day accumulators, persisted before each deep sleep and
+// restored at boot - otherwise every wake is a fresh boot that resets the
+// bucket ids to -1 and the hourly/daily tiers never flush overnight.
 typedef struct {
   long  hourBucket;   // epoch/3600 of the in-progress hour (-1 = none)
   float hourSum;
@@ -216,9 +201,8 @@ void loadRollupState() {
 // Append a fresh reading to the raw tier, then roll it into the hourly and
 // daily accumulators, flushing each whenever its time bucket rolls over.
 void poolLog(float temp, unsigned long epoch) {
-  // Require synced time (epoch after ~2020): otherwise the sample would be
-  // invisible to the history graph (it filters to the current window) and
-  // would corrupt the hourly/daily rollups below.
+  // Require synced time (epoch after ~2020) - an unsynced sample is invisible
+  // to the window-filtered graph and would corrupt the rollups below.
   if (epoch < 1600000000L) return;
 
   appendTier("/pool.csv", g_poolLogTime, g_poolLogTemp, nullptr, nullptr,

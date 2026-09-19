@@ -1,11 +1,6 @@
-// flight_details.ino - origin/destination + flight details view.
-//
-// Route/track/route-from-callsign fetches run once per overhead stint (the
-// fetched flags reset when the overhead identity changes) and the recall tap
-// only redisplays the g_lastFlight snapshot — no refetch. ICAO codes map to
-// city names via the table below. When adsb.lol route data carries an IATA
-// code and Show IATA is on, codes display as "ICAO | IATA"; ICAO is always
-// kept for comparisons (home airport, route diff).
+// flight_details.ino - origin/destination + flight details view. Route/track
+// fetch once per overhead stint; the recall tap redisplays g_lastFlight.
+// Codes show "ICAO | IATA" when available; comparisons always use ICAO.
 
 // ---- Airport ICAO -> city lookup (major US + some intl). Fallback = raw code.
 struct Airport { const char* icao; const char* city; };
@@ -117,15 +112,12 @@ bool airlineInfo(const char* callsign, String& name, uint16_t& color) {
   return false;
 }
 
-// findAirlineLogo() is defined in logos.ino: it loads logos from the dedicated
-// LittleFS "logos" partition at runtime (single reusable buffer, PSRAM-first),
-// and is declared at the top of cyd-horizon.ino.
+// findAirlineLogo() lives in logos.ino (LittleFS partition, single reusable buffer).
 
 
 
-// Fetch route (estDepartureAirport / estArrivalAirport) for the given aircraft
-// via OpenSky. Fills g_routeOrigin/g_routeDest (ICAO codes). Cheap-ish but uses
-// OpenSky credits, so we cache it (g_routeFetched).
+// Fetch route via OpenSky /flights/aircraft into g_routeOrigin/Dest (ICAO);
+// cached per plane to save credits.
 void fetchRoute(const char* icao24) {
   g_routeBusy = true;   // guard g_routeOrigin/g_routeDest while we write them
   g_routeOrigin = "";
@@ -176,9 +168,8 @@ void fetchRoute(const char* icao24) {
     }
   }
   http.end();
-  // Cache a valid response. Also mark as fetched for TLS errors, 429 (out of
-  // credits), or truncated/bad framing, so we do not keep retrying and burning
-  // credits for the same overhead plane.
+  // Mark fetched on TLS error/429/bad framing too - don't keep burning credits
+  // on the same plane.
   if (code < 0 || code == HTTP_CODE_TOO_MANY_REQUESTS || (code == HTTP_CODE_OK && !parsedOk)) {
     g_routeFetched = true;
     if (code == HTTP_CODE_TOO_MANY_REQUESTS) {
@@ -196,11 +187,8 @@ void fetchRoute(const char* icao24) {
   g_routeBusy = false;
 }
 
-// Fetch the ground track (past positions + latest bearing) via OpenSky /tracks
-// into g_trackPts (bounded to ~2x radar range) and g_trackBearingDeg (used to
-// dead-reckon the blip along the real path). Also captures the /tracks/* credit
-// bucket. A failed/empty/no-credit response leaves g_trackCount = 0 — no track
-// drawn, dead-reckoning falls back to heading/speed.
+// Fetch ground track via OpenSky /tracks into g_trackPts + g_trackBearingDeg
+// for dead-reckoning; a failed/empty response leaves g_trackCount=0 (no line).
 void fetchTrack(const char* icao24) {
   g_trackBusy = true;
   portENTER_CRITICAL(&g_trackMux);
@@ -287,9 +275,8 @@ void fetchTrack(const char* icao24) {
     if (isDevBuild()) Serial.printf("[net] track ok free=%u pts=%d\n", (unsigned)ESP.getFreeHeap(), (int)g_trackCount);
   }
   http.end();
-  // Cache a valid response. Also mark as fetched for TLS errors, 429 (out of
-  // credits), or truncated/bad framing, so we do not keep retrying and burning
-  // credits for the same overhead plane. A pure no-WiFi exit is handled above.
+  // Mark fetched on TLS error/429/bad framing too (a no-WiFi exit above stays
+  // unfetched) - don't keep burning credits on the same plane.
   if (code < 0 || code == HTTP_CODE_TOO_MANY_REQUESTS || (code == HTTP_CODE_OK && !parsedOk)) {
     g_trackFetched = true;
     if (code == HTTP_CODE_TOO_MANY_REQUESTS) {
@@ -304,13 +291,8 @@ void fetchTrack(const char* icao24) {
   g_trackBusy = false;
 }
 
-// Fetch the planned callsign route from the adsb.lol VRS standing-data mirror
-// over verified HTTPS (GlobalSign ECC root): the endpoint is
-// https://vrs-standing-data.adsb.lol/routes/{prefix}/{callsign}.json.
-// Fills g_adsbRouteOrigin/Dest (ICAO), g_adsbOriginIata/DestIata (display-only),
-// and g_adsbOriginCity/DestCity. The airport_codes fallback path is ICAO-only —
-// _airport_codes_iata spans the whole multi-hop route and can't be trusted to
-// pair legs with the codes we pick.
+// Fetch the planned route from adsb.lol (vrs-standing-data). The airport_codes
+// fallback is ICAO-only - _iata spans multi-hop routes and can't pair legs.
 void fetchAdsbRoute(const char* callsign) {
   g_adsbRouteBusy = true;
   g_adsbRouteOrigin = "";

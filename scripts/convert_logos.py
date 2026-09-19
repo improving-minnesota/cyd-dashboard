@@ -33,16 +33,14 @@ SRC_DIR = os.path.join(SKETCH_DIR, "airline-logos")
 DEFAULT_HDR = os.path.join(SKETCH_DIR, "airline_logos.h")
 LOGO_MAGIC = b"LGO1"
 
-# Box matches the on-screen size (drawn 1:1, no runtime upscaling) so a single
-# high-quality downsample from the source PNG preserves detail, instead of
-# downsampling small then blowing back up with blocky nearest-neighbor scaling.
+# Box matches on-screen size (drawn 1:1, no runtime scaling) so one
+# high-quality downsample preserves detail vs. downsample-then-upscale.
 BOX_W = 72   # target box width  (= on-screen logo width)
 BOX_H = 48   # target box height (= on-screen logo height)
 TRANSPARENT = 0xF81F   # magenta; TFT_eSPI skips this color when pushing
 
-# (filename keyword, ICAO code, nice name). The keyword must match exactly one
-# source file (case-insensitive substring). Keep keywords specific/ordered so
-# ambiguous names resolve uniquely (e.g. UPS uses "Parcel" before "United").
+# (filename keyword, ICAO code, nice name). Keyword must match exactly one
+# source file (case-insensitive substring) - keep specific (UPS = "Parcel").
 AIRLINES = [
     ("ANA Holdings",    "ANA", "ANA (All Nippon Airways)"),
     ("Aer Lingus",      "EIN", "Aer Lingus"),

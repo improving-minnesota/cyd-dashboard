@@ -1,30 +1,9 @@
 #include <strings.h>   // strcasecmp (preset sort)
 
 // ---- Alarms ----
-// Up to MAX_ALARMS time-of-day alarms with per-weekday masks and an LED +
-// speaker notification pattern (each preset drives the RGB LED and a matching
-// beep pattern on the JST speaker header, GPIO 26). An empty mask isn't a
-// dead alarm - it's a one-time alarm: nextScheduled() treats it as "any
-// weekday" so it fires at the next h:m, and dismissing it turns it off.
-// Stored as one NVS blob
-// in the "flight" namespace, so Settings/Factory reset wipes them like every
-// other setting.
-//
-// Firing model: each alarm carries nextFire, the absolute epoch of its next
-// firing, persisted in NVS. An alarm is due iff nextFire <= now - there is no
-// time-of-day window, so a firing missed while asleep or powered off still
-// goes off when the device next runs. nextFire is rewritten whenever the
-// situation changes: editing an alarm rearms it to the next matching weekday,
-// Dismiss does the same, and Snooze parks it at now + 5 min. A snoozed alarm
-// needs no flag: its nextFire sits earlier than the next scheduled
-// occurrence. Each alarm tracks its own nextFire, so multiple alarms can be
-// snoozed at once, and each counts its snoozes (a.snoozes, persisted) - an
-// episode allows ALARM_MAX_SNOOZES, then the next snooze request (idle
-// timeout or button) dismisses it for the day.
-//
-// When an alarm fires the screen shows big Dismiss / Snooze buttons and the
-// LED runs the alarm's pattern until handled. If nobody answers before the
-// screen idle timeout it auto-snoozes.
+// Time-of-day alarms: weekday masks (empty = one-time) + LED/speaker preset;
+// persisted nextFire drives firing/snooze (missed firings still go off).
+// One NVS blob in "flight". See DEVELOPER.md "Alarms".
 #define MAX_ALARMS 6
 #define ALARM_SNOOZE_SEC (5 * 60)
 #define ALARM_MAX_SNOOZES 3   // snoozes per firing episode; the next request dismisses
@@ -50,13 +29,8 @@ String g_alarmTimeStr = "0700";   // HHMM buffer for the manual keyboard editor
 extern int g_wifiSub;             // defined in wifi_config.ino (concatenated last)
 
 // ---- notification presets ----
-// Each preset is a looping "score" of steps; a step carries the tone frequency
-// (0 = rest) and the RGB LED channels to light for its duration. Driving LED
-// and speaker from the same table keeps light and sound in sync and makes
-// every preset a readable line of (freq, ms, rgb) notes. rgb bits: 1=red,
-// 2=green, 4=blue (7=white); the LED channels are active-low.
-// struct NtfStep is declared in cyd-horizon.ino (with ntfStepAt's explicit
-// prototype) so the Arduino-generated prototypes can reference it.
+// A preset is a looping (freq, ms, rgb) score driving LED + speaker; rgb bits
+// 1/2/4 = R/G/B, active-low. NtfStep lives in cyd-horizon.ino for prototypes.
 
 static const NtfStep kPatBlink[] = {   // white flash + beep ~1Hz
   { 988, 500, 7 }, { 0, 500, 0 },
@@ -319,9 +293,8 @@ const char* alarmPresetName(int i) {
   return kNtfPresets[constrain(i, 0, kNumAlarmPresets - 1)].name;
 }
 
-// Steppers cycle alphabetically, but the persisted value stays a kNtfPresets
-// index (it's in NVS), so the table itself is never reordered. g_ntfOrder
-// maps display position -> preset index and is sorted once on first use.
+// Steppers cycle alphabetically but the NVS value stays a kNtfPresets index
+// (never reorder the table); g_ntfOrder maps display position -> index.
 static uint8_t g_ntfOrder[64];
 static bool g_ntfOrderInit = false;
 static void ntfOrderInit() {
@@ -394,11 +367,8 @@ bool anyAlarmEnabled() {
 }
 
 // ---- scheduling ----
-// Earliest future epoch matching the alarm's h:m on an allowed weekday, or 0
-// if it can't fire (disabled or time not synced yet). No days selected is a
-// one-time alarm: the mask effectively becomes "any weekday", so it fires at
-// the next h:m and alarmDismiss() turns it off instead of rearming.
-// Strictly future so a firing already in progress doesn't reselect itself.
+// Earliest future h:m on an allowed weekday (empty mask = one-time next h:m),
+// or 0 if it can't fire. Strictly future so a firing doesn't reselect itself.
 static time_t nextScheduled(int i, time_t now) {
   const Alarm& a = g_alarms[i];
   if (!a.en) return 0;
@@ -415,10 +385,8 @@ static time_t nextScheduled(int i, time_t now) {
   return 0;
 }
 
-// Recompute nextFire from the schedule and clear the snooze count - the end
-// of a firing episode (dismiss) or a schedule change (any editor write).
-// nextFire==0 means "pending": checkAlarms()/alarmDueNow() fill it in once
-// the clock is synced.
+// Recompute nextFire + clear snoozes on dismiss/edit; 0 = "pending", filled
+// once the clock syncs.
 void rearmAlarm(int i) {
   Alarm& a = g_alarms[i];
   a.snoozes = 0;
@@ -426,9 +394,7 @@ void rearmAlarm(int i) {
 }
 
 // ---- firing ----
-// A snoozed alarm's nextFire sits earlier than its next scheduled
-// occurrence; that comparison is the whole "is snoozed" test - no separate
-// flag to keep in sync across reboots.
+// "Snoozed" = nextFire earlier than the next scheduled occurrence - no flag to keep in sync.
 static bool isSnoozed(int i, time_t now) {
   const Alarm& a = g_alarms[i];
   if (!a.en || a.nextFire == 0 || (time_t)a.nextFire <= now) return false;
@@ -462,10 +428,8 @@ time_t snoozeRefireAt() {
   return i < 0 ? 0 : (time_t)g_alarms[i].nextFire;
 }
 
-// Called from loop() every tick. Fires any alarm whose nextFire has passed -
-// scheduled time, matured snooze, or a firing missed while asleep or powered
-// off - from whatever screen is showing. Also fills in nextFire for alarms
-// saved before the clock was known (e.g. edited with no time sync).
+// loop() tick: fire any alarm whose nextFire passed (schedule, matured snooze,
+// or a firing missed while off); also fills in pending nextFires.
 void checkAlarms() {
   if (g_alarmFiring || !g_timeReady) return;
   time_t now = time(nullptr);
@@ -501,9 +465,8 @@ bool alarmDueNow() {
   return due;
 }
 
-// Earliest upcoming nextFire across enabled alarms, or 0. enterDeepSleep()
-// uses it to wake exactly at the next firing instead of discovering it up to
-// ~5 min late on the pool-temp cadence.
+// Earliest upcoming nextFire (0 if none) - enterDeepSleep() wakes at it instead
+// of discovering the firing ~5 min late on the pool cadence.
 time_t nextAlarmAt() {
   time_t now = time(nullptr);
   if (now < 1600000000L) return 0;
@@ -515,11 +478,8 @@ time_t nextAlarmAt() {
   return (time_t)best;
 }
 
-// Earliest enabled-alarm occurrence after `after`, counting both the next
-// scheduled firing and a parked snooze (whose nextFire sits earlier than the
-// schedule). Unlike nextAlarmAt(), passing `after` earlier than now also finds
-// occurrences that already fired but still sit inside a trailing window - the
-// daily update scan's +/-1h alarm quiet window uses it both ways.
+// Earliest enabled-alarm occurrence after `after`, counting parked snoozes; an
+// `after` before now finds trailing-window occurrences (update-scan quiet win).
 time_t nextAlarmAfter(time_t after) {
   uint32_t best = 0;
   for (int i = 0; i < g_alarmCount; i++) {
@@ -533,9 +493,8 @@ time_t nextAlarmAfter(time_t after) {
   return (time_t)best;
 }
 
-// "Snoozing for N minutes..." for the dashboard's bottom-left status line
-// while a snooze is pending; returns false when no snooze is pending. The
-// minute count is ceiled so it reads 5 down to 1 rather than hitting 0.
+// "Snoozing for N minutes..." status text (ceiled so it reads 5..1); false
+// when no snooze is pending.
 bool snoozeStatusText(char* buf, size_t n) {
   time_t at = snoozeRefireAt();
   if (!at) return false;
@@ -575,10 +534,8 @@ void alarmDismiss() {
   dirty = true;
 }
 
-// Park the firing alarm for 5 minutes. An episode allows ALARM_MAX_SNOOZES
-// snoozes; one more request (idle timeout or button) dismisses it for the
-// day. nextFire goes to NVS, so the snooze survives deep sleep and power
-// loss.
+// Park the firing alarm 5 min; past ALARM_MAX_SNOOZES the next request
+// dismisses. nextFire is in NVS, so a snooze survives deep sleep.
 void alarmSnooze() {
   if (g_fireIdx >= 0 && g_fireIdx < g_alarmCount) {
     Alarm& a = g_alarms[g_fireIdx];
@@ -602,9 +559,7 @@ static void ledWrite(bool r, bool g, bool b) {   // active-low channels
   digitalWrite(CYD_LED_BLUE,  b ? LOW : HIGH);
 }
 
-// One-shot preview while picking a preset in the editor (see
-// handleAlarmsTouch): plays the chosen pattern on the LED and speaker for a
-// few seconds so the user can see and hear what they picked.
+// One-shot preview of the picked preset on LED + speaker while editing.
 static uint32_t g_ledPreviewUntil = 0;
 static int      g_ledPreviewPreset = -1;
 
@@ -626,13 +581,8 @@ bool alarmLedBusy() {
 }
 
 // ---- notification speaker (non-blocking, driven with the LED) ----
-// GPIO 26 is the CYD's JST speaker connector through the onboard amp. Volume
-// comes from the LEDC duty cycle: tone() always runs ~50% (10-bit, duty 511),
-// so we drive ledcWrite() directly with a duty scaled by the "Notify
-// Volume" setting (g_notifyVol, NVS "ntfvol", one of kNtfVolLevels). A square wave's
-// loudness tracks its duty, so 100 reproduces the old full-volume sound and
-// 0 is silent. tone()/noTone() are not used: they queue onto a background
-// task that resets the duty to half-scale, which would undo the volume.
+// GPIO 26 = JST speaker via the onboard amp. Volume is the LEDC duty scaled by
+// g_notifyVol; tone() is unusable - it pins duty at ~50% on a background task.
 #define SPK_PIN 26
 #define SPK_RES 10                  // LEDC bits; 50% duty = 511 like tone()
 static int  g_toneFreq = -1;        // currently playing freq, -1 = silent
@@ -641,11 +591,8 @@ static bool g_spkAttached = false;  // SPK_PIN is attached to an LEDC channel
 static void toneWrite(int freq) {
   if (freq == g_toneFreq) return;
   g_toneFreq = freq;
-  // Both boards gate their audio amp behind GPIO 4 (active-low shutdown):
-  // the E32R40T uses an FM8002E, and the 2432S028R's SC8002B turned out to
-  // use the same pin (verified with the speaker-test app: LOW = loud tone
-  // while the display keeps working). Re-asserted on every tone in case a
-  // TFT_RST pulse during a later tft.init() left it high again.
+  // Both boards gate the amp behind GPIO 4 (active-low); re-asserted per tone
+  // in case a TFT_RST pulse during tft.init() raised it.
   if (freq > 0) { pinMode(4, OUTPUT); digitalWrite(4, LOW); }
   if (freq <= 0) {
     if (g_spkAttached) ledcWrite(SPK_PIN, 0);   // silent; pin stays attached
@@ -681,15 +628,9 @@ void updateAlarmLed(unsigned long now) {
 }
 
 // ---- watch-callsign notification ----
-// While a watched callsign's flight is shown on the dashboard, the LED runs
-// the user's saved "Callsign Notify" preset (same patterns as alarms)
-// and the speaker plays that preset's beep pattern for the first ~5s of each
-// sighting. Independent of the blink-for-flight setting. Driven from loop()
-// inside the !alarmLedBusy() gate so a firing alarm keeps the LED + speaker.
-// Disarming on inactive re-arms the notification so a watched flight that
-// leaves and returns notifies again; a different watched plane taking over
-// the tracked slot (substring matches can hand off mid-view) also counts as
-// a new sighting and replays the speaker window.
+// While a watched flight shows, run its preset on LED + speaker (~5s per
+// sighting). Gated on !alarmLedBusy() so a firing alarm wins; re-arms on
+// leave/return or a new watched plane.
 #define WATCH_TONE_MS 5000
 static unsigned long g_watchToneStart = 0;
 static bool g_watchToneArmed = false;
@@ -720,17 +661,13 @@ void updateWatchNotify(unsigned long now, bool active, const char* icao24) {
 }
 
 // ---- boot chime ----
-// A short rising C5-E5-G5-C6 arpeggio while the LED steps red->green->blue->
-// white: the "device is on" signature. Blocking in setup() so it finishes
-// before the loop's LED logic takes over. Cold boots only - setup() skips it
-// whenever the reset came out of deep sleep.
+// Rising C5-E5-G5-C6 arpeggio + LED sweep: "device is on". Blocking in setup(),
+// cold boots only (deep-sleep wakes skip it).
 static const NtfStep kBootChime[] = {
   { 523, 110, 1 }, { 659, 110, 2 }, { 784, 110, 4 }, { 1047, 320, 7 },
 };
 
-// Play an NtfStep score once, blocking. Trailing all-rest steps are skipped:
-// presets pad their loop period with a final {0,...,0}, which only matters
-// when the pattern repeats.
+// Play a score once, blocking; trailing rest steps (loop padding) are skipped.
 static void playSteps(const NtfStep* steps, int n) {
   while (n > 0 && steps[n - 1].freq == 0 && steps[n - 1].rgb == 0) n--;
   for (int i = 0; i < n; i++) {
@@ -773,9 +710,8 @@ void drawAlarmBell(int x, int y, uint16_t bg) {
   (void)bg;
 }
 
-// Alarms editor screen: "Alarms > N". Enable toggle, a time stepper (tap the
-// time itself for keyboard entry), weekday toggles, notify-preset stepper,
-// and a < / New-or-> / Delete footer.
+// Alarms editor "Alarms > N": enable toggle, time stepper (tap the time for
+// keyboard), weekday toggles, preset stepper, < / New / Delete footer.
 void drawAlarms() {
   Alarm& a = g_alarms[g_alarmIdx];
   tft.fillScreen(TFT_BLACK);

@@ -1,12 +1,6 @@
 // wifi_config.ino - on-device network provisioning via the touchscreen.
-//
-// Part of the cyd-horizon sketch. Provides these sub-screens:
-//   0 = network list (scan results) + "enter manually" + "IP Setup"
-//   1 = keyboard to type an SSID
-//   2 = keyboard to type a password, then save & connect
-//   20 = IP Settings page (DHCP/Static + address fields)
-//   21..25 = keyboards for IP address, subnet mask, gateway, DNS, hostname
-// Credentials are stored in NVS so the device reconnects after a reboot.
+// Sub-screens: 0=list, 1=SSID kb, 2=password kb, 20=IP settings, 21..25=IP
+// field keyboards (3..13 = settings keyboards). Credentials persist in NVS.
 
 int  g_wifiSub = 0;         // 0=list, 1=ssid keyboard, 2=pass keyboard
 bool g_kbShift = false;     // one-shot: capital for the next letter only
@@ -26,8 +20,7 @@ String g_ssid = "";
 String g_pass = "";
 // g_latLonStr is defined in cyd-horizon.ino (concatenation order)
 
-// Switch to the list screen and kick off an async scan - the list shows
-// "Scanning..." until pollWifiScan() harvests the results.
+// Enter the list screen and kick an async scan (pollWifiScan() harvests it).
 void enterWifiScreen() {
   g_wifiSub = 0;
   g_ssid = "";
@@ -38,8 +31,7 @@ void enterWifiScreen() {
   dirty = true;
 }
 
-// Kick off a non-blocking scan. scanNetworks(true) returns immediately, so
-// neither entering the screen nor tapping "Scan" freezes the UI for ~2 s.
+// Async scan so entering the screen / tapping Scan doesn't freeze the UI ~2 s.
 void scanWifi() {
   WiFi.scanDelete();
   WiFi.mode(WIFI_STA);            // scanning needs the STA radio even with no creds
@@ -49,8 +41,7 @@ void scanWifi() {
   g_netScroll = 0;
 }
 
-// Called from loop() while a scan is in flight: collects results when the
-// scan completes and requests a redraw.
+// loop() scan poll: collect results + request redraw when the scan completes.
 void pollWifiScan() {
   if (!g_scanning) return;
   int n = WiFi.scanComplete();
@@ -75,9 +66,8 @@ void pollWifiScan() {
   }
   g_scanning = false;
   if (n < 0) n = 0;   // WIFI_SCAN_FAILED or zero results
-  // Deduplicate by SSID, recording how many access points share it and the
-  // 2.4GHz channels they use. The ESP32 only sees 2.4GHz, so duplicate SSIDs
-  // are multiple APs of the same network, not different bands.
+  // Dedupe by SSID + track AP count/channels (ESP32 is 2.4GHz-only, so dupes
+  // are multiple APs of one network, not different bands).
   for (int i = 0; i < n && g_netCount < 20; i++) {
     String ssid = WiFi.SSID(i);
     int ch = WiFi.channel(i);
@@ -204,9 +194,7 @@ void drawWifiList() {
 }
 
 void handleWifiListTouch(uint16_t x, uint16_t y) {
-  // During the first-boot wizard, Back ends the flow on the dashboard (a
-  // "skip" that still leaves the device usable); otherwise it returns to
-  // Settings as before.
+  // In the boot wizard, Back skips to the dashboard; otherwise Settings.
   if (inRect(x, y, RX(265), 4, RX(315), 24)) {
     if (g_bootStage == BOOT_WIFI) { g_bootStage = BOOT_DONE; g_screen = SCR_DASH; }
     else g_screen = SCR_SETTINGS;
@@ -235,10 +223,8 @@ void handleWifiListTouch(uint16_t x, uint16_t y) {
 }
 
 // ---- IP Settings (DHCP / static addressing + hostname) ----
-// The g_static*/g_hostname strings are the live values; edits persist via
-// saveNetCfg() on keyboard OK. Values are (re)loaded when the page opens so a
-// backed-out edit can't leave unsaved text in the globals the next connect
-// would use.
+// g_static*/g_hostname are live values persisted by saveNetCfg(); reload on
+// open so a backed-out edit can't leak into the next connect.
 
 void loadNetCfg() {
   g_ipDhcp    = prefs.getBool("ipdhcp", true);
@@ -355,8 +341,7 @@ void handleIpConfigTouch(uint16_t x, uint16_t y) {
     dirty = true;
     return;
   }
-  // Edit buttons (right edge of each row). DHCP shows only the hostname row;
-  // static shows all five, matching drawIpConfig()'s layout.
+  // Edit buttons per drawIpConfig() - DHCP shows only the hostname row.
   if (!g_ipDhcp) {
     if      (inRect(x, y, RX(270),  76, RX(312), 100)) g_wifiSub = 21;
     else if (inRect(x, y, RX(270), 104, RX(312), 128)) g_wifiSub = 22;
@@ -372,7 +357,7 @@ void handleIpConfigTouch(uint16_t x, uint16_t y) {
 }
 
 // ---- on-screen keyboard (QWERTY + Shift + symbols) ----
-// Three rows of 10 keys at y 60..143; a bottom control bar at y 144..219.
+// Three rows of 10 keys (y 60..143); bottom control bar y 144..219.
 char keyFromXY(int x, int y) {
   int row = (y - 60) / 28;
   if (row < 0 || row > 2) return 0;
@@ -393,13 +378,11 @@ char keyFromXY(int x, int y) {
 }
 
 // ---- cursor-based text editing in the on-screen keyboard ----
-// g_kbCursor is the edit cursor index (0..length) within the active field. It
-// is reset to the end whenever the active field (g_wifiSub) changes. Tapping
-// the text field places the cursor; letters/space/del act at that position.
+// g_kbCursor (0..length) is the edit cursor, reset to end on field change;
+// taps in the field place it, keys act at it.
 
-// Compute the horizontal scroll so the cursor stays visible. Returns the index
-// of the first visible character and its cumulative pixel width (the base used
-// to align drawn text and the cursor bar, so they never drift apart).
+// Scroll so the cursor stays visible; returns the first visible char + its
+// pixel width (the shared base keeps drawn text and the cursor bar aligned).
 void kbVisibleRange(const String& text, int& start, int& startWidth, int avail) {
   int len = text.length();
   if (g_kbCursor < 0) g_kbCursor = 0;
@@ -413,8 +396,7 @@ void kbVisibleRange(const String& text, int& start, int& startWidth, int avail) 
   startWidth = tft.textWidth(text.substring(0, start));
 }
 
-// Map a pixel offset from the start of the full text to the nearest character
-// boundary index (cursor position).
+// Map a pixel offset to the nearest character boundary (cursor position).
 int cursorIndexAt(const String& text, int textX) {
   if (textX <= 0) return 0;
   if (textX >= tft.textWidth(text)) return text.length();
@@ -426,9 +408,8 @@ int cursorIndexAt(const String& text, int textX) {
   return best;
 }
 
-// Draw the editable text field with the cursor bar and horizontal scrolling.
-// `avail` is the usable text width (narrower for password fields, which have a
-// View/Hide toggle on the right). Password fields are masked unless g_kbShow.
+// Editable field with cursor bar + scroll; password fields mask the text and
+// reserve `avail` room for the View/Hide toggle.
 void drawEditableField(const String& text, bool pw, int avail) {
   tft.fillRoundRect(6, 34, DISP_W - 14, 22, 4, TFT_DARKGREY);
   tft.setTextColor(TFT_GREENYELLOW, TFT_DARKGREY);
@@ -517,9 +498,7 @@ void drawKeyboard(const String& title, const String& text, bool pw) {
     tft.setTextColor(btnFg(bg), bg);
     tft.setTextFont(2);
     if (i == 3) {
-      // Backspace glyph: the built-in fonts are ASCII-only (no U+232B), so
-      // draw it - a left-pointed tag with an X punched out, kept just under
-      // the font-2 label size.
+      // Backspace glyph drawn by hand - the built-in fonts are ASCII-only.
       uint16_t fg = btnFg(bg);
       int gx = x + ctrlW / 2 - 9, gy = ctrlY + 30;
       tft.fillTriangle(gx, gy + 7, gx + 5, gy, gx + 5, gy + 14, fg);
@@ -622,9 +601,8 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
   // bottom control bar (y 144..219): Shift | ?123/abc | space | backspace | OK
   if (y >= 144 && y <= 219) {
     int i = constrain(x / (DISP_W / 5), 0, 4);
-    if (i == 0) {   // Shift cycles: shift -> Shift (next letter) -> CAPS -> shift
-      // No timing window - resistive-screen taps can't reliably tell a
-      // deliberate double-tap from two separate presses.
+    if (i == 0) {   // Shift cycles shift -> Shift -> CAPS
+      // No double-tap timing - resistive taps can't be told apart reliably.
       if (g_kbCaps)       { g_kbCaps = false; g_kbShift = false; }
       else if (g_kbShift) { g_kbCaps = true; }
       else                { g_kbShift = true; }
@@ -652,9 +630,8 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
       else if (g_wifiSub == 3) { g_wifiSub = 4; dirty = true; }
       else if (g_wifiSub == 4) { saveOsCreds(); g_screen = SCR_FTRACKER; dirty = true; }
       else if (g_wifiSub == 5) {
-        // Address search. Show a "Searching..." screen during the blocking
-        // geocode call, and on failure keep the user in the flow (sub 12) so
-        // they can edit the address instead of starting over from empty.
+        // Show "Searching..." during the blocking geocode; on failure land on
+        // sub 12 so the user can fix the address instead of starting over.
         if (g_addrSearch.length() == 0) {
           g_addrErr = "empty";
           g_wifiSub = 12;
@@ -710,8 +687,7 @@ void handleKeyboardTouch(uint16_t x, uint16_t y) {
       g_kbCursor++;
       dirty = true;
     }
-    // tap one uppercase char per Shift press, then drop back to lowercase;
-    // CAPS is intentionally NOT cleared here
+    // Shift drops after one letter; CAPS intentionally persists.
     if (g_kbShift && c >= 'A' && c <= 'Z') { g_kbShift = false; dirty = true; }
   }
 }
@@ -746,13 +722,9 @@ void commitAlarmTime() {
 }
 
 // ---- Serial NVS provisioning ----
-// At boot, listens a few seconds for "KEY=VALUE" lines over USB serial and
-// writes each recognized key into NVS — provisions credentials without
-// compiling them into firmware or touching the filesystem. Host side:
-// scripts/provision_config.py. "@END" exits the window early.
-// Production strips this via ENABLE_SERIAL_PROVISION=0 (defined in
-// cyd-horizon.ino so it's visible first in Arduino's alphabetical
-// concatenation); credentials stay in NVS, so the board keeps working.
+// Boot-time "KEY=VALUE" lines over USB serial -> NVS (host:
+// scripts/provision_config.py; "@END" exits early). Production strips this
+// via ENABLE_SERIAL_PROVISION=0; creds stay in NVS so the board keeps working.
 #if ENABLE_SERIAL_PROVISION
 #define PROVISION_WINDOW_MS 4000UL
 
@@ -762,10 +734,9 @@ static String s_otaFile = "";
 static String s_otaVer = "";   // label for the OTA screen (from OTA_VER=)
 
 static String buildOtaUrl(const String& ipOrUrl, const String& file) {
-  // If a full URL was given (starts with http:// or https://), use it directly.
+  // A full URL is used directly; otherwise ipOrUrl is an IP/host and the local
+  // replay server serves firmware over plain HTTP :8080 (data is HTTPS :8081).
   if (ipOrUrl.startsWith("http://") || ipOrUrl.startsWith("https://")) return ipOrUrl;
-  // Otherwise treat ipOrUrl as just an IP/host and build the local replay server URL.
-  // OTA firmware is served over plain HTTP on port 8080; all other replay data is HTTPS on 8081.
   String url = "http://" + ipOrUrl + ":8080/firmware";
   if (file.length()) url += "?file=" + file;
   return url;
@@ -865,13 +836,8 @@ done:
   if (changed) Serial.println("PROV: done");
 }
 
-// Runtime serial command handler for OTA (can be called anytime from loop)
-// Supports:
-//   OTA_URL=http://server:port/firmware.bin   (full URL, legacy)
-//   OTA_IP=192.168.x.x                        (server IP)
-//   OTA_FILE=cyd-horizon.ino.bin            (firmware filename)
-//   OTA_VER=1.18.0-dev, Build 25              (label shown on the OTA screen)
-//   OTA_GO                                      (trigger with OTA_IP + OTA_FILE)
+// Runtime serial OTA commands (anytime from loop): OTA_URL=<full url>, or
+// OTA_IP + OTA_FILE + OTA_VER (screen label) + OTA_GO to trigger.
 void handleSerialCommands() {
   static String line;
   while (Serial.available()) {
@@ -932,11 +898,8 @@ void handleSerialCommands() {
 
 #endif  // ENABLE_SERIAL_PROVISION
 
-// Persist OpenSky credentials to NVS and force the next poll to re-authenticate
-// with them. Without this, a cached bearer token minted from the OLD client
-// would keep being used until it expired (~30 min), so corrected credentials
-// appeared not to take effect - and a stale AUTH_BAD/401 backoff would keep the
-// "Invalid OpenSky Creds" error on screen.
+// Persist OpenSky creds + drop the cached token/401 backoff - otherwise the old
+// token's ~30 min life makes corrected credentials appear ignored.
 void saveOsCreds() {
   prefs.begin("flight", false);
   prefs.putString("oscid",  g_osClientId);
@@ -945,8 +908,7 @@ void saveOsCreds() {
   invalidateOsAuth();
 }
 
-// Drop any cached OpenSky token/auth verdict so the next radar poll starts
-// clean. Also clears the 401 backoff so the retry happens immediately.
+// Drop the cached OpenSky token/auth verdict + 401 backoff; re-poll now.
 void invalidateOsAuth() {
   g_osToken = "";
   g_osTokenValid = false;
@@ -991,9 +953,9 @@ void saveAndConnectWifi() {
   dirty = true;
 }
 
-// ---- Address search: user-friendly flow (see also geocodeAddress) ----
-// g_addrSearch holds the text being edited (kept across visits so a failed
-// search can be fixed). wifiSub 5 = edit keyboard, 12 = result/status screen.
+// ---- Address search (see geocodeAddress) ----
+// g_addrSearch persists across visits so a failed search can be fixed;
+// wifiSub 5 = edit keyboard, 12 = result/status screen.
 
 // Brief "Searching..." screen shown while the (blocking) geocode request runs.
 void drawSearchingAddr(const String& q) {
@@ -1018,8 +980,7 @@ String friendlyGeoError(const char* code) {
   return "Could not complete the search.";
 }
 
-// Result/status screen after an address search. Any tap returns to editing the
-// address so the user can fix it rather than start over.
+// Result/status screen after a search; any tap returns to editing the address.
 void drawAddrStatus() {
   tft.fillScreen(TFT_BLACK);
   tft.fillRect(0, 0, DISP_W, 28, g_clockCol);

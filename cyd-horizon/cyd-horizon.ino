@@ -1,19 +1,6 @@
-// cyd-horizon: standalone dashboard for CYD-family boards
-// (see "Board variants" in DEVELOPER.md; pins in tft_setup.h).
-//
-// Fetches live aircraft positions from the OpenSky API over WiFi, filters
-// for planes near/overhead your location, draws a dashboard on the TFT, and
-// lets you adjust the distance radius and altitude ceiling from a touch
-// settings screen (persisted to NVS so they survive reboots).
-//
-// SETUP:
-//   1. WiFi/OpenSky/Govee credentials are provisioned to NVS over USB serial
-//      (see README + wifi_config.ino); no credentials are compiled in.
-//   2. The TFT/touch pins come from TFT_eSPI User_Setups/
-//      Setup_ESP32_2432S028_CYD.h (correct pinout for the 2432S028R: TFT on
-//      HSPI, XPT2046 touch on VSPI, touch IRQ on GPIO 36).
-//
-// Display rotates to landscape; 320x240 logical (480x320 panel on E32R40T).
+// cyd-horizon: standalone dashboard for CYD-family boards (see DEVELOPER.md;
+// pins in tft_setup.h). Landscape, 320x240 logical (480x320 on E32R40T).
+// Credentials are provisioned to NVS over serial - none compiled in.
 
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -32,32 +19,26 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <malloc.h>  // malloc_usable_size
-// Airline logos are loaded at runtime from a dedicated LittleFS partition (see
-// logos.ino), never compiled into the firmware. Declare the type and symbols
-// here so every .ino file can use them regardless of Arduino's alphabetical
-// concatenation order.
+// Logos load at runtime from a LittleFS partition (logos.ino); declared here
+// so Arduino's alphabetical .ino concat can't hide them from other files.
 struct RuntimeLogo { char icao[4]; uint16_t* data; int w; int h; };
 bool logosInit();
 const RuntimeLogo* findAirlineLogo(const char* callsign);
-// Same trick for the notification-step type in alarms.ino: without an explicit
-// declaration here, the generated prototype for ntfStepAt() would be hoisted
-// above the struct definition and fail to compile.
+// Same hoisting workaround: ntfStepAt()'s generated prototype would precede this struct.
 struct NtfStep { uint16_t freq; uint16_t ms; uint8_t rgb; };
 static const NtfStep* ntfStepAt(int preset, unsigned long now);
 void logoRelease(const RuntimeLogo* logo);
 // Forward-declare Plane so Arduino's auto-generated function prototypes (which
 // are inserted before the sketch body) can reference drawFlightInfo(Plane& p).
 struct Plane;
+// Same hoisting workaround for plotSeries()' pending-bucket param (t==0 = none).
+struct PendingRollup { unsigned long t; float avg, lo, hi; };
 
 // LED blink colors for overhead-flight notifications.
 enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW, BLINK_WHITE };
 
-// Serial NVS provisioning (see wifi_config.ino). Defined HERE (not in
-// wifi_config.ino) because Arduino concatenates .ino files alphabetically, and
-// this file uses the macro before wifi_config.ino is reached. Set to 0 to
-// strip out the temporary provisioning listener. Guarded with #ifndef so the
-// build can enable it with -DENABLE_SERIAL_PROVISION=1 (an unconditional
-// #define here would otherwise silently override that command-line flag).
+// Serial NVS provisioning (wifi_config.ino). Defined here so it precedes
+// wifi_config.ino in the .ino concat; #ifndef lets -D override.
 #ifndef ENABLE_SERIAL_PROVISION
 #define ENABLE_SERIAL_PROVISION 0
 #endif
@@ -72,28 +53,22 @@ enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW, 
 #define BUILD_NUM 0
 #endif
 
-// Pool temperature feature (Govee) via POST /router/api/v1/device/state, logged
-// to flash for the history graphs. Whether this board's H5310 appears in
-// /user/devices depends on Govee's API support for the model — if not listed
-// (or a fetch fails) the pool shows "--" and a red border, not a crash.
+// Pool temp via Govee API, logged to flash for the history graphs; an
+// unlisted/failed device shows "--" + red border rather than crashing.
 #define POOL_FEATURE 1
 
 // Deep-sleep wake interval while inside the sleep window. The device wakes
 // briefly to log the pool temperature, then returns to low-power deep sleep.
 #define SLEEP_POOL_INTERVAL_US (5ULL * 60ULL * 1000000ULL)   // 5 minutes
 
-// Daily auto-update scan scheduling. The once-per-day GitHub release check is
-// spread over a random offset within JITTER so fleets that wake together (end
-// of a sleep window, midnight rollover) don't hit the API in the same minute,
-// and it never starts within +/- QUIET of an enabled alarm firing (see the
-// scheduler in loop()).
+// Daily update scan scheduling: jittered so fleets waking together don't hit
+// GitHub in lockstep, and kept clear of alarm firings (scheduler in loop()).
 #define AUTOSCAN_JITTER_S       3600
 #define AUTOSCAN_ALARM_QUIET_S  3600
 
 // ---- Touch-wake from deep sleep ----
-// VERIFIED on this unit: the XPT2046 touch IRQ is GPIO 36 (active-low) and
-// wakes via EXT0. enterDeepSleep() must hold touch CS low during sleep for the
-// wake to fire. GPIO 36 is input-only — no INPUT_PULLUP.
+// VERIFIED on this unit: touch IRQ = GPIO 36 (active-low, EXT0, input-only);
+// enterDeepSleep() must hold touch CS low during sleep for the wake to fire.
 #define TOUCH_IRQ_ENABLED 1
 #define TOUCH_IRQ_PIN     36
 #define TOUCH_CS_PIN      33
@@ -106,8 +81,7 @@ enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW, 
 #define TOUCH_CLK  14
 #else
 // ---- XPT2046 touch on VSPI (separate bus from the TFT's HSPI) ----
-// TFT_eSPI's getTouch() only works on the display's bus, so we drive the
-// XPT2046 directly over VSPI instead; see touchReadXY().
+// getTouch() only works on the display bus, so we drive the XPT2046 directly.
 #define TOUCH_SPI VSPI
 #define TOUCH_MOSI 32
 #define TOUCH_MISO 39
@@ -119,11 +93,9 @@ enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW, 
 #define TOUCH_DEBUG 0
 
 // ---------------- CONFIG (edit these) ----------------
-// OpenSky bbox will be computed from g_lat/g_lon at runtime.
-// Build/version shown on the About page. CI/dev builds pass -DAPP_VERSION=
-// <ver>-dev (see release.yml / DEVELOPER.md); the literal below is only a
-// fallback for flag-less builds (e.g. Arduino IDE) so isDevBuild() has a
-// "-dev" string to find. A "-dev" build never auto-updates (g_autoUpdate).
+// OpenSky bbox is computed from g_lat/g_lon at runtime.
+// APP_VERSION: CI/dev pass -DAPP_VERSION=<ver>-dev; this literal is only the
+// flag-less fallback. A "-dev" build never auto-updates (g_autoUpdate).
 #define STRINGIZE_INNER(x) #x
 #define STRINGIZE(x) STRINGIZE_INNER(x)
 #ifndef APP_VERSION
@@ -134,9 +106,7 @@ enum BlinkColor { BLINK_NONE, BLINK_RED, BLINK_GREEN, BLINK_BLUE, BLINK_YELLOW, 
   const char* const kVersion = STRINGIZE(APP_VERSION);
   #define kVersionStr STRINGIZE(APP_VERSION)
 #endif
-// Marker embedded in the binary so scripts/ota_push.py can label the OTA
-// screen with the version it is serving. It's also printed at boot in dev
-// builds, which is what keeps the linker from garbage-collecting it.
+// Version marker for ota_push.py's OTA screen label; the boot print keeps it linked.
 const char kBuildTag[] = "CYD_TAG=" kVersionStr ", Build " STRINGIZE(BUILD_NUM);
 bool isDevBuild() { return strstr(kVersion, "-dev") != NULL; }
 // User-Agent sent on every network call so servers can identify the client,
@@ -145,29 +115,9 @@ String appUserAgent() { return "cyd-horizon/v" + String(kVersion); }
 // ------------------------------------------------------
 
 // ---- Display wrapper: logical UI, optionally scaled to the panel ----
-// All layout code is written in logical pixels: DISP_W x 240. On the 2.8"
-// board that is 320x240 and this wrapper is an identity pass-through. On
-// CYD_E32R40T the logical space is 360x240 and every geometry argument is
-// scaled x4/3 onto the 480x320 panel - the SAME factor on both axes so
-// nothing stretches; the extra 40 logical columns are spent on spacing
-// instead (RX()/CX() push right-edge and centered elements outward).
-//
-// Text: F1 keeps the classic 8px font - it is the same physical size as on
-// the 2.8" panel and the only tier small enough to fit three credit rows in
-// the header. Larger text uses smooth FreeFonts a notch below the x4/3
-// target so the panel's extra width goes to spacing instead of wider
-// glyphs: F2->FreeSans9, F4/F6->FreeSansBold18 (big values and header
-// clock). FreeFonts draw at the text baseline
-// rather than top-left, so the wrapper tracks the active font's ascent and
-// offsets setCursor() to preserve "y = top of text"; the drawString family
-// already applies the freefont datum adjustment internally.
-//
-// Rect sizes scale by EDGES (x2 = S(x+w) - S(x)), not by scaling w alone -
-// integer truncation would otherwise leave 1px seams between adjacent
-// logical rects (e.g. the incremental OTA progress fill).
-//
-// Touch maps panel->logical in touchReadXY(). Raw panel access (init,
-// rotation, board commands) goes through `lcd`.
+// Logical DISP_W x 240 -> panel: identity on the 2.8", x4/3 onto 480x320 on
+// CYD_E32R40T (DEVELOPER.md "Board variants"). Rect sizes scale by EDGES
+// (S(x+w)-S(x)) so truncation can't leave 1px seams; raw panel uses `lcd`.
 #ifdef CYD_E32R40T
   #define DISP_W   360
   #define SCALEX(v)   ((v) * 4 / 3)
@@ -185,9 +135,7 @@ String appUserAgent() { return "cyd-horizon/v" + String(kVersion); }
 // wider UIs). CX: horizontal centre. Both are identity on the 2.8" build.
 #define RX(v) ((v) + (DISP_W - 320))
 #define CX    (DISP_W / 2)
-// FONT_AUX: secondary text (button captions like Toggle/Edit, forecast cells,
-// status lines). The 8px classic F1 is fine on the 2.8" panel but reads tiny
-// on the 4", where it maps to the smooth FreeSans F2 instead.
+// FONT_AUX: secondary text - classic F1 on the 2.8", smooth FreeSans F2 on the 4".
 #ifdef CYD_E32R40T
   #define FONT_AUX 2
 #else
@@ -225,8 +173,7 @@ public:
   int16_t fontHeight() { return UNSCALEY((curAsc + curDesc) * curSize); }
 
   // ---- text drawing ----
-  // setCursor's y is "top of text" in the layout code; for FreeFonts the
-  // panel cursor is the baseline, so shift down by the font's ascent.
+  // setCursor's y is "top of text"; FreeFonts' cursor is the baseline - shift by ascent.
   void setCursor(int16_t x, int16_t y)                { lcd.setCursor(SCALEX(x), SCALEY(y) + curAsc * curSize); }
   void setCursor(int16_t x, int16_t y, uint8_t f)     { applyFont(f); setCursor(x, y); }
   int16_t drawString(const char* s, int32_t x, int32_t y)          { return lcd.drawString(s, SCALEX(x), SCALEY(y)); }
@@ -260,9 +207,7 @@ public:
   void drawPixel(int32_t x, int32_t y, uint32_t c) { lcd.drawPixel(SCALEX(x), SCALEY(y), c); }
 
 private:
-  // Active font state for baseline compensation. curAsc/curDesc are the
-  // FreeFont's max above/below-baseline extents; 0 for classic fonts, so the
-  // 2.8" pass-through stays exact.
+  // Active font extents for baseline compensation (0 for classic fonts).
   uint8_t curAsc = 0;
   uint8_t curDesc = 0;
   uint8_t curSize = 1;
@@ -272,9 +217,7 @@ private:
     const GFXfont* g = nullptr;
     uint8_t asc = 0, desc = 0;
     switch (f) {
-      // F1 intentionally has no FreeFont mapping: it stays on the classic
-      // 8px font (same physical size as the 2.8" panel and the only tier
-      // that fits the header's three credit rows).
+      // F1 stays classic 8px: the only tier that fits the header's 3 credit rows.
       case 2: g = &FreeSans9pt7b;      asc = 13; desc = 5; break;  // body text
       case 4: g = &FreeSansBold18pt7b; asc = 25; desc = 8; break;  // big values
       case 6: g = &FreeSansBold18pt7b; asc = 25; desc = 8; break;  // header clock
@@ -294,16 +237,8 @@ TFT_eSPI lcd = TFT_eSPI();
 UiTft tft(lcd);
 Preferences prefs;
 
-// A busy airspace's /states/all response has no fixed size cap, and
-// ArduinoJson's default JsonDocument grows on the heap without limit. This
-// allocator caps how much memory a single parse can use, so a large response
-// fails the parse cleanly (handled like any other JSON error) instead of
-// risking exhausting the heap.
-//
-// Accounting uses malloc_usable_size() rather than the requested size, and
-// credits frees and shrinks: ArduinoJson allocates, shrinks and frees string
-// nodes throughout a parse, so charging only allocations turns `used_` into a
-// churn counter and trips the cap far below the real working set.
+// Caps one JSON parse's heap use so a huge response fails cleanly instead of
+// exhausting the heap; frees are credited so frees mid-parse don't trip it.
 class BoundedAllocator : public ArduinoJson::Allocator {
  public:
   explicit BoundedAllocator(size_t maxBytes) : limit_(maxBytes), used_(0) {}
@@ -358,10 +293,8 @@ const int MAXP = 6;
 Plane planes[MAXP];
 int planeCount = 0;
 
-// Snapshot of the most recent overhead flight, kept so the "N aircraft" tap on
-// the dashboard can recall the same details that were last shown even after the
-// plane has left the radius. Filled in the flight-processing block whenever a
-// plane is overhead; valid=false until the first overhead flight is recorded.
+// Snapshot of the last overhead flight so the "N aircraft" tap can recall it
+// after it leaves the radius (valid=false until the first one).
 struct FlightSnap {
   bool  valid;            // false until at least one overhead flight is recorded
   char  callsign[9];
@@ -392,11 +325,8 @@ FlightSnap g_lastFlight;
 const unsigned long SCREEN_IDLE_TIMEOUT_MS = 120000UL; // 2 minutes
 unsigned long g_screenIdleUntil = 0;       // non-dashboard screen auto-return deadline
 
-// Radar blip bookkeeping for the flight-detail page (its radar shows a single
-// plane, so it has its own last-pixel state). g_radarShown records whether a
-// radar is actually displayed right now; dead-reckoning only moves blips on a
-// screen that is really showing one (avoids painting a phantom radar onto the
-// idle dashboard).
+// Flight-detail radar has its own blip state; g_radarShown gates dead-reckoning
+// to a screen actually showing a radar (else we'd paint onto the idle dashboard).
 bool g_radarShown = false;
 int  g_flightLastPx, g_flightLastPy;
 bool g_flightBlipOn = false;
@@ -407,11 +337,8 @@ int   g_ceilingFt = 15000;
 int   g_pollSec = 30;
 bool  g_trackEnabled = true;   // flight tracking on/off
 bool  g_blinkForFlight = true; // blink the LED when an overhead flight is found
-// Units selection: Imperial (ft/mph/mi), Metric (m/kts/km), Aviation
-// (ft/kts/nm). Distances are stored in miles and altitudes in feet
-// internally; the helpers convert for display, and the settings sliders
-// edit in the displayed unit. Switching units keeps the displayed number
-// and reinterprets it in the new unit (3.5 mi -> 3.5 km stored as ~2.2 mi).
+// Units: Imperial/Metric/Aviation. Distances store as miles, altitudes feet;
+// helpers convert at display. Switching keeps the number and reinterprets it.
 #define UNITS_IMPERIAL 0
 #define UNITS_METRIC   1
 #define UNITS_AVIATION 2
@@ -421,9 +348,7 @@ const char* distUnit()  { return g_units == UNITS_METRIC ? "km" : (g_units == UN
 float       altConv()   { return g_units == UNITS_METRIC ? 0.3048f : 1.0f; }  // feet -> display
 const char* altUnit()   { return g_units == UNITS_METRIC ? "m" : "ft"; }
 const char* unitsName() { return g_units == UNITS_METRIC ? "Metric" : (g_units == UNITS_AVIATION ? "Aviation" : "Imperial"); }
-// Temperatures are fetched and logged in degrees F (canonical storage);
-// convert at display time so Metric/Aviation users see C without invalidating
-// stored history.
+// Temps stored as F; converted at display so stored history survives unit switches.
 float tempDisp(float f) { return g_units == UNITS_IMPERIAL ? f : (f - 32.0f) * 5.0f / 9.0f; }
 char  tempUnit()        { return g_units == UNITS_IMPERIAL ? 'F' : 'C'; }
 bool  g_clock24 = false;       // false = 12-hour clock with AM/PM, true = 24-hour
@@ -468,9 +393,8 @@ unsigned long g_nextRouteMs = 0;  // earliest millis() to retry the /flights/* b
 unsigned long g_nextTrackMs = 0;  // earliest millis() to retry the /tracks/* bucket after a 429
 const int LOW_CREDIT_THRESHOLD = 0;         // "at the limit"
 const unsigned long CREDIT_RECOVERY_MS = 15UL * 60UL * 1000UL;  // fallback retry cadence while exhausted
-// After this many consecutive 401s (each already retried with a fresh token),
-// stop polling at the normal cadence and fall back to CREDIT_RECOVERY_MS so we
-// aren't hammering the API with credentials the server keeps rejecting.
+// After this many consecutive 401s (each retried with a fresh token), drop to
+// the CREDIT_RECOVERY_MS cadence instead of hammering rejected credentials.
 const int AUTH_401_BACKOFF_AFTER = 5;
 const unsigned long ADSB_RETRY_MS = 60UL * 1000UL;  // vrs-standing-data 429/transport retry
 
@@ -478,9 +402,8 @@ const unsigned long ADSB_RETRY_MS = 60UL * 1000UL;  // vrs-standing-data 429/tra
 enum AuthState { AUTH_OK = 0, AUTH_ANON, AUTH_BAD };
 int g_authState = AUTH_ANON;   // defaults to anonymous (blank creds)
 bool g_authChecked = false;    // true after the first OpenSky fetch attempt
-// True when an OpenSky TLS handshake/cert validation failed (transport-level
-// error, negative HTTPClient code). Used to turn such failures into a hard
-// error instead of silently falling back to anonymous.
+// Set on an OpenSky TLS handshake/cert failure (negative HTTPClient code) -
+// turns it into a hard error, not a silent fallback to anonymous.
 bool g_osHandshakeFailed = false;
 
 // Sleep Mode settings (persisted)
@@ -520,13 +443,8 @@ unsigned long g_goveeRateReset = 0;
 // fetch waits out the 5-min cadence, longer than a touch-wake stays awake.
 unsigned long g_poolRetryAt = 0;
 
-// Pool temp history: tiered storage so Month/Year graphs have real range without
-// unbounded memory/flash use.
-//   - raw (5-min samples): covers Day/Week views, ~8.7 days retained
-//   - hourly rollups (avg/lo/hi per hour): covers Month view, ~33 days retained
-//   - daily rollups (avg/lo/hi per day): covers Year view, >1 year retained
-// The rolled-up tiers keep each bucket's low/high alongside the average so the
-// Month/Year graphs can scale to the true extremes instead of min/max-of-avgs.
+// Pool temp history tiers (raw/hourly/daily) give Day/Week/Month/Year real
+// ranges; rollups store per-bucket lo/hi (DEVELOPER.md "Temperature history").
 #define MAX_POOL_LOG 2048
 float g_poolLogTemp[MAX_POOL_LOG];
 unsigned long g_poolLogTime[MAX_POOL_LOG];
@@ -563,13 +481,8 @@ int   g_curDayN = 0;
 enum PoolTF { TF_DAY, TF_WEEK, TF_MONTH, TF_YEAR };
 int g_poolTF = TF_WEEK;
 
-// Weather temp history: tiered storage mirroring pool temp (see weatherfs.ino
-// and poolfs.ino). Open-Meteo current temperature is fetched every 10 min -
-// half the pool's 5-min rate - so the same tiers need roughly half the raw
-// samples for the same retained time range. Always-on (no enable toggle).
-//   - raw (10-min samples): covers Day/Week views, ~8.3 days retained
-//   - hourly rollups (avg/lo/hi per hour): covers Month view, ~30 days retained
-//   - daily rollups (avg/lo/hi per day): covers Year view, ~1 year retained
+// Weather temp history mirroring pool (10-min samples, so roughly half the
+// raw samples for the same span; see weatherfs.ino/poolfs.ino). Always on.
 #define MAX_WX_LOG 1200
 float g_wxLogTemp[MAX_WX_LOG];
 unsigned long g_wxLogTime[MAX_WX_LOG];
@@ -622,10 +535,8 @@ String g_osClientSecret = "";   // OpenSky OAuth2 client secret
 String g_osToken = "";          // cached OpenSky bearer token
 unsigned long g_osTokenExpiry = 0;  // millis() at which g_osToken expires
 bool   g_osTokenValid = false;
-// Consecutive radar polls that returned 401 even with a freshly minted token.
-// Drives the AUTH_BAD indicator and, past AUTH_401_BACKOFF_AFTER, the slow
-// retry cadence (see g_nextRadarMs). Reset on any successful radar poll and
-// whenever the credentials change.
+// Consecutive radar 401s on a fresh token: drives AUTH_BAD and, past
+// AUTH_401_BACKOFF_AFTER, the slow retry cadence. Reset on success/cred change.
 int    g_auth401Streak = 0;
 
 // True when the last radar/weather poll actually failed (not just empty).
@@ -656,15 +567,11 @@ extern int    g_alarmIdx;
 extern int    g_alarmCount;
 
 // ---- Touch calibration state (see calibration.ino) ----
-// Defined here (not calibration.ino) because Arduino concatenates .ino files
-// alphabetically, and the touch code in this file uses these before
-// calibration.ino would be reached.
+// Defined here because this file's touch code precedes calibration.ino in the concat.
 enum CalState { CAL_NONE, CAL_LOADING, CAL_TARGET, CAL_DONE };
 CalState g_calState = CAL_NONE;
-// Factory defaults, measured on this unit from a full-range read sweep:
-//   rawY 592..3678 -> dispX 0..320, rawX 379..3396 -> dispY 0..240
-// disp = (raw - offset) * 1000 / scale. Overridden by the on-device
-// calibration (saved to NVS) if the user runs it.
+// Factory defaults measured on this unit: rawY 592..3678 -> dispX 0..320,
+// rawX 379..3396 -> dispY 0..240. On-device calibration (NVS) overrides them.
 int  g_calScaleX = 9646;   // (3678-592)*1000/320
 long g_calOffX   = 592;    // rawY offset
 int  g_calScaleY = 12571;  // (3396-379)*1000/240
@@ -676,41 +583,31 @@ bool connected = false;
 char lastErr[40] = "connecting...";
 
 unsigned long lastPoll = 0;
-// millis() when the last flight fetch actually completed (data shown). The
-// countdown bar is referenced to this instead of lastPoll so it drains to
-// empty exactly when the freshly-fetched flight appears, rather than a fetch
-// latency (~1s) after the poll was merely scheduled.
+// millis() of the last completed flight fetch - the countdown bar references
+// this so it empties exactly when the fresh flight appears (not at schedule time).
 unsigned long g_lastData = 0;
 unsigned long lastClockDraw = 0;
 unsigned long g_lastWeather = 0;
 const unsigned long WEATHER_REFRESH_MS = 10UL * 60UL * 1000UL;
-// Open-Meteo 429 backoff. g_wxNextEpoch is a UTC-epoch suppression deadline
-// (NVS "wxrl", so deep-sleep wakes honor it); g_wxRetryAt is a millis deadline
-// for transient cases that should retry sooner than the 10-min cadence.
+// Open-Meteo 429 backoff: g_wxNextEpoch is a UTC deadline (NVS "wxrl", survives
+// deep sleep); g_wxRetryAt is a millis retry for transient cases.
 int  g_wx429Streak = 0;
 unsigned long g_wxNextEpoch = 0;
 unsigned long g_wxRetryAt = 0;
 extern bool g_weatherValid;   // declared in weather.ino
 
-// First data fetch of the boot: a random offset inside BOOT_FETCH_JITTER_MS
-// spreads the API calls of a fleet that powers up together (outage restore,
-// sleep-window end) so they don't hit in lockstep; each board still gets data
-// within ~1 min. The fetch also waits for SNTP-synced time (verified TLS fails
-// on future-dated certs, and logged samples need real epochs) up to
-// BOOT_TIME_WAIT_MS so broken NTP can't block it forever. Early in boot an
-// absent weather/pool result retries every g_bootFailRetryMs (a per-boot
-// random 55-65s) until BOOT_FAIL_GRACE_MS - a short touch-wake ends before
-// the 10/5-min cadences.
+// First fetch of the boot: jittered so a fleet doesn't hit the APIs in
+// lockstep; waits for SNTP time (verified TLS fails on future-dated certs),
+// then retries at a per-boot random 55-65s until BOOT_FAIL_GRACE_MS.
 #define BOOT_FETCH_JITTER_MS 30000UL
 #define BOOT_TIME_WAIT_MS    10000UL
 #define BOOT_FAIL_GRACE_MS   300000UL
-// In-sleep-window logger wakes get a smaller spread: boards that powered up
-// together share the same 5-min wake phase.
+// In-window logger wakes get a smaller spread - same-phase boards share the
+// 5-min wake tick.
 #define SLEEP_WAKE_JITTER_MS 30000UL
 
-// First WiFi connect after boot: start NTP and kick the (jittered) first data
-// load instead of waiting for the poll/countdown timers (matters when WiFi is
-// slow to connect, since setup() couldn't fetch anything).
+// First WiFi connect: start NTP and kick the jittered first load instead of
+// waiting on poll timers (setup() couldn't fetch when WiFi is slow).
 bool g_wifiConnectedOnce = false;   // true once WiFi has been up since boot
 unsigned long g_firstConnectAt = 0; // millis of that first connect
 unsigned long g_bootFetchAt = 0;    // millis deadline for the first data fetch
@@ -718,10 +615,8 @@ unsigned long g_bootFailRetryMs = 0; // per-boot random 55-65s absent-result ret
 bool g_bootFetched = false;         // true once the jittered boot fetch was requested
 bool g_firstBoot = false;           // true on first boot (no saved location yet)
 
-// First-boot wizard: if no touch calibration is saved we run it at boot, then
-// if no WiFi credentials are saved we gather those. BOOT_DONE means normal boot
-// (straight to the dashboard). This runs once per power-up; setup() decides the
-// starting stage and the calibration/wifi completion paths advance it.
+// First-boot wizard: calibration if none saved, then WiFi creds; BOOT_DONE =
+// normal boot. setup() picks the starting stage.
 enum BootStage { BOOT_NONE, BOOT_CALIB, BOOT_WIFI, BOOT_DONE };
 BootStage g_bootStage = BOOT_NONE;
 
@@ -729,9 +624,7 @@ BootStage g_bootStage = BOOT_NONE;
 bool wifiTrying = false;
 unsigned long wifiTryStart = 0;
 
-// When set, the dashboard keeps showing the idle screen even if a flight is
-// overhead (user dismissed it via the countdown bar). Cleared when a new
-// overhead flight is found.
+// User dismissed the overhead view via the countdown bar; cleared on the next new overhead flight.
 bool g_suppressFlight = false;
 
 // Queued LED blink. Performed in loop() AFTER the flight view is drawn, so the
@@ -740,18 +633,15 @@ bool g_pendingBlink = false;
 BlinkColor g_blinkColor = BLINK_BLUE;
 BlinkColor g_routeHoldColor = BLINK_NONE;  // route color to keep lit while flight details are shown
 
-// Route details for the overhead flight (origin/destination), fetched
-// automatically the first time a new plane is overhead and cached per plane
-// (reset whenever the overhead identity changes). Defined in
-// flight_details.ino.
+// Route for the overhead flight, auto-fetched once per plane and cached until
+// the overhead identity changes (flight_details.ino).
 String g_routeOrigin = "";      // "KDAL"
 String g_routeDest   = "";      // e.g. "KJFK"
 bool   g_routeFetched = false;  // true once we've tried (success or not)
 volatile bool g_routeBusy = false;  // true while a route fetch is in flight (cross-task)
 
-// adsb.lol vrs-standing-data callsign route (planned route). Used as the primary
-// display; OpenSky is shown only when its actual route differs. The IATA codes
-// are display-only — comparisons always use the ICAO codes.
+// adsb.lol planned route is the primary display; OpenSky shows only when its
+// actual route differs. IATA codes are display-only - comparisons use ICAO.
 String g_adsbRouteOrigin = "";
 String g_adsbRouteDest   = "";
 String g_adsbOriginIata  = "";      // 3-letter IATA codes for display ("" = none)
@@ -762,10 +652,8 @@ bool   g_adsbRouteFetched = false;
 volatile bool g_adsbRouteBusy = false;
 unsigned long g_nextAdsbMs = 0; // back-off after a 429 or transport failure
 
-// Ground track for the tracked overhead plane, fetched once per new plane from
-// the OpenSky /tracks endpoint and used to draw the past flight path and to
-// dead-reckon the blip along the plane's real bearing. Points are stored as
-// (dx,dy) miles relative to the observer. See fetchTrack() in flight_details.ino.
+// Ground track for the tracked plane (OpenSky /tracks, once per plane): draws
+// the past path and dead-reckons the blip. Points are (dx,dy) miles rel. observer.
 #define MAX_TRACK_PTS 64
 struct TrackPoint { float dxMi, dyMi; };
 TrackPoint g_trackPts[MAX_TRACK_PTS];
@@ -779,10 +667,8 @@ String g_homeAirport = "";      // home airport: drives the incoming/outgoing LE
 String g_watchCallsign = "";    // callsign fragment to track preferentially + notify for (substring match) while its flight details are shown
 int    g_watchNotify   = 0;     // its "Callsign Notify" preset: index into the shared alarm patterns (NVS "watchntf")
 #define NTF_VOL_MIN 1           // Notify Volume floor: never fully inaudible
-// Notify Volume is a fixed-level pick rather than a percent continuum; NVS
-// "ntfvol" stores the level's percent so values written by older builds
-// still load sanely (they snap to the nearest level). The UI shows the
-// level number (1-10).
+// Notify Volume is fixed levels; NVS "ntfvol" stores the percent so old values
+// snap to the nearest level. UI shows 1-10.
 const int kNtfVolLevels[] = { 1, 2, 3, 4, 5, 15, 25, 50, 75, 100 };
 #define NTF_VOL_LEVELS ((int)(sizeof(kNtfVolLevels) / sizeof(kNtfVolLevels[0])))
 int    g_notifyVol     = 100;   // one of kNtfVolLevels - loudness for all notification sounds (NVS "ntfvol")
@@ -820,17 +706,14 @@ void sortPlanes() {
 }
 
 // ---- WiFi ----
-// Set the STA hostname before the interface is created. This must be called
-// before WiFi.mode(WIFI_STA); arduino-esp32 only writes the hostname to the
-// esp_netif when it creates the STA interface, so calling it after mode has
-// no effect. The IP/static config helper follows separately, after mode.
+// Hostname must be set before WiFi.mode(WIFI_STA): arduino-esp32 only writes
+// it to the esp_netif when creating the STA interface.
 void setNetHostname() {
   if (g_hostname.length() > 0) WiFi.setHostname(g_hostname.c_str());
 }
 
-// Apply saved static-IP settings to the STA interface. Call after
-// WiFi.mode(WIFI_STA), before WiFi.begin(). Invalid or incomplete static
-// settings fall back to DHCP so a half-entered form can wedge connectivity.
+// Apply saved static-IP settings (after WiFi.mode, before WiFi.begin);
+// invalid/incomplete settings fall back to DHCP.
 void applyNetConfig() {
   if (g_ipDhcp) return;
   IPAddress ip, mask, gw, dns;
@@ -858,10 +741,8 @@ bool tryConnect(const char* ssid, const char* pass) {
 const char* kOsTokenUrl = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token";
 const int   kOsTokenLifetimeMs = 30 * 60 * 1000;   // OpenSky tokens expire after ~30 min
 
-// Per-use/CA-family trust stores. Each host gets the smallest bundle that
-// covers its certificate chain, so each TLS handshake parses fewer roots.
-// There is no fallback bundle: an unmapped host fails TLS setup rather than
-// loading a bundle that may not cover its chain.
+// Per-host trust stores: the smallest bundle covering each cert chain (fewer
+// roots parsed per handshake). No fallback bundle - unmapped hosts fail TLS.
 
 // Govee: Amazon Root CA 1
 static const char* const kAmazonRootCAs =
@@ -1090,19 +971,13 @@ static const char* const kIsrgRootCAs =
   "-----END CERTIFICATE-----\n";
 
 
-// Expiry of the bundled roots (earliest notAfter, ISRG Root X1 = 2035-06-04;
-// conservative 2035-01-01). Past this, the OTA path may fall back to
-// setInsecure(true) so a root rotation can't block updates. Data fetches never
-// take that fallback.
+// Earliest bundled-root expiry (ISRG Root X1 = 2035-06; conservative). Past it
+// OTA may fall back to setInsecure() so a root rotation can't block updates.
 #define OTA_CA_EXPIRY 2051222400UL
 
-// Return the smallest trust store that covers the target host, so each TLS
-// handshake only parses the roots it needs. There is no fallback bundle;
-// unmapped hosts return nullptr so TLS setup fails cleanly. The OTA path
-// may still fall back to setInsecure() once the bundled roots have passed
-// OTA_CA_EXPIRY.
-// adsb.lol / vrs-standing-data trust bundle
-// GlobalSign ECC Root CA - R4 (root) + WE1 (intermediate).
+// Smallest trust store covering the host; unmapped hosts fail TLS (no fallback
+// bundle). OTA may still go insecure past OTA_CA_EXPIRY.
+// adsb.lol / vrs-standing-data: GlobalSign ECC Root CA - R4 + WE1 intermediate.
 static const char* const kGlobalSignEccRootCAs =
   "-----BEGIN CERTIFICATE-----\n"
   "MIIB4TCCAYegAwIBAgIRKjikHJYKBN5CsiilC+g0mAIwCgYIKoZIzj0EAwIwUDEk\n"
@@ -1164,14 +1039,9 @@ static const char* trustStoreForUrl(const char* url) {
   return nullptr;  // unmapped host: fail TLS setup cleanly
 }
 
-// Shared helper: attach the smallest root bundle that covers the target host
-// to a NetworkClientSecure and start a verified-TLS request. When allowInsecure
-// is set (OTA only) AND the bundled roots have passed OTA_CA_EXPIRY, fall back
-// to setInsecure(true) so updates keep working after the roots rotate out.
-// There is NO insecure retry after a validation failure -- that would let a MITM
-// defeat certificate verification. Returns false when the client/URL can't be
-// set up (caller should treat as a hard error). The caller must keep `sec`
-// alive for the lifetime of the request.
+// Attach the host's smallest root bundle and start a verified request.
+// allowInsecure (OTA only) may setInsecure() past OTA_CA_EXPIRY - but never as
+// a retry after a validation failure, which would let a MITM defeat it.
 bool httpsBegin(HTTPClient& http, NetworkClientSecure& sec, const char* url, bool allowInsecure) {
   const char* trust = trustStoreForUrl(url);
   if (!trust) return false;  // unmapped host: no bundle to validate with
@@ -1205,29 +1075,18 @@ void logHeapDiag(const char* why) {
 // makes before giving up on a transport-layer failure. Mirrors the OTA retry.
 #define HTTPS_RETRY_ATTEMPTS 3
 #define HTTPS_RETRY_DELAY_MS 1500
-// HTTP method selector for httpsRequestRetry(). Some arduino-esp32 core
-// versions scope HTTPClient's http_method enumerators (HTTP_METHOD_GET etc.)
-// to the class, so we use our own plain constants instead.
+// Own HTTP-method constants: some cores scope HTTPClient's HTTP_METHOD_* enums to the class.
 #define HTTPS_METHOD_GET 0
 #define HTTPS_METHOD_POST 1
 
-// Verified-TLS request with retries on transient transport failures (fresh TLS
-// connects can drop after prolonged uptime — the same issue the OTA path guards
-// against). Retries the full begin()+request up to HTTPS_RETRY_ATTEMPTS times;
-// any real HTTP response (code >= 0, even non-200) ends the loop since a reply
-// proves the path works. Returns the final code, or -1 if all attempts failed
-// at the transport layer.
-// `headers` is a nullptr-terminated name/value array (empty value skips it);
-// pass them here, not via addHeader() — HTTPClient clears its header list on
-// begin()/end() and would drop them. Keep `sec`/`http` alive to read the
-// response afterwards.
+// Verified-TLS request with transport retries: fresh connects can drop after
+// long uptime, so retry the whole begin()+request; any real HTTP reply ends it.
+// `headers` is nullptr-terminated - HTTPClient clears addHeader() on begin().
 int httpsRequestRetry(HTTPClient& http, NetworkClientSecure& sec, const char* url,
                       int method, const String& body, const char* const* headers,
                       bool allowInsecure) {
-  // Use HTTP/1.0 so the response body is not chunked; this lets callers parse
-  // directly from http.getStream() without buffering the whole response in a
-  // String. HTTP/1.0 disables keep-alive, but this helper tears down and
-  // reopens the connection on each attempt anyway.
+  // HTTP/1.0 keeps the body unchunked so callers can stream-parse without
+  // buffering; keep-alive is moot since we reconnect per attempt.
   http.useHTTP10(true);
   // Persistent per-client: setUserAgent() survives begin()/end(), unlike
   // addHeader(), so setting it here covers every request this helper makes.
@@ -1276,11 +1135,8 @@ String urlEncode(const String& s) {
   return out;
 }
 
-// Pick the route data to show: adsb.lol by default; OpenSky only when its
-// actual airports differ from adsb.lol's planned route. Returns the airport
-// codes to draw — "ICAO | IATA" when the adsb.lol route provided an IATA code
-// and the Show IATA setting is on, else ICAO — and the matching city names.
-// All comparisons stay on ICAO.
+// Route to display: adsb.lol planned, or OpenSky when its actual airports
+// differ. Returns "ICAO | IATA" codes (when provided + Show IATA) + cities.
 void getRouteDisplay(String& origin, String& originCity, String& dest, String& destCity, bool& hasData) {
   origin = ""; originCity = ""; dest = ""; destCity = ""; hasData = false;
   String adsbO = (g_adsbRouteBusy || g_adsbRouteOrigin.length() == 0) ? "" : g_adsbRouteOrigin;
@@ -1312,10 +1168,8 @@ void getRouteDisplay(String& origin, String& originCity, String& dest, String& d
   hasData = (origin.length() || dest.length() || g_adsbRouteFetched || g_routeFetched);
 }
 
-// Ensure g_osToken holds a valid bearer token, fetching one from the OpenSky
-// token endpoint when needed. Returns true when authenticated. Returns false
-// when no client is configured (fall back to anonymous) OR the token exchange
-// failed (client credentials are invalid - callers should flag AUTH_BAD).
+// Ensure g_osToken holds a valid bearer token (fetch when needed). false = no
+// client configured (go anonymous) or rejected creds (callers flag AUTH_BAD).
 bool openskyEnsureToken() {
   g_osHandshakeFailed = false;   // fresh for each call (cached-token path keeps it false)
   if (g_osTokenValid && g_osToken.length() > 0 && millis() < g_osTokenExpiry) {
@@ -1326,16 +1180,9 @@ bool openskyEnsureToken() {
   if (g_osClientId.length() == 0 || g_osClientSecret.length() == 0) {
     return false;  // no client configured -> anonymous
   }
-  // TLS is verified against the bundled ISRG roots. Unlike the OTA path there
-  // is no insecure fallback, so a handshake/validation failure (e.g. expired
-  // CA or a MITM) is a hard error, never a silent downgrade to anonymous. The
-  // exchange is retried on transient transport failures.
-  //
-  // Failure classification (drives whether the dashboard flags bad credentials):
-  //   - transport failure, 429/5xx, or a malformed 200 -> transient; set
-  //     g_osHandshakeFailed so the caller keeps the last known auth state.
-  //   - token endpoint 400/401 (Keycloak "invalid_client") -> genuine bad
-  //     credentials; leave g_osHandshakeFailed false so AUTH_BAD is surfaced.
+  // Verified TLS, no insecure fallback: a handshake failure is a hard error,
+  // not a downgrade to anonymous. 400/401 = bad creds (AUTH_BAD); transport/
+  // 429/5xx = transient (g_osHandshakeFailed keeps the last auth state).
   NetworkClientSecure sec;
   HTTPClient http;
   http.setTimeout(5000);
@@ -1375,10 +1222,8 @@ bool openskyEnsureToken() {
 }
 
 // ---- Async network task ----
-// Network I/O (HTTPClient) is synchronous and can block for seconds while a
-// fetch times out, which freezes the main loop (touch + drawing). So network
-// fetches run on a separate FreeRTOS task on the other core; the loop only sets
-// a flag and stays responsive. One fetch runs at a time.
+// Synchronous HTTP can block for seconds; fetches run on the other core so the
+// loop (touch + drawing) stays responsive. One fetch at a time.
 volatile bool netWantFlights      = false;
 volatile bool netWantWeather      = false;
 volatile bool netWantLocation     = false;
@@ -1393,9 +1238,7 @@ void netTask(void* p) {
   for (;;) {
     vTaskDelay(30 / portTICK_PERIOD_MS);
     if (WiFi.status() != WL_CONNECTED) continue;
-    // While an OTA is downloading, pause all net fetches so the OTA task's HTTP
-    // doesn't overlap with ours (concurrent lwIP use can trigger a FreeRTOS
-    // xTaskPriorityDisinherit assert).
+    // Pause net fetches during OTA: concurrent lwIP use can trip a FreeRTOS assert.
     if (g_otaRunning) { vTaskDelay(30); continue; }
     // User-initiated update check gets priority so the About page responds
     // quickly even while background fetches (flights/weather/pool) are queued.
@@ -1424,9 +1267,8 @@ void fetchFlights() {
   NetworkClientSecure sec;
   HTTPClient http;
   char osurl[240];
-  // Bound the query to what the radar draws (2x radius, min 8 mi) so the
-  // response stays small. Longitude is widened by 1/cos(lat) so the box is a
-  // true circle and doesn't clip planes due east/west.
+  // Bound the query to what the radar draws (2x radius, min 8 mi); lon widened
+  // by 1/cos(lat) so the box is a true circle.
   const float bboxMi = max(g_radiusMi * 2.0f, 8.0f);
   const float dLat = bboxMi / 69.0f;                        // ~1 deg lat ~ 69 mi
   const float dLon = dLat / cosf(g_lat * PI / 180.0f);
@@ -1438,15 +1280,11 @@ void fetchFlights() {
                   g_lat, g_lon, bboxMi, osurl);
   }
   http.setTimeout(5000);
-  // Tell HTTPClient which response headers to capture. Without this it discards
-  // everything except a small built-in set, so X-Rate-Limit-Remaining (the
-  // OpenSky credit balance) would never be available.
+  // Whitelist the rate-limit headers - HTTPClient discards all but a built-in set otherwise.
   const char* hdrKeys[] = { "X-Rate-Limit-Remaining", "X-Rate-Limit-Retry-After-Seconds" };
   http.collectHeaders(hdrKeys, 2);
-  // OAuth2 client-credentials raise the rate limit (4000 vs 400 credits/day).
-  // A token-exchange transport failure (g_osHandshakeFailed) is transient, NOT
-  // bad credentials — the request below may still succeed anonymously, so we
-  // keep the last known auth state rather than flagging a false AUTH_BAD.
+  // OAuth2 creds raise the rate limit (4000 vs 400/day). A token-exchange
+  // transport failure is transient, not bad creds - keep the last auth state.
   bool authed = openskyEnsureToken();
   if (isDevBuild()) {
     Serial.printf("[net] OpenSky auth client=%s token=%s handshake=%d\n",
@@ -1458,10 +1296,8 @@ void fetchFlights() {
   const char* flightHdrs[] = { "Authorization", authHdr.c_str(), nullptr };
   int code = httpsRequestRetry(http, sec, osurl, HTTPS_METHOD_GET, "", flightHdrs, false);
   g_authChecked = true;   // we've made a real OpenSky attempt; auth state is now meaningful
-  // Negative code = the flight-data request itself hit a TLS handshake /
-  // transport failure (e.g. cert rejected or connection reset). That is a
-  // transient network error, not bad credentials, so keep the last known auth
-  // state instead of flagging "Invalid Credentials"; the next poll recovers.
+  // Negative code = transport/TLS failure (transient), not bad creds - keep
+  // the last auth state; the next poll recovers.
   if (code < 0) {
     g_osHandshakeFailed = true;
     g_radarDataFailed = true;
@@ -1471,10 +1307,8 @@ void fetchFlights() {
     return;
   }
   if (code == HTTP_CODE_UNAUTHORIZED && authed) {
-    // The token was rejected. OpenSky tokens expire after ~30 minutes, so the
-    // common cause is a stale cached token (e.g. millis() drift, or a token
-    // revoked server-side): drop it, mint a fresh one, and retry this poll
-    // immediately rather than waiting a whole poll cycle.
+    // Token rejected: likely stale (~30 min expiry) - mint a fresh one and
+    // retry now instead of waiting a whole poll cycle.
     http.end();
     g_osTokenValid = false;
     g_osToken = "";
@@ -1486,18 +1320,14 @@ void fetchFlights() {
       code = httpsRequestRetry(http, sec, osurl, HTTPS_METHOD_GET, "", retryHdrs, false);
       if (isDevBuild()) Serial.printf("[net] 401 retried with fresh token code=%d\n", code);
     } else {
-      // Couldn't even get a new token. openskyEnsureToken() distinguishes a
-      // transport failure (g_osHandshakeFailed, transient) from a rejected
-      // client (genuine bad credentials), and the auth-state block below
-      // already handles both, so just fall through with the 401.
+      // Couldn't mint a new token - openskyEnsureToken() already classified
+      // transient vs bad-creds; fall through with the 401.
       code = HTTP_CODE_UNAUTHORIZED;
     }
   }
   if (code == HTTP_CODE_UNAUTHORIZED) {
-    // Still unauthorized with a freshly minted token. For a configured client
-    // that means the credentials really are being rejected, so surface it;
-    // anonymous polling gets no such claim. This self-clears on the next
-    // successful poll.
+    // 401 with a fresh token = genuinely rejected creds for a configured
+    // client (anonymous gets no claim); self-clears on the next success.
     if (g_osClientId.length() > 0 && !g_osHandshakeFailed) {
       if (g_auth401Streak < 1000) g_auth401Streak++;
       g_authState = AUTH_BAD;
@@ -1517,9 +1347,7 @@ void fetchFlights() {
     return;
   }
   if (code == HTTP_CODE_TOO_MANY_REQUESTS) {
-    // Rate/credit limited - treat as exhausted regardless of the last known
-    // header value, and back off until the bucket resets. OpenSky returns the
-    // seconds until the rate limit clears in X-Rate-Limit-Retry-After-Seconds.
+    // Rate limited: treat as exhausted and back off per X-Rate-Limit-Retry-After-Seconds.
     g_creditsKnown = true;
     g_creditsRemaining = 0;
     g_creditsExhausted = true;
@@ -1540,10 +1368,8 @@ void fetchFlights() {
     dirty = true;
     return;
   }
-  // Auth state reflects what OpenSky actually accepted: a configured client
-  // whose token exchange was rejected means bad credentials (AUTH_BAD);
-  // otherwise AUTH_OK with a token, AUTH_ANON without. A transport failure
-  // (g_osHandshakeFailed) is transient — keep the last known state.
+  // Auth state reflects what OpenSky accepted: rejected exchange + configured
+  // client = AUTH_BAD; a transport failure keeps the last known state.
   if (!g_osHandshakeFailed) {
     if (g_osClientId.length() > 0) g_authState = (authed ? AUTH_OK : AUTH_BAD);
     else g_authState = AUTH_ANON;
@@ -1559,17 +1385,14 @@ void fetchFlights() {
     g_creditsKnown = true;
     g_creditsExhausted = (g_creditsRemaining <= LOW_CREDIT_THRESHOLD);
   }
-  // Stream-parse the states[] array one row at a time. A busy airspace can return a
-  // very large states array; we only keep MAXP planes, so buffering the whole array
-  // would waste contiguous heap needed by the next TLS handshake.
+  // Stream-parse states[] one row at a time - buffering it all would eat the
+  // contiguous heap the next TLS handshake needs (we only keep MAXP planes).
   HttpBodyStream body(http);
   BoundedAllocator rowAlloc(4096);   // one state row; belt-and-suspenders cap
   JsonDocument st(&rowAlloc);
   if (!seekArray(body, "\"states\"")) {
     if (body.peek() == 'n') {
-      // OpenSky returns "states":null when the requested box has no aircraft
-      // (e.g. first boot before g_lat/g_lon are set, or a very tight bbox).
-      // Treat this as a valid empty result, not a JSON error.
+      // "states":null = empty bbox - a valid empty result, not a JSON error.
       bool ok = body.drain();
       http.end();
       if (isDevBuild()) Serial.printf("[net] flights states null len=%u ok=%d\n", (unsigned)body.bytesRead(), (int)ok);
@@ -1644,14 +1467,8 @@ void fetchFlights() {
   sortPlanes();
   g_radarDataFailed = false;
   if (isDevBuild()) Serial.printf("[net] flights ok planes=%d free=%u\n", planeCount, (unsigned)ESP.getFreeHeap());
-  // A configured watch callsign outranks the closest flight: when the watched
-  // plane appears in this poll and its blip would land inside the overall
-  // screen bounds, it is promoted to planes[0] so every downstream user
-  // (details, route/track fetches, blink, radar, recall snapshot) tracks it
-  // instead of the closer flight. The watch value is a substring match, so
-  // several planes can qualify - planes[] is distance-sorted, making the
-  // first match the nearest one. A watched plane that would not draw is left
-  // alone and the closest flight stays tracked.
+  // A watched callsign that would draw is promoted to planes[0] (substring
+  // match + distance sort = nearest wins) so downstream tracks it.
   int watchIdx = -1;
   if (g_watchCallsign.length() > 0) {
     for (int i = 0; i < planeCount; i++) {
@@ -1667,18 +1484,15 @@ void fetchFlights() {
     planes[watchIdx] = t;
   }
   bool watchShown = (watchIdx >= 0);
-  // A freshly found overhead flight re-shows the flight view even if the user
-  // had dismissed it earlier via the countdown bar. If the overhead plane's
-  // identity changed, reset any route details so they are re-fetched for the
-  // new plane (the route cache belongs to the previous plane).
+  // A new overhead flight re-shows the view even after a dismiss; an identity
+  // change resets the route cache (it belongs to the previous plane).
   static char lastOverheadIcao[7] = "";
   static char lastBlinkIcao[7] = "";    // so we re-blink when the color changes
   static BlinkColor lastBlinkColor = BLINK_NONE;
   if (planeCount > 0 && (planes[0].distMi <= g_radiusMi || watchShown)) {
     g_suppressFlight = false;
-    // Snapshot the overhead flight so the "N aircraft" tap can recall the same
-    // details later, even after the plane leaves the radius. Update it every
-    // poll so alt/speed/distance and the (lazily fetched) route stay current.
+    // Snapshot the overhead flight every poll so the "N aircraft" tap can
+    // recall it later, current up to when it left.
     g_lastFlight.valid = true;
     strncpy(g_lastFlight.callsign, planes[0].callsign, 8); g_lastFlight.callsign[8] = 0;
     strncpy(g_lastFlight.icao24, planes[0].icao24, 6);     g_lastFlight.icao24[6]   = 0;
@@ -1728,27 +1542,17 @@ void fetchFlights() {
       lastBlinkIcao[0] = 0;
       lastBlinkColor = BLINK_NONE;
     }
-    // Fetch the route and the ground track automatically the first time this
-    // plane is overhead, caching each once per plane (g_routeFetched /
-    // g_trackFetched). A failed/empty track just leaves g_trackCount=0 so the
-    // radar draws no line and dead-reckoning falls back to heading/speed.
+    // Auto-fetch route + ground track once per overhead plane; a failed track
+    // leaves g_trackCount=0 (no line; dead-reckoning uses heading/speed).
     unsigned long nowMs = millis();
     if (!g_routeFetched && (long)(nowMs - g_nextRouteMs) >= 0) fetchRoute(planes[0].icao24);
-    // The watched flight's ground track is refetched every poll instead of
-    // being cached from its first sighting, so the drawn path and the
-    // dead-reckoned blip keep following its real trajectory while it's in view.
-    // A "*" watch is excluded: it matches whatever plane is nearest, so the
-    // per-poll refetch would hit the track endpoint for every overhead flight.
+    // A watched flight's track refetches every poll so path + blip follow its
+    // real trajectory - except "*", which would refetch for every flight.
     if ((!g_trackFetched || (watchShown && !watchIsWildcard())) && (long)(nowMs - g_nextTrackMs) >= 0) fetchTrack(planes[0].icao24);
     if (!g_adsbRouteFetched && (long)(nowMs - g_nextAdsbMs) >= 0) fetchAdsbRoute(planes[0].callsign);
-    // Decide the LED color from the best available route source. Re-check on
-    // every poll and re-blink whenever the color changes (e.g. when route data
-    // arrives after the first sighting). OpenSky is preferred per field when
-    // non-empty; ADSB.lol fills the gaps. Color priority is yellow (same home
-    // airport), green (home arrival), red (home departure), then blue. A
-    // watched callsign skips the route-color blink entirely - loop() drives
-    // its saved notification preset via updateWatchNotify() instead, so it
-    // also stays independent of the blink-for-flight setting.
+    // LED from best route data (OpenSky preferred, adsb.lol fills gaps):
+    // yellow home / green arrival / red departure / blue. Watched callsigns
+    // skip this - loop() runs their preset instead.
     bool watchMatch = isWatchedCallsign(planes[0].callsign);
     BlinkColor color = watchMatch ? BLINK_NONE : computeBlinkColor();
     if (strncmp(planes[0].icao24, lastBlinkIcao, 6) != 0) {
@@ -1799,8 +1603,7 @@ void fetchIpLocation() {
 }
 
 // ---- Address geocoding (free, no key: Nominatim / OpenStreetMap) ----
-// Returns true on a match and updates g_lat / g_lon. On failure sets lastErr to
-// a short code the caller maps to a friendly message.
+// true on match (updates g_lat/g_lon); lastErr gets a short code on failure.
 bool geocodeAddress() {
   if (WiFi.status() != WL_CONNECTED) {
     snprintf(lastErr, sizeof lastErr, "geo 0");   // no connection
@@ -1857,22 +1660,15 @@ bool geocodeAddress() {
 // fetchGoveeTemp() live in pool.ino.
 
 // ---- drawing ----
-// Header bar: date, time, credits. The time is rendered larger (FONT2, text
-// size 2 = 32px) so it stands out; the header band is widened to fit it.
+// Header: date, credits, and a larger clock; the band is widened to fit it.
 #define HEADER_H 36
-// Shared time-of-day editor geometry (drawTimeAdj in settings.ino, used by
-// alarms.ino too, which is concatenated before settings.ino). A horizontal
-// [▼▲] hour pair sits left of the time, a minute pair right; stepping the
-// hour wraps through AM/PM automatically, so there's no separate meridiem
-// control.
+// Shared time-of-day editor geometry (drawTimeAdj in settings.ino; defined
+// here since alarms.ino concats first). Hour step wraps AM/PM - no meridiem control.
 #define TADJ_HX 80      // hour [▼▲] pair x ([▲] is TADJ_BW+4 to its right)
 #define TADJ_MX RX(252) // minute / value [▼▲] pair x (right-anchored)
 #define TADJ_BW 30    // stepper button width (buttons are 24px tall)
-// Header theme: the user-selectable clock color (g_clockCol, default blue) when
-// there is no critical issue; red/maroon when a critical dashboard issue is
-// showing so an ongoing error is always obvious. Non-critical warnings (e.g.
-// running OpenSky anonymously) keep the normal clock color. Persisted as
-// "clkcol".
+// Header color: picked clock color (NVS "clkcol"), or red/maroon while a
+// critical issue shows; non-critical warnings keep the normal color.
 #define DEFAULT_CLOCK_COL TFT_BLUE
 uint16_t g_clockCol = DEFAULT_CLOCK_COL;
 
@@ -1888,11 +1684,8 @@ uint16_t btnFg(uint16_t bg) {
   return colorLum(bg) > 140 ? TFT_BLACK : TFT_WHITE;
 }
 
-// Ordinary-button color: the picked theme color nudged a step darker when
-// it's light and lighter when it's dark, so buttons subtly stand out from
-// the header band while keeping the same hue. Lightening blends toward
-// white rather than scaling up: a saturated channel is already at its max,
-// so a scalar multiply would clamp back to the identical color.
+// Button color: theme nudged darker/lighter so buttons stand out from the
+// header. Lightening blends toward white - scaling a saturated channel would clamp.
 uint16_t btnCol() {
   int r = (g_clockCol >> 11) & 31, g = (g_clockCol >> 5) & 63, b = g_clockCol & 31;
   if (colorLum(g_clockCol) > 140) {
@@ -1903,10 +1696,8 @@ uint16_t btnCol() {
   return (r << 11) | (g << 5) | b;
 }
 
-// Draw an ordinary themed button: the adjusted theme color, plus a white
-// outline when the fill is near-black so it stays visible on black screens.
-// "Near-black" means every channel is low — luminance alone would also flag
-// saturated dark blues/reds that are plainly visible on black.
+// Themed button; white outline when the fill is near-black (all channels low -
+// luminance alone would flag plainly-visible dark blues/reds).
 void themeBtn(int x, int y, int w, int h, int r) {
   uint16_t c = btnCol();
   tft.fillRoundRect(x, y, w, h, r, c);
@@ -1933,13 +1724,8 @@ uint16_t mix565(uint16_t a, uint16_t b, int num, int den) {
        |  (ab + (bb - ab) * num / den);
 }
 
-// History-graph colors, derived from the theme so they track the picked clock
-// color. The data line is the theme pushed 75% toward white on dark themes /
-// black on light themes — the same light/dark split btnFg uses — so it
-// contrasts with the btnCol() plot background. The average line applies the
-// same 75% blend to the theme's complement (hue +180°), keeping the luminance
-// but reading as a different color; greys have no hue to complement, so their
-// avg line falls back to orange.
+// Graph colors from the theme: data line = theme pushed 75% toward white/black
+// (contrasts the plot fill); avg line = complement (orange if hue-less grey).
 uint16_t graphBgCol() { return btnCol(); }
 uint16_t graphLineCol() {
   return mix565(g_clockCol, colorLum(g_clockCol) > 140 ? TFT_BLACK : TFT_WHITE, 3, 4);
@@ -1964,19 +1750,15 @@ void colorHS(uint16_t c, int& h, int& s) {
   else              h = ((60 * (r - g) / d) + 600) % 360;
 }
 
-// Color for destructive buttons (Delete, Yes, Factory Reset): red.
-// When the theme itself is close to red (saturated, hue within ~25 deg of
-// 0), use yellow so the button still contrasts with the header band it
-// sits on.
+// Destructive buttons are red - yellow when the theme is near-red so they
+// still contrast the header band.
 uint16_t dangerCol() {
   int h, s; colorHS(g_clockCol, h, s);
   if (s >= 80 && min(h, 360 - h) <= 25) return TFT_YELLOW;
   return TFT_RED;
 }
 
-// Fill for unselected/disabled toggles. Dark grey normally; when the theme
-// is itself a mid grey, use white so selected/unselected states can't be
-// confused.
+// Unselected toggles: dark grey, or white on a mid-grey theme so states can't be confused.
 uint16_t disabledCol() {
   int h, s; colorHS(g_clockCol, h, s);
   int lum = colorLum(g_clockCol);
@@ -1984,10 +1766,8 @@ uint16_t disabledCol() {
   return TFT_DARKGREY;
 }
 
-// Credit tier color shared by the header readouts and the OpenSky Credits
-// screen: tiered by absolute remaining amounts (no assumed daily budget) -
-// pink below 50, yellow below 500, grey otherwise. An unobserved bucket is
-// yellow too (awaiting a value, not yet an error).
+// Credit tier color (header + Credits screen): pink <50, yellow <500 or
+// unobserved, else grey.
 uint16_t creditTierColor(int value, bool known) {
   if (!known)    return TFT_YELLOW;
   if (value < 50)  return TFT_PINK;
@@ -1995,9 +1775,8 @@ uint16_t creditTierColor(int value, bool known) {
   return TFT_LIGHTGREY;
 }
 
-// Draw one header credit bucket: a label (e.g. "CRP:") in the header text
-// color with its tier-colored value. An unobserved bucket shows "?". Drawn
-// in FONT1 (6x8) so the three stacked rows fit inside the 36px header band.
+// One header credit bucket: label + tier-colored value ("?" if unobserved),
+// FONT1 so the three stacked rows fit the 36px band.
 void drawHeaderCredit(int x, int y, const char* label, int value, bool known,
                       uint16_t bg) {
   tft.setTextColor(btnFg(bg), bg);
@@ -2020,12 +1799,8 @@ void drawHeaderBand() {
   tft.setTextSize(1);
   tft.setCursor(4, 11);
   tft.print(fmtDate());
-  // Three independent OpenSky credit buckets (CRP: radar polling, CRL: route
-  // lookup, CFT: flight tracking), one per line in the right side of the
-  // header. Drawn in FONT1 so all three fit inside the 36px band. The block
-  // sits inside the header's credits tap zone (see the touch handler). Only
-  // shown while flight tracking is enabled; when it's off the header's right
-  // side is left empty.
+  // Three OpenSky credit buckets (CRP radar / CRL routes / CFT tracks) stacked
+  // right, inside the header's credits tap zone. Only while tracking is on.
   if (g_trackEnabled) {
     tft.setTextFont(1);
     tft.setTextSize(1);
@@ -2033,10 +1808,8 @@ void drawHeaderBand() {
     drawHeaderCredit(RX(202), 14, "CRL:", g_flightsCredits,   g_flightsCredits >= 0, bg);
     drawHeaderCredit(RX(202), 24, "CFT:", g_tracksCredits,    g_tracksCredits >= 0,  bg);
   }
-  // bigger, bolder clock: FONT2 doubled on the 2.8"; on the 4" panel F6 maps
-  // to FreeSansBold18 (a notch under the x4/3 target so the band stays airy).
-  // A small AM/PM marker sits to its right in the bottom slot (12h only);
-  // the alarm bell takes the top slot when any alarm is enabled.
+  // Bigger clock: FONT2 doubled on the 2.8"; F6 -> FreeSansBold18 on the 4".
+  // AM/PM marker in the bottom-right slot (12h only); alarm bell takes the top.
   String clk = fmtClock();
 #ifdef CYD_E32R40T
   tft.setTextFont(6);
@@ -2084,10 +1857,8 @@ void drawCreditsRow(int y, const char* label, int remaining, bool known) {
   else tft.print("--");
 }
 
-// OpenSky Credits screen: shows the three independent daily credit buckets
-// (states = radar polling, flights = route lookup, tracks = flight tracking)
-// with their last-known remaining balances. Reached by tapping the credits in
-// the header band. Back returns to the previous screen.
+// OpenSky Credits screen: the three daily credit buckets with last-known
+// balances (tap the header credits to open; Back returns).
 void drawCredits() {
   tft.fillScreen(TFT_BLACK);
   uint16_t bg = g_clockCol;
@@ -2112,10 +1883,8 @@ void drawCredits() {
   tft.print("Grey ok, yellow < 500, pink < 50.");
 }
 
-// Incremental 1-second update for the dashboard. Instead of clearing and
-// redrawing the whole screen (which flickers), it only redraws the header band
-// (the clock) and the countdown bar. The rest of the screen is unchanged. Full
-// redraws still happen when the underlying data (flights/weather/pool) changes.
+// 1s incremental update: redraw only the header clock + countdown bar to avoid
+// flicker; full redraws still happen when the underlying data changes.
 void updateDashboard() {
   // Incremental 1-second update for the dashboard and the flight-detail page;
   // both are the only screens with a header band.
@@ -2128,9 +1897,8 @@ void updateDashboard() {
     dirty = true;
     return;
   }
-  // Only redraw the header when the clock text or any credit value actually
-  // changes. Redrawing the whole header band every second caused visible
-  // flicker even though the time/date text does not change that often.
+  // Redraw the header only when the clock/credits actually change - every-second
+  // full redraws flickered.
   static String lastClock;
   static int lastC = -1, lastF = -1, lastT = -1;
   String curClock = fmtClock();
@@ -2139,12 +1907,8 @@ void updateDashboard() {
     lastClock = curClock;
     lastC = c; lastF = g_flightsCredits; lastT = g_tracksCredits;
     drawHeaderBand();
-    // The header redraw covers the Back button (it sits inside the header band),
-    // so restore it - but only when a radar/flight view is actually on screen
-    // (the dashboard overhead view or the flight-detail page). Not when the idle
-    // dashboard is showing: a plane may have dead-reckoned into range (so a live
-    // overhead check would pass) before the view has switched on a full redraw,
-    // and drawing the Back button there would show it on the wrong screen.
+    // The header redraw covers Back - restore it only when a radar/flight view
+    // is up; `overhead` can pass early and would draw Back onto the idle dash.
     bool onDetail = (g_screen == SCR_FLIGHTDETAIL);
     if (g_radarShown || onDetail) drawFlightBackButton();
   }
@@ -2156,14 +1920,11 @@ void updateDashboard() {
   stepRadar();
 }
 
-// Draw the auto-update status line at the bottom-left of the dashboard.
-// "Scanning" shows while a scan is in flight; the others persist for a few
-// seconds (g_autoUpdStatusUntil) so the outcome is readable on screen.
+// Auto-update status line, bottom-left; each status persists a few seconds
+// (g_autoUpdStatusUntil) so the outcome is readable.
 void drawAutoUpdateStatus() {
   if (g_autoUpdStatus == 0) return;
-  // Every status (including "Scanning") expires after its deadline, so a
-  // status can never get stuck on screen if a code path forgets to transition
-  // it away (see g_autoUpdStatusUntil at each set site).
+  // Every status expires so none can get stuck on screen.
   if ((long)(millis() - g_autoUpdStatusUntil) > 0) { g_autoUpdStatus = 0; return; }
   const char* msg = "";
   uint16_t col = TFT_LIGHTGREY;
@@ -2184,11 +1945,8 @@ void drawAutoUpdateStatus() {
   tft.print(msg);
 }
 
-// While an alarm snooze is pending, draw its countdown over the bottom-left
-// status line (same spot drawAutoUpdateStatus uses). Only re-renders when the
-// minute count changes so it doesn't flicker every second. drawIdle() shows
-// the same text on full redraws, and the alarm-fire screen takes over when it
-// matures, so no erase is needed when the pending state ends.
+// Pending-snooze countdown over the bottom-left status line; re-renders only
+// on a minute change (other draws own the line, so no erase is needed).
 void drawSnoozeStatus() {
   char msg[40];
   if (!snoozeStatusText(msg, sizeof msg)) return;
@@ -2208,11 +1966,8 @@ void drawSnoozeStatus() {
   tft.print(msg);
 }
 
-// True when a flight should be shown live on the dashboard: the tracked plane
-// (planes[0], which fetchFlights promotes a watched callsign into) is inside
-// the configured radius, or is the watched callsign whose blip lands inside
-// the overall screen bounds. Recomputed on the live dx/dy so dead-reckoning
-// off the screen/radius drops the view the same way the next poll would.
+// True when a flight shows live: tracked plane in radius, or watched callsign
+// on-screen. Uses live dx/dy so dead-reckoning off drops it like the next poll.
 bool flightOverhead() {
   return planeCount > 0 &&
          (planes[0].distMi <= g_radiusMi ||
@@ -2234,9 +1989,8 @@ void drawDashboard() {
   // dismissed flight stays dismissed until a new overhead flight is found.
   bool overhead = g_trackEnabled && !g_suppressFlight && flightOverhead();
   if (overhead) {
-    // Route details are drawn inline by drawFlightInfo. They appear once the
-    // route is auto-fetched (see fetchRoute in flight_details.ino); the
-    // aircraft-count recall tap only redisplays the snapshotted result.
+    // Route details drawn inline once auto-fetched; the recall tap only
+    // redisplays the snapshot.
     drawFlightInfo(planes[0]);
     drawRadar();
   } else {
@@ -2250,12 +2004,8 @@ void drawDashboard() {
   drawAuthBorder();
 }
 
-// Returns the label for the dashboard's current critical issue, or nullptr when
-// there is none. Priority: No WiFi > invalid creds > no flight credits > data
-// unavailable (OpenSky, weather) > pool temp unavailable. Critical issues draw a
-// red border and tint the clock bar red/maroon. The "anonymous" OpenSky case is
-// deliberately NOT here - it's a non-critical warning (flights still work
-// anonymously), handled by dashboardWarningLabel() below.
+// Critical-issue label: No WiFi > bad creds > no credits > data unavailable >
+// pool unavailable. Anonymous OpenSky is a warning, not critical (below).
 const char* dashboardCriticalLabel() {
   if (WiFi.status() != WL_CONNECTED) return "No WIFI";
   if (g_trackEnabled) {
@@ -2272,11 +2022,8 @@ const char* dashboardCriticalLabel() {
   return nullptr;
 }
 
-// Non-critical warning label, or nullptr. Running OpenSky anonymously is a
-// warning (lower rate limit), not an error, so it draws a yellow border and the
-// clock bar keeps its normal color. Only called out after the first fetch has
-// actually determined the auth state (otherwise it'd show on startup before
-// WiFi/OpenSky is tried).
+// Non-critical warning (yellow border, normal clock): anonymous OpenSky - only
+// after the first fetch determined auth state, else it'd show at startup.
 const char* dashboardWarningLabel() {
   if (g_trackEnabled && g_authChecked && g_authState == AUTH_ANON) return "ANONYMOUS";
   return nullptr;
@@ -2314,9 +2061,8 @@ void drawCountdownBar() {
   int x = RX(303), w = 14, topY = HEADER_H + 2, botY = 200;
   int h = botY - topY;
   unsigned long now = millis();
-  // Reference the bar to when the last flight data was shown (g_lastData) so
-  // it reaches empty exactly when the next fetch's flight appears, instead of
-  // draining a fetch-latency (~1s) before the flight shows.
+  // Bar references last-shown data (g_lastData) so it empties exactly when the
+  // next fetch's flight appears.
   unsigned long ref = g_lastData ? g_lastData : lastPoll;
   unsigned long elapsed = (now >= ref) ? (now - ref) : 0;
   unsigned long period = (unsigned long)g_pollSec * 1000UL;
@@ -2348,10 +2094,8 @@ void drawCog() {
 }
 
 // ---- LED blink notifications ----
-// CYD RGB LED pins (active-low). Used to blink when an overhead flight is found.
-// The red channel is GPIO 22 on this board, not GPIO 4: GPIO 4 is the panel
-// reset (see tft_setup.h). Other CYD revisions do have red on GPIO 4, so the
-// firmware is intentionally hard-coded for the unit this branch was verified on.
+// RGB LED pins (active-low). Red is GPIO 22 on this board, not GPIO 4 (panel
+// reset) - other CYD revisions differ, so this is hard-coded for this unit.
 #define CYD_LED_RED   22
 #define CYD_LED_GREEN 16
 #define CYD_LED_BLUE  17
@@ -2362,10 +2106,8 @@ static String ledRouteField(const String& openVal, const String& adsbVal) {
   return openVal.length() ? openVal : adsbVal;
 }
 
-// Decide the LED color for the currently overhead flight.
-// OpenSky route data is preferred per field when non-empty; ADSB.lol fills in
-// the gaps. Priority: yellow (same home), green (home arrival), red (home
-// departure), blue (other).
+// LED color for the overhead flight: OpenSky preferred per field, adsb.lol
+// fills gaps; yellow same-home, green arrival, red departure, else blue.
 static BlinkColor computeBlinkColor() {
   if (g_homeAirport.length() == 0) return BLINK_BLUE;
   String o = ledRouteField(g_routeOrigin, g_adsbRouteOrigin);
@@ -2382,11 +2124,8 @@ static bool watchIsWildcard() {
   return b == "*";
 }
 
-// True when the configured watch callsign appears anywhere in `cs`
-// (case-insensitive, substring match): "DAL" matches DAL1234 and "5432"
-// matches DAL5432, so a partial entry still tracks the flight. A lone "*"
-// matches every flight, turning the callsign notification into an
-// any-flight alert.
+// Watch callsign = case-insensitive substring match ("DAL" matches DAL1234);
+// a lone "*" matches every flight.
 static bool isWatchedCallsign(const char* cs) {
   if (g_watchCallsign.length() == 0) return false;
   if (watchIsWildcard()) return true;
@@ -2406,16 +2145,8 @@ void blinkLedPin(int pin, int times, int ms) {
   }
 }
 
-// Blink the onboard LED to signal an overhead flight:
-//   white  = configured watch callsign while its flight details are shown
-//   yellow = both origin and destination are the same home airport
-//   green  = destination matches the home airport
-//   red    = origin matches the home airport
-//   blue   = all other overhead flights (default)
-// Each color blinks 5 times at 240 ms on/off. We turn ALL LEDs off first so a
-// stale LOW on a previous color does not bleed. Red, green, and yellow stay lit
-// while the live flight details remain on the dashboard; loop() turns them off
-// when the flight leaves or the view is dismissed. Blue and white just blink.
+// Blink the LED for an overhead flight: white watch / yellow home / green
+// arrival / red departure / blue. Route colors stay lit on the details view.
 void blinkLed(BlinkColor color) {
   pinMode(CYD_LED_RED, OUTPUT);   digitalWrite(CYD_LED_RED, HIGH);
   pinMode(CYD_LED_GREEN, OUTPUT); digitalWrite(CYD_LED_GREEN, HIGH);
@@ -2448,13 +2179,10 @@ void blinkLed(BlinkColor color) {
   }
 }
 
-// The watched-callsign notification (LED + speaker) lives in alarms.ino as
-// updateWatchNotify(): it reuses the shared alarm patterns so the callsign
-// alert looks and sounds like the user's chosen preset.
+// Watch-callsign alert lives in alarms.ino (updateWatchNotify) - it reuses the alarm presets.
 
-// Keep red/green/yellow route colors solid while the live flight details are
-// shown on the dashboard, and turn them off when the flight leaves or the view
-// is dismissed (including recalled flight details).
+// Route colors stay solid while the live details show; off when the flight
+// leaves or the view is dismissed (including recalled details).
 void updateRouteLed(bool active) {
   pinMode(CYD_LED_RED, OUTPUT);
   pinMode(CYD_LED_GREEN, OUTPUT);
@@ -2480,9 +2208,8 @@ void updateRouteLed(bool active) {
   }
 }
 
-// When no flight notification is active, mirror the dashboard's status border:
-// red for a critical issue and yellow for the OpenSky anonymous warning. This
-// keeps the onboard LED in sync with the red/yellow lower-right screen bar.
+// No flight notification: the LED mirrors the status border (red critical /
+// yellow anonymous warning).
 void updateStatusLed() {
   pinMode(CYD_LED_RED, OUTPUT);
   pinMode(CYD_LED_GREEN, OUTPUT);
@@ -2507,12 +2234,8 @@ void drawFlightBackButton() {
   backBtn("Back");
 }
 
-// Draw an RGB565 bitmap (in RAM, not PROGMEM) upscaled by `scale`
-// (nearest-neighbor), skipping pixels equal to `transp`. Uses fillRect per
-// pixel so no large scratch buffer is needed on the stack. Airline logos are
-// stored at their on-screen size (see scripts/convert_logos.py) and drawn with
-// scale=1 to preserve detail; `scale` stays generic in case a future caller
-// needs to upscale.
+// Draw an RGB565 bitmap upscaled nearest-neighbor, skipping `transp` pixels;
+// fillRect per pixel needs no scratch buffer (logos are pre-sized, scale=1).
 void drawScaledBitmap(int x, int y, const uint16_t* data, int w, int h,
                       int scale, uint16_t transp) {
   for (int sy = 0; sy < h; sy++) {
@@ -2554,10 +2277,8 @@ void drawFlightInfo(Plane& p) {
     tft.printf("%dft  %dmph  %.1fmi", p.altFt, (int)round(p.spdKt * 1.15078f), p.distMi);
   }
 
-  // Origin/destination. adsb.lol is the planned route; OpenSky is shown only
-  // when its actual airports differ. The route is fetched on the network task;
-  // getRouteDisplay guards the shared String globals, so the values are safe to
-  // read for this frame even if a fetch is in flight.
+  // Route: adsb.lol planned, OpenSky shown only when different; getRouteDisplay
+  // guards the shared Strings against a fetch in flight.
   String origin, originCity, dest, destCity;
   bool hasData;
   getRouteDisplay(origin, originCity, dest, destCity, hasData);
@@ -2595,9 +2316,7 @@ void drawFlightInfo(Plane& p) {
     tft.print("No route data");
   }
 
-  // Airline logo in the top-right corner, if one exists (drawn at its native
-  // stored size - see scripts/convert_logos.py - so no blocky upscaling). No fallback
-  // badge - just the logo (or nothing).
+  // Airline logo top-right at native stored size (no upscale); nothing if absent.
   const RuntimeLogo* logo = findAirlineLogo(p.callsign);
   if (logo) {
     drawScaledBitmap(RX(226), 40, logo->data, logo->w, logo->h, 1, 0xF81F);
@@ -2606,8 +2325,7 @@ void drawFlightInfo(Plane& p) {
 }
 
 // ---- Radar (frame, blips, ground track, projection) ----
-// Shared radar geometry: the dashboard overhead radar and the flight-detail
-// radar both use the same center/radius, so blips can be redrawn in place.
+// Dashboard + detail radars share center/radius so blips can redraw in place.
 static const int kRadarCX = RX(235), kRadarCY = 155, kRadarR = 48;
 
 // Draw the static radar rings, crosshairs and range label.
@@ -2668,9 +2386,7 @@ void drawTrackPolyline(int cx, int cy, float scale) {
   }
 }
 
-// Extend a line to the screen edge along a direction, from the track's end when
-// a track is available, else from the plane's current position along its live
-// heading (so the projection always shows and the plane follows it). Static,
+// Line to the screen edge from the track end (or along live heading); static,
 // redrawn each frame so the blip doesn't leave a hole.
 void drawTrackProjection(int cx, int cy, float scale, float planeDxMi, float planeDyMi, float planeHdgDeg) {
   TrackPoint lastPoint;
@@ -2715,11 +2431,8 @@ void drawTrackProjection(int cx, int cy, float scale, float planeDxMi, float pla
   drawDottedLineSafe(sx, sy, ex, ey, TFT_LIGHTGREY, 1, 6, CLIP_ALL);
 }
 
-// Bounding radius of a blip (plane icon or its dot fallback), used both for
-// the erase pass and the "would this land on an on-screen object" check. A
-// fixed circle this size covers the icon at any rotation (it only ever rotates
-// in place around its own center). Sized for the largest icon, the tracked
-// flight, which is drawn bigger to stand out.
+// Blip bounding radius for erase/overlap checks - a fixed circle covers the
+// icon at any rotation; sized for the larger tracked-flight icon.
 const int kBlipR = 11;
 // Scale multipliers for the radar plane icons. The tracked flight is drawn
 // bigger so it stands out from the other (smaller) planes.
@@ -2754,9 +2467,8 @@ static bool segInsideRect(int x0, int y0, int x1, int y1,
 void drawDottedLineSafe(int x0, int y0, int x1, int y1, uint16_t col, int dash, int gap, ClipZones zones) {
   const int R = kBlipR;
   Seg rects[5]; int nRects = 0;
-  // Dynamic zones are always clipped: the header/menu bar (with the clock) and
-  // the countdown bar when enabled. These change/redraw frequently, so a line
-  // drawn over them would leave stale artifacts.
+  // Always clip the header/menu and countdown bars - they redraw often, so a
+  // line over them leaves artifacts.
   rects[nRects++] = { -50, -50, DISP_W + 50, 33 + R };              // header/menu bar + clock
   if (g_screen == SCR_DASH && g_showTimer && g_trackEnabled)
     rects[nRects++] = { RX(302) - R, 34 - R, RX(320) + R, 200 + R };   // countdown bar
@@ -2799,11 +2511,8 @@ void drawDottedLineSafe(int x0, int y0, int x1, int y1, uint16_t col, int dash, 
   for (int i = 0; i < m; i++) drawDottedLine(cur[i].x0, cur[i].y0, cur[i].x1, cur[i].y1, col, dash, gap);
 }
 
-// Returns true if a blip centered at (px,py) would overlap an on-screen object
-// (header text, flight-info text, airline logo, or countdown bar). Such blips
-// are skipped instead of drawn, so we never later erase a black hole through
-// that object. Boxes are padded by kBlipR so a blip at the edge can't clip an
-// object.
+// Would a blip at (px,py) overlap an on-screen object? Such blips are skipped
+// rather than erased-through later; boxes are padded by kBlipR.
 bool blipBlocked(int px, int py) {
   const int R = kBlipR;
   if (py <= 33 + R) return true;                                     // header band
@@ -2829,10 +2538,8 @@ void planePoint(float fx, float fy, float rx, float ry, float f, float r,
   outY = cy + (int16_t)round(fy * f + ry * r);
 }
 
-// Draw a small airplane silhouette (nose, wings, tail) pointing along
-// hdgDeg (0 = north, clockwise), with a black outline so overlapping blips
-// of different colors stay legible. Falls back to a plain outlined dot when
-// heading is unknown (-1) so we still show something for those flights.
+// Plane silhouette along hdgDeg with a black outline (legible overlap);
+// unknown heading (-1) falls back to a dot.
 void drawPlaneIcon(int cx, int cy, float hdgDeg, uint16_t color, float scale) {
   if (hdgDeg < 0.0f) {
     int r = max(1, (int)round(3.0f * scale));
@@ -2847,9 +2554,7 @@ void drawPlaneIcon(int cx, int cy, float hdgDeg, uint16_t color, float scale) {
   float rx = cos(rad), ry = sin(rad);
   float s = scale;
 
-  // Nose/wings form the front arrowhead; the tail triangle shares the same
-  // back-edge line (f = -1) as the wings so the two shapes read as one
-  // silhouette instead of two disconnected blobs. `s` scales the whole icon.
+  // Tail shares the wings' back edge (f = -1) so the shapes read as one silhouette.
   int16_t noseX, noseY, wingLX, wingLY, wingRX, wingRY;
   int16_t tailX, tailY, tailBaseLX, tailBaseLY, tailBaseRX, tailBaseRY;
   planePoint(fx, fy, rx, ry,  5.0f * s,  0.0f,      cx, cy, noseX, noseY);
@@ -2865,10 +2570,8 @@ void drawPlaneIcon(int cx, int cy, float hdgDeg, uint16_t color, float scale) {
   tft.drawTriangle(tailX, tailY, tailBaseLX, tailBaseLY, tailBaseRX, tailBaseRY, TFT_BLACK);
 }
 
-// Draw a single radar blip at its offset from center, clipped to the screen.
-// On success it records the on-screen pixel (outPx/outPy) so a later in-place
-// update can erase it. Returns false (and draws nothing) if the blip is
-// off-screen or would land on top of an on-screen object.
+// Draw one blip, clipped, recording its pixel (outPx/outPy) for a later erase.
+// false (draws nothing) if off-screen or overlapping an object.
 bool plotRadarBlip(int cx, int cy, float scale, float dxMi, float dyMi, float distMi,
                    int& outPx, int& outPy, uint16_t color, float hdgDeg, float glyphScale) {
   int px = cx + (int)(dxMi * scale);
@@ -2884,10 +2587,8 @@ bool plotRadarBlip(int cx, int cy, float scale, float dxMi, float dyMi, float di
 // safe because blips are never drawn over on-screen objects.
 void eraseRadarBlip(int px, int py) { tft.fillCircle(px, py, kBlipR, TFT_BLACK); }
 
-// True when a plane's radar blip would land inside the overall screen bounds.
-// fetchFlights() uses this to promote a watched callsign to the tracked slot
-// only when it would actually draw — a plane past the screen edge (even when
-// within the OpenSky poll bbox) does not take priority.
+// True when the blip lands inside screen bounds - fetchFlights() only promotes
+// a watched callsign that would actually draw.
 bool blipOnScreen(const Plane& p) {
   float scale = (float)kRadarR / g_radiusMi;
   int px = kRadarCX + (int)(p.dxMi * scale);
@@ -2902,9 +2603,7 @@ uint16_t blipColor(const Plane& p, int index) {
          : ((p.distMi <= g_radiusMi) ? TFT_RED : TFT_GREEN);
 }
 
-// Draw the tracked (overhead) flight, always on top, as a larger cyan icon.
-// If it dead-reckons off the screen (before the view is dismissed) it simply
-// isn't drawn.
+// Tracked flight: larger cyan icon on top; not drawn once dead-reckoned off-screen.
 void drawTrackedBlip(int cx, int cy, float scale, Plane& p) {
   int px = cx + (int)(p.dxMi * scale);
   int py = cy - (int)(p.dyMi * scale);
@@ -2916,9 +2615,8 @@ void drawTrackedBlip(int cx, int cy, float scale, Plane& p) {
   }
 }
 
-// Full radar draw for the dashboard overhead view. Draws the static frame plus
-// every plane blip and records each blip's pixel. Called from a full screen
-// redraw (the screen is already black, so no region clear is needed here).
+// Full radar draw: frame + all blips, recording each pixel (screen is already
+// black on a full redraw).
 void drawRadar() {
   int cx = kRadarCX, cy = kRadarCY, r = kRadarR;
   drawRadarFrame(cx, cy, r);
@@ -2937,11 +2635,8 @@ void drawRadar() {
   tft.fillCircle(cx, cy, 3, TFT_WHITE); // you
 }
 
-// In-place per-second update for the dashboard radar: erase each blip's old
-// pixel, restore the static frame (in case a blip crossed a ring/label pixel),
-// then redraw blips at their dead-reckoned positions. Blips only ever draw
-// over the black background or the radar frame itself, so the erase never
-// damages other on-screen objects and no trails are left behind.
+// Per-second in-place update: erase each blip's pixel, restore the frame, redraw
+// at dead-reckoned positions (blips only ever cover black or the frame).
 void drawRadarInPlace() {
   int cx = kRadarCX, cy = kRadarCY, r = kRadarR;
   float scale = r / g_radiusMi;
@@ -2994,9 +2689,8 @@ void drawFlightDetailRadarInPlace() {
   tft.fillCircle(cx, cy, 3, TFT_WHITE); // you
 }
 
-// Advance an estimated east/north offset and distance by dtMs of straight,
-// level flight at the given heading and speed. A missing heading (-1) or zero
-// speed means we can't extrapolate, so the position is left unchanged.
+// Advance an offset by dtMs of straight-level flight; missing heading (-1) or
+// zero speed means no extrapolation.
 void deadReckonPosition(float& dxMi, float& dyMi, float& distMi,
                         float hdgDeg, int spdKt, unsigned long dtMs) {
   if (hdgDeg < 0.0f || spdKt <= 0 || dtMs == 0) return;
@@ -3008,11 +2702,8 @@ void deadReckonPosition(float& dxMi, float& dyMi, float& distMi,
   distMi = sqrtf(dxMi * dxMi + dyMi * dyMi);
 }
 
-// Per-second dead-reckoning for the radar. Every plane (and the flight-detail
-// snapshot) is advanced by the time since its last known position, then the
-// active radar is redrawn in place. Deltas are capped so a long absence (e.g.
-// another screen was up) never extrapolates into a wild jump; the next OpenSky
-// poll overwrites positions with real data anyway.
+// Per-second dead-reckoning + in-place radar redraw; deltas capped so a long
+// absence can't jump wildly (the next poll overwrites anyway).
 void stepRadar() {
   unsigned long now = millis();
   for (int i = 0; i < planeCount; i++) {
@@ -3037,9 +2728,8 @@ void stepRadar() {
     }
   }
 
-  // Move blips in place only on a screen that is actually showing a radar;
-  // g_radarShown is set by the full draw, so we never paint a phantom radar
-  // onto the idle dashboard during the brief window before its full redraw.
+  // Move blips only on a screen actually showing a radar (g_radarShown) - else
+  // we'd paint a phantom onto the idle dashboard before its full redraw.
   if (g_screen == SCR_FLIGHTDETAIL) {
     if (g_radarShown) drawFlightDetailRadarInPlace();
   } else if (g_screen == SCR_DASH) {
@@ -3047,10 +2737,8 @@ void stepRadar() {
   }
 }
 
-// Full-screen page that recalls the last overhead flight (see SCR_FLIGHTDETAIL).
-// Mirrors the overhead view layout; if no overhead flight has been recorded yet
-// it shows dash placeholders. Reached by tapping the "N aircraft" status on the
-// dashboard. Auto-returns to the dashboard after ~30s (see loop()).
+// Flight-recall page (tap "N aircraft"); mirrors the overhead view, placeholders
+// if none seen. Auto-returns after ~30s (see loop()).
 void drawFlightDetailPage() {
   tft.fillScreen(TFT_BLACK);
   drawHeaderBand();
@@ -3140,10 +2828,8 @@ void drawFlightDetailPage() {
   g_radarShown = g_lastFlight.valid;
 }
 
-// Settings screen + sub-screens (Flight Tracker, Sleep Mode, Reset confirm)
-// and their small helpers: drawSettings(), drawFtracker(), handleFtrackerTouch(),
-// drawReset(), drawSleep(), drawEditRow(), handleSleepTouch(), drawSlider()
-// live in settings.ino.
+// Settings screens + helpers (drawSettings, drawFtracker, handleFtrackerTouch,
+// drawReset, drawSleep, drawEditRow, handleSleepTouch, drawSlider) in settings.ino.
 
 // ---- touch ----
 bool inRect(int x, int y, int x0, int y0, int x1, int y1) {
@@ -3162,10 +2848,8 @@ void saveInt(const char* key, int v) {
   dirty = true;
 }
 
-// Read a single XPT2046 12-bit channel (0xD0 = X, 0x90 = Y) over VSPI.
-// IMPORTANT: after sending the command byte we must WAIT ~200us for the ADC to
-// convert before clocking out the 12-bit result. Reading immediately catches the
-// conversion mid-flight and yields wildly unstable values.
+// Read one XPT2046 channel over VSPI. Must wait ~200us after the command for
+// the ADC to convert - reading early gives wildly unstable values.
 static uint16_t xptChannel(uint8_t cmd, SPIClass& spi) {
   spi.beginTransaction(SPISettings(2500000, MSBFIRST, SPI_MODE0));
   digitalWrite(TOUCH_CS_PIN, LOW);
@@ -3180,15 +2864,8 @@ static uint16_t xptChannel(uint8_t cmd, SPIClass& spi) {
   return tmp & 0x0FFF;
 }
 
-// Read the touch position directly from the XPT2046 on VSPI and map it into
-// the 320x240 display coordinate space (same space the touch UI uses). Returns
-// false when no press is detected.
-//
-// Gated on the hardware IRQ (GPIO 36, active-low): the XPT2046 only asserts it
-// during an actual physical touch, so checking it first avoids ever sampling
-// (and mis-trusting) the ADC while untouched. This matters because the raw
-// X/Y channels pick up enough noise while idle - especially with WiFi active -
-// that a value-based threshold alone produces frequent false "touches".
+// Read XPT2046 touch mapped to logical coords, gated on the GPIO 36 IRQ - idle
+// channel noise (esp. with WiFi) makes a value threshold give false touches.
 bool touchReadXY(uint16_t& outX, uint16_t& outY, uint16_t* rawX = nullptr, uint16_t* rawY = nullptr) {
   static SPIClass tspi(TOUCH_SPI);
   static bool inited = false;
@@ -3212,11 +2889,8 @@ bool touchReadXY(uint16_t& outX, uint16_t& outY, uint16_t* rawX = nullptr, uint1
   long dx = ((long)ry - g_calOffX) * 1000L / g_calScaleX;
   long dy = ((long)rx - g_calOffY) * 1000L / g_calScaleY;
 #ifdef CYD_E32R40T
-  // The E32R40T's touch axes run opposite the panel on both X and Y (a
-  // bottom-right tap reads as top-left). The cal fit can't express inversion
-  // (positive scale only), so flip the axes in panel space, then convert
-  // panel -> logical DISP_W x 240 UI coordinates to match the drawing wrapper
-  // (uniform x3/4 inverse of the x4/3 draw scale).
+  // E32R40T touch axes run inverted vs the panel - flip in panel space (the cal
+  // fit is positive-scale only), then convert panel -> logical.
   dx = (479 - dx) * 3 / 4;
   dy = (319 - dy) * 3 / 4;
 #endif
@@ -3308,17 +2982,8 @@ void handleTouch() {
     }
     // Step 2: confirmation prompt.
     if (inRect(x, y, 30, 180, 140, 214)) {  // Yes -> wipe + reboot
-      // "Graph Data" (g_resetConfirm == 3) touches only the graph files, no NVS.
-      // "Settings" (g_resetConfirm == 2) clears settings & credentials only, so
-      // it keeps the touch calibration - it's hardware-specific and lives in
-      // the same NVS namespace we're clearing; without it the panel reverts to
-      // factory defaults that don't match this unit and the dashboard looks
-      // unresponsive. "Factory Reset" (g_resetConfirm == 1) is a full factory
-      // reset, so it also clears airline logos on the separate "logos"
-      // partition and the touch calibration; the touchscreen falls back to
-      // defaults and must be recalibrated on the next boot (hold anywhere 10s).
-      // Every other key - including the clock color "clkcol" - is removed by
-      // prefs.clear() above, so it reverts to its default after either reset.
+      // Reset scopes: (3) graph files only; (2) NVS minus touch calibration
+      // (hardware-specific, same namespace); (1) also logos + calibration.
       if (g_resetConfirm == 4) {  // Restart only, no data wipe
         ESP.restart();
       }
@@ -3333,9 +2998,7 @@ void handleTouch() {
       }
       if (g_resetConfirm == 1 || g_resetConfirm == 3) { poolfsWipe(); weatherfsWipe(); }   // Factory/Graph Data delete pool + weather history files
       if (g_resetConfirm == 1) { logosWipe(); }   // Factory Reset also removes airline logos
-      // Brief on-screen feedback so the tap visibly registers, and a short
-      // pause so NVS/LittleFS finish flushing before the reboot. Say exactly
-      // what is being wiped.
+      // On-screen feedback + a short pause so NVS/LittleFS flush before reboot.
       tft.fillScreen(TFT_BLACK);
       tft.setTextColor(TFT_WHITE, TFT_BLACK);
       tft.setTextFont(2);
@@ -3419,31 +3082,23 @@ void handleTouch() {
   if (g_screen == SCR_DASH) { // SCR_DASH
     bool overhead = g_trackEnabled && !g_suppressFlight && flightOverhead();
 
-    // tapping the header credits opens the OpenSky Credits screen (three
-    // buckets). Only active when flight tracking is on (the indicator is only
-    // drawn then). Zone avoids the flight Back button.
+    // Header-credits tap opens the Credits screen (only drawn while tracking
+    // is on). Zone avoids the flight Back button.
     if (g_trackEnabled && inRect(x, y, RX(194), 0, RX(264), 33)) { g_creditsReturn = SCR_DASH; g_screen = SCR_CREDITS; dirty = true; return; }
 
-    // tapping the header date/clock (or the AM/PM/alarm-bell marker) opens the
-    // Alarms screen. On the 4" the clock is centred, so the zone widens to
-    // cover it (RX keeps it clear of the credits zone at RX(194)).
+    // Clock/date tap opens Alarms; on the 4" the centered clock widens the zone
+    // (RX keeps it clear of the credits zone).
     if (inRect(x, y, 0, 0, RX(190), HEADER_H - 1)) { g_screen = SCR_ALARMS; g_alarmIdx = constrain(g_alarmIdx, 0, g_alarmCount - 1); dirty = true; return; }
 
     // settings cog -> settings. Generous tap zone so it's easy to hit even with
     // a small touch-calibration offset (the cog itself is only ~28x24).
     if (inRect(x, y, RX(278), 184, DISP_W, 234)) { g_screen = SCR_SETTINGS; dirty = true; return; }
 
-    // Back button (upper-right) or the countdown bar dismisses the overhead
-    // flight back to idle. Gate on g_radarShown (is the overhead flight view
-    // actually displayed?) rather than the live `overhead` data condition: as
-    // dead-reckoning moves the flight out of radius, `overhead` can go false
-    // while the view is still on screen, which would make the Back button do
-    // nothing until a later redraw. The countdown-bar tap zone only applies
-    // while the timer is shown (so there is no invisible region when hidden).
+    // Back / countdown-bar tap dismisses the overhead view. Gate on
+    // g_radarShown (view up), not `overhead` - dead-reckoning can clear it
+    // early. The bar zone applies only while the timer is drawn.
     if (g_radarShown &&
-        // Back button - runs to the right screen edge (past the drawn button)
-        // so taps the calibration maps slightly hot still register instead of
-        // dying in the few-pixel dead strip at the panel edge.
+        // Back zone runs to the screen edge so taps the calibration maps hot still register.
         ((inRect(x, y, RX(265), 4, DISP_W - 1, 24)) ||
          (g_showTimer && x >= RX(296) && y >= HEADER_H + 2 && y <= 200))) {  // countdown bar
       g_suppressFlight = true;
@@ -3468,10 +3123,8 @@ void handleTouch() {
       return;
     }
 
-    // tapping the lower-left status line (e.g. "6 aircraft") while idle recalls
-    // the last overhead flight's details (dashes if none has been seen yet).
-    // Disabled while a snooze countdown owns that line - the recall data would
-    // be stale (flight polls are suppressed) and the countdown is informational.
+    // "N aircraft" tap recalls the last overhead flight; disabled while a snooze
+    // countdown owns the line (polls suppressed, so the recall would be stale).
     if (!overhead && !snoozePending() && inRect(x, y, 4, 216, 170, 236)) {
       g_screen = SCR_FLIGHTDETAIL;
       g_screenIdleUntil = millis() + SCREEN_IDLE_TIMEOUT_MS;
@@ -3481,9 +3134,8 @@ void handleTouch() {
   }
 
   if (g_screen == SCR_FLIGHTDETAIL) {
-    // Any tap keeps the page open (resets the 30s auto-return); the upper-right
-    // Back button returns to the dashboard; tapping the header credits opens
-    // the OpenSky Credits screen (returning back here).
+    // Any tap resets the 30s auto-return; Back returns to the dashboard;
+    // credits tap opens the Credits screen (returning here).
     g_screenIdleUntil = millis() + SCREEN_IDLE_TIMEOUT_MS;
     if (g_trackEnabled && inRect(x, y, RX(194), 0, RX(264), 33)) { g_creditsReturn = SCR_FLIGHTDETAIL; g_screen = SCR_CREDITS; dirty = true; return; }
     if (inRect(x, y, 0, 0, RX(190), HEADER_H - 1)) { g_screen = SCR_ALARMS; g_alarmIdx = constrain(g_alarmIdx, 0, g_alarmCount - 1); dirty = true; return; }
@@ -3519,8 +3171,9 @@ void setup() {
 #else
   Serial.println("[boot] board=2432s028r");
 #endif
+  // Version on every build - detect_boards.py parses it (releases: build=0).
+  Serial.printf("[boot] version=%s build=%d\n", kVersion, (int)BUILD_NUM);
   if (isDevBuild()) {
-    Serial.printf("[boot] version=%s build=%d\n", kVersion, (int)BUILD_NUM);
     Serial.printf("[boot] %s\n", kBuildTag);
     Serial.printf("[boot] OpenSky credentials clientId=%s clientSecret=%s\n",
                   g_osClientId.length() ? "set" : "blank",
@@ -3537,10 +3190,8 @@ void setup() {
   g_sleepEndH = prefs.getInt("sleepeH", 8);
   g_sleepEndM = prefs.getInt("sleepeM", 0);
   g_wakeMin = prefs.getInt("wake", 5);
-  // The Sleep Mode edit buffers default to hardcoded strings and are only
-  // written on edit (see commitSleepTime() in wifi_config.ino) — sync them from
-  // the loaded values or the Settings screen shows stale "22:00"/"08:00"
-  // after every reboot.
+  // Sync sleep-time edit buffers from NVS - they default to hardcoded strings
+  // and would show stale "22:00"/"08:00" after every reboot.
   {
     char buf[8];
     snprintf(buf, sizeof buf, "%02d%02d", g_sleepStartH, g_sleepStartM);
@@ -3557,10 +3208,8 @@ void setup() {
   g_showIata = prefs.getBool("showiata", true);
   g_autoUpdate = prefs.getBool("autoupd", true);
   g_lastScanDay = prefs.getULong("lastscan", 0);
-  // Dev builds (version ending in "-dev") never auto-update: force it OFF for
-  // this boot so a dev flash can't silently upgrade. Do NOT persist it to NVS -
-  // the user's saved Auto-Update preference should survive a dev flash, so it's
-  // still ON when they later install a release build.
+  // Dev builds never auto-update: force off for this boot, but don't persist -
+  // the user's preference must survive into the next release build.
   if (isDevBuild() && g_autoUpdate) {
     g_autoUpdate = false;
   }
@@ -3591,21 +3240,15 @@ void setup() {
     Serial.printf("[boot] location state firstBoot=%d lat=%.5f lon=%.5f\n",
                   (int)g_firstBoot, g_lat, g_lon);
   }
-  // First-boot wizard: run touch calibration first if none was ever saved
-  // (fresh device or after a full factory reset), then gather WiFi credentials
-  // if none are stored. "Has it been calibrated?" is answered by whether the
-  // calibration keys exist in NVS (calCompute() always writes all four
-  // together), so no separate flag is needed. The keys are read here, while the
-  // namespace is still open (calLoad() must not be re-opened until setup()
-  // finishes reading).
+  // First-boot wizard: calibrate if its NVS keys are absent, then WiFi creds.
+  // Keys are read while the namespace is open - calLoad() must not re-open it.
   bool needCalib = !prefs.isKey("calsx");
   bool needWifi  = (g_savedSsid.length() == 0);
   if (needCalib)      g_bootStage = BOOT_CALIB;
   else if (needWifi)  g_bootStage = BOOT_WIFI;
   else                g_bootStage = BOOT_DONE;
-  // First boot on a new version (or on firmware old enough that it never
-  // recorded one): flag it so the boot chime below is followed by the 1-up
-  // jingle, then stamp the running version so it only fires once.
+  // First boot on a new version: play the 1-up jingle after the chime, then
+  // stamp the version so it fires once.
   g_upgraded = (prefs.getString("lastver", "") != kVersion);
   if (g_upgraded) prefs.putString("lastver", kVersion);
   loadAlarms();   // reads the "alarms" blob while the namespace is still open
@@ -3615,37 +3258,27 @@ void setup() {
   weatherfsInit();  // load persisted weather temp history from flash into RAM
   logosInit();    // mount the "logos" partition (may be absent -> run logo-less)
 
-  // esp_sleep_get_wakeup_cause() reads a register NOT cleared by software
-  // reset (esp_restart()/OTA/Factory Reset) — it can report a stale cause from
-  // an earlier deep-sleep exit. Only trust it when esp_reset_reason() confirms
-  // a real deep-sleep wake, else a stale value could send a fresh boot into
-  // sleeperRun() before the display even initializes.
+  // esp_sleep_get_wakeup_cause() survives soft resets with a stale value - only
+  // trust it when esp_reset_reason() confirms a real deep-sleep wake.
   bool wokeFromDeepSleep = (esp_reset_reason() == ESP_RST_DEEPSLEEP);
   esp_sleep_wakeup_cause_t wakeCause = wokeFromDeepSleep
       ? esp_sleep_get_wakeup_cause() : ESP_SLEEP_WAKEUP_UNDEFINED;
 #if TOUCH_IRQ_ENABLED
-  // enterDeepSleep() latches TOUCH_CS_PIN low via gpio_hold_en() so the XPT2046
-  // can assert its IRQ during sleep. The hold survives the wake reset, so
-  // release it here — otherwise CS stays low, the IRQ stays asserted, and the
-  // level-triggered EXT0 wake would re-fire on every later deep-sleep attempt.
+  // Release the touch-CS hold latched for the sleep wake - else the asserted
+  // IRQ would re-fire EXT0 on every later deep-sleep attempt.
   gpio_hold_dis((gpio_num_t)TOUCH_CS_PIN);
   pinMode(TOUCH_CS_PIN, OUTPUT);
   digitalWrite(TOUCH_CS_PIN, HIGH);   // deselect the touch controller
-  // A touch wake is normally reported as ESP_SLEEP_WAKEUP_EXT0. But the cause
-  // register isn't always reliable here, so also honor the wake duration when
-  // the touch IRQ line is actually asserted (finger still down) at boot.
-  // Otherwise the device would wake for a few seconds and then immediately
-  // fall back asleep once NTP syncs and inSleepWindowNow() turns true.
+  // Touch wake usually reports EXT0 but the cause register is unreliable -
+  // also honor a still-asserted IRQ, else the device re-sleeps immediately.
   bool touchActiveNow = (digitalRead(TOUCH_IRQ_PIN) == LOW);
   if (wakeCause == ESP_SLEEP_WAKEUP_EXT0 || touchActiveNow) {
     wakeUntil = millis() + (unsigned long)g_wakeMin * 60000UL;
   }
 #endif
 
-  // On a deep-sleep timer wake inside the sleep window, run the low-power
-  // pool logger. It returns when the window ends (WiFi + time already synced,
-  // so we skip repeating that work) or if WiFi/time couldn't be obtained —
-  // either way we fall through to a normal boot.
+  // Timer wake inside the sleep window: run the low-power pool logger; it
+  // returns when the window ends or WiFi/time fails - then boot normally.
   bool alreadyAwake = false;
   if (g_sleepOn && wakeCause == ESP_SLEEP_WAKEUP_TIMER) {
     alreadyAwake = sleeperRun();
@@ -3657,9 +3290,8 @@ void setup() {
   tft.setRotation(1); // landscape 320x240 (480x320 panel on CYD_E32R40T)
   tft.fillScreen(TFT_BLACK);
 
-  // First-boot wizard: missing touch calibration starts calBegin() (driven by
-  // calPoll() in loop(), then advances to WiFi or the dashboard); missing WiFi
-  // credentials with saved calibration jumps straight to the WiFi screen.
+  // Wizard: missing calibration -> calBegin() (calPoll() advances it); missing
+  // WiFi creds -> straight to the WiFi screen.
   if (g_bootStage == BOOT_CALIB) {
     calBegin();
     // Calibration needs a responsive touch path before anything else.
@@ -3669,10 +3301,8 @@ void setup() {
     dirty = true;
   }
 
-  // Connect without blocking at boot: start an async connect and show the
-  // dashboard right away (No WIFI border if not connected yet). Data loads once
-  // WiFi is up via the loop() g_wifiConnectedOnce block, so boot isn't held up
-  // by the 15s tryConnect timeout and fetch timeouts on a no-WiFi device.
+  // Connect async and show the dashboard right away - boot isn't held by the
+  // connect/fetch timeouts on a no-WiFi device.
   connected = (WiFi.status() == WL_CONNECTED);
   if (!alreadyAwake && !connected && g_savedSsid.length() > 0) {
     setNetHostname();
@@ -3683,16 +3313,13 @@ void setup() {
     wifiTryStart = millis();  // doesn't call WiFi.begin() again mid-handshake
   }
   if (connected) {
-    // Start NTP only after WiFi is up. Calling configTime() (SNTP/UDP) before
-    // the WiFi link is established triggers the ESP32 Arduino "Required to lock
-    // TCPIP core functionality" crash on lwip.
+    // NTP only after WiFi is up - configTime() before the link triggers the
+    // lwip "Required to lock TCPIP core functionality" crash.
     setupNTP();
     delay(100);            // let SNTP get a moment to start cleanly
   }
-  // The first data fetch runs from loop() on the net task at a random offset
-  // within BOOT_FETCH_JITTER_MS, so boards that power up together (outage
-  // restore, sleep-window end) don't call the APIs in lockstep - and boot no
-  // longer blocks on synchronous TLS.
+  // First fetch runs on the net task at a jittered offset (fleet lockstep) -
+  // boot no longer blocks on synchronous TLS.
   g_bootFetchAt = millis() + esp_random() % BOOT_FETCH_JITTER_MS;
   // Absent-result retry interval for the post-boot grace window: drawn once
   // per boot (55-65s) so boards that powered up together retry off-phase.
@@ -3701,26 +3328,18 @@ void setup() {
     Serial.printf("[net] boot fetch in %lums\n",
                   (unsigned long)(g_bootFetchAt - millis()));
   }
-  // Stay on the dashboard even if no WiFi is configured (users reach the WiFi
-  // setup screen from Settings). If credentials are saved but the connection
-  // fails, the dashboard shows the "No WIFI" border and retries automatically.
+  // Stay on the dashboard even without WiFi (setup reachable from Settings);
+  // failed connects show "No WIFI" and retry.
 
-  // Start the async network task on the other core so blocking HTTP calls never
-  // freeze the main loop (touch + drawing).
-  // Stack measured on-device (uxTaskGetStackHighWaterMark): the deep mbedTLS
-  // handshake + JSON parse peaks around 6 KB, so 12 KB leaves ~2x headroom.
+  // Net task on the other core so blocking HTTP can't freeze the loop.
+  // Stack: ~6 KB measured peak (mbedTLS + JSON), so 12 KB is ~2x headroom.
   xTaskCreatePinnedToCore(netTask, "net", NET_TASK_STACK_BYTES, NULL, 1, &g_netTask, 0);
-  // OTA task created once at boot (idle until g_otaRunning), not per-OTA: a
-  // fresh task's first TLS connect was observed to fail, and an on-demand stack
-  // carved from the heap drops below what mbedtls needs. 12 KB matches the net
-  // task's measured peak, so heap stays clear of that threshold.
+  // OTA task pre-created at boot: a fresh task's first TLS connect was observed
+  // to fail, and an on-demand stack drops below what mbedtls needs.
   xTaskCreate(otaTaskEntry, "ota", 12288, NULL, 1, &g_otaTask);
 
-  // "Device is on" signature: short rising arpeggio + LED sweep, at the NVS
-  // notification volume. Blocking (~0.7s); it finishes before loop()'s LED
-  // logic takes over. Cold boots only - a deep-sleep wake (timer, touch, or
-  // window end) shouldn't announce itself like a fresh power-on. A first boot
-  // on a new version appends the 1-up jingle.
+  // Boot chime + LED sweep ("device is on"), cold boots only - deep-sleep wakes
+  // skip it; a first boot on a new version appends the 1-up jingle.
   if (!wokeFromDeepSleep) {
     playBootChime();
     if (g_upgraded) playUpgradeChime();
@@ -3730,8 +3349,7 @@ void setup() {
 }
 
 // ---- Sleep / deep-sleep ----
-// Enter deep sleep with a timer wakeup (to keep logging the pool temp), plus
-// a touch-IRQ wakeup if TOUCH_IRQ_ENABLED and wired. Never returns.
+// Deep sleep with a timer wake (pool logging) + touch-IRQ wake. Never returns.
 void enterDeepSleep() {
 #if TOUCH_IRQ_ENABLED
   // Keep the XPT2046 selected during deep sleep so its IRQ can assert LOW on
@@ -3742,10 +3360,8 @@ void enterDeepSleep() {
   delay(10);
   esp_sleep_enable_ext0_wakeup((gpio_num_t)TOUCH_IRQ_PIN, 0);  // wake on LOW (touch)
 #endif
-  // Wake at the next alarm firing if it lands sooner than the pool-temp
-  // cadence, so an alarm (or matured snooze) goes off on time instead of up
-  // to ~5 min late. nextFire is already in NVS, so the refire survives this
-  // sleep too.
+  // Wake at the next alarm if sooner than the pool cadence so it fires on time;
+  // nextFire is in NVS so the refire survives this sleep.
   uint64_t wakeUs = SLEEP_POOL_INTERVAL_US;
   time_t nextAlarm = nextAlarmAt();
   time_t epochNow = time(nullptr);
@@ -3762,18 +3378,14 @@ void enterDeepSleep() {
 // Is the current local time inside the configured sleep window?
 bool inSleepWindowNow() {
   if (!g_sleepOn) return false;
-  // Only trust the clock once NTP has synced: after a soft reset (e.g. OTA) the
-  // RTC retains a valid-looking UTC epoch but the timezone isn't applied until
-  // configTime() runs, so an epoch check alone could land inside the sleep
-  // window and trigger an unwanted sleep. sntp_get_sync_status() is unusable
-  // (Arduino-ESP32's configTime() never drives it to COMPLETED on-device), so
-  // g_timeReady (set by setupNTP) is the gate; combine it with the epoch check.
+  // Only trust the clock after NTP sync - after a soft reset the RTC epoch
+  // looks valid but the timezone isn't applied until configTime() runs.
+  // sntp_get_sync_status() never completes on-device, so g_timeReady is the gate.
   if (!g_timeReady) return false;
   if (time(nullptr) < 1600000000L) return false;
   struct tm t;
-  // Explicit 0ms timeout: called every main-loop iteration, and
-  // getLocalTime()'s default 5s timeout would block the loop (touch +
-  // drawing) for that long every time while time isn't synced yet.
+  // 0ms timeout: called every loop iteration; getLocalTime()'s default 5s would
+  // block the loop while time isn't synced.
   if (!getLocalTime(&t, 0)) return false;
   int cur = t.tm_hour * 60 + t.tm_min;
   int start = g_sleepStartH * 60 + g_sleepStartM;
@@ -3782,9 +3394,8 @@ bool inSleepWindowNow() {
   return (cur >= start || cur < end);   // wraps past midnight
 }
 
-// Epoch of the next sleep-window start after `after` (today's or tomorrow's),
-// or 0 when Sleep Mode is off. Bounds the daily update scan to the awake time
-// remaining before the device next sleeps.
+// Next sleep-window start after `after` (0 when Sleep Mode off) - bounds the
+// daily update scan to the awake time remaining.
 time_t nextSleepStart(time_t after) {
   if (!g_sleepOn) return 0;
   struct tm t;
@@ -3800,9 +3411,7 @@ time_t nextSleepStart(time_t after) {
   return 0;
 }
 
-// Latest-resort slot for the daily update scan when the remaining awake time
-// is one solid alarm window: the midpoint of the largest occurrence-free gap
-// inside [from, horizon] - the moment furthest from any firing.
+// Latest-resort scan slot: midpoint of the largest alarm-free gap in [from, horizon].
 static time_t bestEffortSlot(time_t from, time_t horizon) {
   time_t best = from, segStart = from;
   long bestGap = -1;
@@ -3819,15 +3428,11 @@ static time_t bestEffortSlot(time_t from, time_t horizon) {
   return best;
 }
 
-// Low-power pool logger run while inside the sleep window. Wakes on the deep-
-// sleep timer, syncs time, logs the pool temperature to flash, and sleeps
-// again. Returns true only when the sleep window has ended (so the caller
-// should boot normally). Never returns while still inside the window.
+// Low-power pool logger for the sleep window: wake, sync time, log, sleep again.
+// Returns true only when the window has ended (caller boots normally).
 bool sleeperRun() {
   if (g_savedSsid.length() == 0) return false;
-  // WiFi first, then NTP: calling configTime() (SNTP/UDP) before the WiFi link
-  // is established can trigger the lwip "Required to lock TCPIP core
-  // functionality" crash (see the note above setup()'s setupNTP call).
+  // WiFi before NTP - configTime() pre-link triggers the lwip crash (see setup()).
   bool conn = tryConnect(g_savedSsid.c_str(), g_savedPass.c_str());
   if (!conn) return false;
   setupNTP();
@@ -3852,22 +3457,15 @@ bool sleeperRun() {
   }
 }
 
-// Runs performOTA (TLS handshake overflows the 8 KB loop task). Pre-created at
-// boot and left idle until g_otaRunning (see setup()) so this long-lived task's
-// TLS is reliable -- a fresh task's first connect was observed to fail. Owns the
-// display while running; never returns on success (reboots).
+// Runs performOTA on the pre-created task (TLS overflows loopTask; a fresh
+// task's first connect was seen to fail). Owns the display; reboots on success.
 void otaTaskEntry(void*) {
   for (;;) {
     if (!g_otaRunning) { vTaskDelay(50 / portTICK_PERIOD_MS); continue; }
-    // Draw the "Updating" screen immediately, before any blocking network wait,
-    // so the UI switches over right away instead of appearing frozen while the
-    // download stalls. performOTA() redraws it again (harmless) before its own
-    // network calls.
+    // Draw "Updating" before any blocking network wait so the UI doesn't look frozen.
     drawOtaHeader(g_otaVersion);
-    // The OTA downloads over the network while the net task may be mid-fetch
-    // (flights/weather/pool polling continues on the dashboard). Two tasks doing
-    // HTTP/lwIP at once can trigger a FreeRTOS xTaskPriorityDisinherit assert, so
-    // wait for any in-flight net fetch to finish before starting the download.
+    // Wait for in-flight net fetches: two tasks doing HTTP/lwIP at once can
+    // trip a FreeRTOS xTaskPriorityDisinherit assert.
     while (netBusy) vTaskDelay(20);
     performOTA(g_otaUrl, g_otaVersion, g_otaSha256);
     // Only reached on failure (success reboots via ESP.restart()):
@@ -3901,17 +3499,13 @@ void loop() {
   }
 #endif
 
-  // Fire a due alarm (or a matured snooze) before anything else can sleep the
-  // device - firing switches to SCR_ALARMFIRE, which also keeps the
-  // screen==SCR_DASH checks below from applying.
+  // Fire a due alarm before anything can sleep the device - firing switches to
+  // SCR_ALARMFIRE, which also gates the SCR_DASH checks below.
   checkAlarms();
 
   // --- Sleep Mode ---
-  // Only sleep while on the dashboard (so Settings stays interactive). A
-  // pending snooze doesn't block sleep: its nextFire is in NVS and the
-  // deep-sleep timer wakes at it (see enterDeepSleep), so the refire still
-  // goes off on time. A ringing alarm can't be slept on - firing switched
-  // the screen to SCR_ALARMFIRE.
+  // Sleep only from the dashboard; a pending snooze doesn't block (NVS
+  // nextFire survives); a ringing alarm can't be slept on (SCR_ALARMFIRE).
   bool asleep = false;
   if (g_screen == SCR_DASH) {
     // expire a user-triggered wake once the duration has elapsed
@@ -3921,9 +3515,8 @@ void loop() {
   }
 
   if (asleep) {
-    // True low-power sleep: blank the display, then enter deep sleep with a
-    // timer wakeup so the pool temperature keeps getting logged. Also wakes
-    // on touch if TOUCH_IRQ_ENABLED and the IRQ pin is wired (see config).
+    // Blank the display, then deep sleep with a timer wake (pool logging) +
+    // optional touch-IRQ wake.
     if (!g_displayOff) { tft.writecommand(0x28); g_displayOff = true; }  // ILI9341 off
     delay(150);
     enterDeepSleep();   // does not return; resets on next wake
@@ -3932,16 +3525,14 @@ void loop() {
   // --- Awake path: ensure display is on ---
   if (g_displayOff) { tft.writecommand(0x29); g_displayOff = false; dirty = true; }
 
-  // Hand off a pending OTA (About Install button or daily auto-scan) to the OTA
-  // task (see otaTaskEntry) by flipping g_otaRunning; the task polls for it and
-  // owns the display while it runs.
+  // Hand a pending OTA (About Install / daily scan) to the OTA task via
+  // g_otaRunning; the task owns the display while it runs.
   if (g_otaActive && !g_otaRunning) {
     g_otaActive = false;
     g_otaRunning = true;
     g_screenIdleUntil = 0;   // drop any armed idle return so it can't fire mid-OTA
-    // Bail here so the dirty-redraw below can't issue TFT/SPI draws
-    // concurrently with the OTA task — TFT_eSPI has no cross-task locking and
-    // that race can hang the SPI bus (observed as a full freeze).
+    // Bail before the dirty-redraw: concurrent TFT/SPI draws with the OTA task
+    // can hang the SPI bus (TFT_eSPI has no cross-task locking).
     return;
   }
   // OTA rollback safeguard: after a successful boot grace period, cancel any
@@ -3974,9 +3565,8 @@ void loop() {
   }
   connected = wifiUp;
 
-  // First time WiFi is up since boot: start NTP here (doing it before the link
-  // is up triggers a lwip crash) and redraw the dashboard with whatever data
-  // we have. The initial data load fires on the jittered deadline below.
+  // First WiFi-up: start NTP here (pre-link configTime() crashes lwip) and
+  // redraw; the first data load fires on the jittered deadline below.
   if (wifiUp && !g_wifiConnectedOnce) {
     g_wifiConnectedOnce = true;
     g_firstConnectAt = now;
@@ -3994,12 +3584,8 @@ void loop() {
     if (g_screen == SCR_DASH) dirty = true;
   }
 
-  // First data load of this boot, spread over a random offset so a fleet that
-  // powers up together (outage restore, sleep-window end) doesn't hit the APIs
-  // in lockstep. Held until time is synced - verified TLS fails on
-  // future-dated certs and logged samples need real epochs - up to a cap so
-  // broken NTP can't block it forever; fires on connect if the offset already
-  // elapsed.
+  // First data load at a jittered offset (fleet lockstep), held until time is
+  // synced (verified TLS fails on future-dated certs) up to a cap.
   if (wifiUp && !g_bootFetched && (long)(now - g_bootFetchAt) >= 0
       && (time(nullptr) >= 1600000000L || now - g_firstConnectAt >= BOOT_TIME_WAIT_MS)) {
     g_bootFetched = true;
@@ -4019,18 +3605,8 @@ void loop() {
   }
 
   // --- Daily auto-update scan scheduling ---
-  // Instead of checking GitHub the instant WiFi comes up, the once-per-day
-  // scan is scheduled at a random offset within AUTOSCAN_JITTER_S of the day's
-  // first opportunity: fleets that wake together (end of a sleep window,
-  // midnight rollover) then spread their API calls instead of hitting it in
-  // the same minute. The scan also stays out of +/-AUTOSCAN_ALARM_QUIET_S of
-  // any enabled alarm so the OTA screen/reboot can't swallow a firing or yank
-  // the UI right after one. The fetch itself still runs on the net task
-  // (netWantAutoScan) since the TLS + JSON would overflow the loopTask stack.
-  // The whole scheduler is also gated off inside the sleep window: a
-  // touch-wake (or alarm-due wake) there must never start an OTA, whose
-  // reboot would play the boot sound at night. A scan armed before the
-  // window simply fires at the first awake opportunity after it ends.
+  // Once/day at a random offset (fleet lockstep), never near an alarm or in the
+  // sleep window (an OTA reboot would chime at night); runs on the net task.
   {
     time_t epoch = time(nullptr);
     if (g_autoUpdate && wifiUp && g_timeReady && epoch >= 1600000000L
@@ -4057,9 +3633,8 @@ void loop() {
             netWantAutoScan = true;
           } else {
             time_t deferTo = occ + AUTOSCAN_ALARM_QUIET_S;
-            // Next sleep entry bounds how long the scan can be postponed:
-            // deferring past it would lose today's only opportunity (the
-            // scheduler never runs inside the window itself).
+            // Don't defer past the next sleep entry - it would lose today's
+            // only slot (scans never run inside the window).
             time_t horizon = g_sleepOn ? nextSleepStart(epoch) : 0;
             if (!horizon || deferTo <= horizon) {
               g_autoScanAt = deferTo;
@@ -4079,10 +3654,8 @@ void loop() {
 
   // --- Polling runs only while WiFi is up; otherwise updates are suspended ---
   if (g_screen == SCR_DASH && wifiUp) {
-    // Periodic OpenSky flight poll (only while tracking is enabled). While the
-    // OpenSky radar-polling credits are exhausted, back off to an infrequent
-    // recovery check instead of the normal cadence, so we notice once credits
-    // refill (OpenSky resets daily) without hammering the API.
+    // Radar poll cadence; while credits are exhausted, back off to a slow
+    // recovery check (OpenSky resets daily) instead of hammering the API.
     if (g_trackEnabled && !snoozePending()) {   // no flight polls during a snooze
       bool wantFlights = false;
       // Both an exhausted credit bucket and a run of rejected tokens park the
@@ -4097,11 +3670,8 @@ void loop() {
         netWantFlights = true;
       }
     }
-    // Periodic weather refresh. An armed 429 retry (transient "concurrent" /
-    // minutely limits, or a stored window lifting) fires sooner than the
-    // cadence; while armed the cadence is suppressed so it can't burn another
-    // request inside the window. Early in boot an absent result retries every
-    // g_bootFailRetryMs - a short touch-wake ends before the 10-min cadence.
+    // Weather poll cadence; an armed 429 retry fires sooner and suppresses the
+    // cadence. Early-boot failures retry every g_bootFailRetryMs.
     if ((g_wxRetryAt == 0 &&
          (now - g_lastWeather >= WEATHER_REFRESH_MS ||
           (!g_weatherValid && now <= BOOT_FAIL_GRACE_MS && now - g_lastWeather >= g_bootFailRetryMs))) ||
@@ -4133,26 +3703,19 @@ void loop() {
     dirty = true;
   }
 
-  // Refresh the dashboard and flight-detail page once a second. The header
-  // clock/countdown bar are redrawn in place to avoid flicker, and the radar
-  // blips are dead-reckoned forward.
+  // 1s refresh: header clock + countdown redrawn in place, radar blips dead-reckoned.
   if ((g_screen == SCR_DASH || g_screen == SCR_FLIGHTDETAIL) && now - lastClockDraw >= 1000) {
     lastClockDraw = now;
     updateDashboard();
   }
 
-  // Auto-return from any non-dashboard screen to the dashboard after 2 minutes
-  // of inactivity. Any touch resets the timer. Boot screens (calibration and
-  // first-time WiFi setup) are excluded so the initial wizard isn't interrupted,
-  // and a pending/running OTA is excluded so the download can't be disrupted.
-  // The About page is also held after its Install button is tapped so a failed
-  // OTA's result stays visible instead of timing back out to the dashboard.
+  // Auto-return to the dashboard after 2 min idle (any touch resets). Excludes
+  // the boot wizard, pending/running OTA, and About after Install is tapped.
   if (g_calState == CAL_NONE && g_bootStage == BOOT_DONE && !g_otaActive && !g_otaRunning &&
       !(g_screen == SCR_ABOUT && g_otaFromAbout)) {
     if (g_screen == SCR_ALARMFIRE) {
-      // An unanswered alarm auto-snoozes instead of idling back to the
-      // dashboard; the ALARM_MAX_SNOOZES cap inside alarmSnooze() turns the
-      // next timeout (or Snooze press) into a dismiss for the day.
+      // An unanswered alarm auto-snoozes; the ALARM_MAX_SNOOZES cap turns the
+      // next timeout into a dismiss for the day.
       if (g_screenIdleUntil == 0) g_screenIdleUntil = now + SCREEN_IDLE_TIMEOUT_MS;
       if (g_screenIdleUntil != 0 && (long)(now - g_screenIdleUntil) >= 0) alarmSnooze();
     } else if (g_screen != SCR_DASH) {
@@ -4214,10 +3777,8 @@ void loop() {
     if (g_blinkForFlight) blinkLed(g_blinkColor);
   }
 
-  // Determine whether a flight is currently shown live on the dashboard (not on
-  // the recall flight-detail page), and whether that callsign is the watched one.
-  // The watched-callsign alert is NOT gated by g_blinkForFlight - that toggle
-  // only controls the per-flight route-color blink.
+  // Is a flight live on the dashboard (not the recall page), and is it the
+  // watched one? The watch alert ignores g_blinkForFlight (route-color only).
   bool liveFlight = (g_blinkForFlight && g_screen == SCR_DASH && !g_suppressFlight &&
                      flightOverhead());
   bool watchActive = g_screen == SCR_DASH && !g_suppressFlight &&
@@ -4229,10 +3790,8 @@ void loop() {
     g_routeHoldColor = blinked;
   }
 
-  // Drive the LED + speaker: the watched-callsign alert (its saved preset) and
-  // the route-hold color override the dashboard status. The status LED only
-  // runs on the main home screen when no flight notification is active. All of
-  // this stays inside the alarm gate so a firing alarm keeps the LED + speaker.
+  // LED + speaker: the watch alert and route-hold color override the dashboard
+  // status; all inside the alarm gate so a firing alarm keeps them.
   updateWatchNotify(now, watchActive, planeCount > 0 ? planes[0].icao24 : "");
   bool routeActive = liveFlight && !watchActive && g_routeHoldColor != BLINK_NONE;
   if (watchActive) {

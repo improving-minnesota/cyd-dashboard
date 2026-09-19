@@ -1,33 +1,19 @@
-// ota.ino - Firmware OTA updates from the project's public GitHub releases.
-//
-// Queries the GitHub API for the latest release, compares the semver tag to the
-// running kVersion, and when newer downloads the raw app .bin and flashes it to
-// the inactive OTA slot with the arduino-esp32 Update library, then reboots.
-//
-// TLS: the release-metadata API call is verified against the Sectigo/USERTrust
-// root (kSectigoUSERTrustEccRootCAs) and the firmware download is verified against the
-// ISRG / Let's Encrypt roots (kIsrgRootCAs). If the bundled roots have passed
-// their expiry (OTA_CA_EXPIRY) the OTA path falls back to setInsecure(true);
-// data fetches never do. There is NO insecure retry on a handshake failure --
-// that would let a man-in-the-middle defeat certificate validation. Firmware
-// integrity is additionally pinned by comparing the streamed image's SHA-256 to
-// the asset digest returned by the GitHub API.
+// ota.ino - firmware OTA from the project's GitHub releases: query latest,
+// compare semver, download + flash to the inactive slot, reboot. Verified TLS
+// with a time-gated insecure fallback; integrity pinned by the asset's SHA-256
+// digest. See DEVELOPER.md "OTA updates".
 
 #include <NetworkClientSecure.h>
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include "mbedtls/sha256.h"
 
-// OTA verifies TLS against per-host trust stores (GitHub API via
-// kSectigoUSERTrustEccRootCAs, release assets via kIsrgRootCAs in cyd-horizon.ino),
-// with a time-gated setInsecure() fallback once those roots expire (see
-// OTA_CA_EXPIRY) so a root rotation can't block updates.
+// Per-host trust stores: GitHub API via kSectigoUSERTrustEccRootCAs, release
+// assets via kIsrgRootCAs (cyd-horizon.ino).
 
 #define OTA_REPO    "improving-minnesota/cyd-horizon"
-// Release asset name per board variant: each board downloads only the binary
-// built for its hardware. Firmware that predates board-named assets polled
-// for the bare "cyd-horizon.ino.bin"; that asset is no longer published,
-// so those builds cannot OTA and must be updated over USB.
+// Per-board release asset. Firmware predating board-named assets can't OTA
+// (bare "cyd-horizon.ino.bin" is no longer published) - USB update only.
 #ifdef CYD_E32R40T
 #define OTA_ASSET   "cyd-horizon-e32r40t.ino.bin"
 #else
@@ -49,10 +35,7 @@ int compareVersions(const String& a, const String& b) {
   return 0;
 }
 String stripV(const String& s) { return (s.length() && s[0] == 'v') ? s.substring(1) : s; }
-// Strip any non-numeric suffix (e.g. the "-dev" in a local build's version)
-// before comparing: compareVersions() reads each dot-separated component as
-// consecutive digit characters, so a trailing "-dev" on the last numeric
-// component would otherwise be parsed as digits and corrupt the comparison.
+// Strip a non-numeric suffix ("-dev") before comparing - it would parse as digits.
 String bareVersion(const String& s) {
   int i = 0;
   while (i < (int)s.length() && (isDigit(s[i]) || s[i] == '.')) i++;
@@ -62,9 +45,7 @@ bool isNewerThanRunning(const String& tagVersion) {
   String tag = stripV(tagVersion);
   int c = compareVersions(tag, bareVersion(kVersion));
   if (c > 0) return true;
-  // A release is also an upgrade over a -dev build of the same version
-  // (e.g. 1.2.4 offered to a device running 1.2.4-dev), so the device can move
-  // off a dev build onto the equivalent release build.
+  // A release is an upgrade over a -dev build of the same version.
   return c == 0 && strstr(kVersion, "-dev") != NULL;
 }
 
@@ -126,18 +107,16 @@ void checkForUpdate() {
 }
 
 // ---- daily auto-update scan ----------------------------------------------
-// Called once after WiFi + NTP sync on boot. Scans at most once per calendar
-// day (tracked in NVS); on a newer version with Auto-Update ON, starts the OTA.
+// Once per calendar day (NVS-tracked) after WiFi + NTP; a newer version with
+// Auto-Update ON starts the OTA.
 void maybeAutoUpdate() {
   time_t now = time(nullptr);
   unsigned long day = (unsigned long)(now / 86400UL);
   if (!g_autoUpdate) return;
   if (now < 1600000000L) return;                 // NTP not synced yet
   if (g_lastScanDay == day) return;              // already scanned today
-  // Only announce "Scanning" once we know a network check will actually
-  // happen (all the skip-checks above have passed). The deadline generously
-  // covers fetchLatestRelease()'s own timeouts (5s connect + 10s read) so the
-  // status can never outlive the scan it describes.
+  // Only announce "Scanning" once a check will really run; the deadline covers
+  // the fetch timeouts so the status can't outlive the scan.
   g_autoUpdStatus = 1; g_autoUpdStatusUntil = millis() + 20000;   // Scanning...
   String ver, url, digest;
   if (!fetchLatestRelease(ver, url, digest)) {
@@ -157,10 +136,8 @@ void maybeAutoUpdate() {
   }
 }
 
-// Runs the daily auto-update scan on the net task (NOT the main loop). The
-// synchronous GitHub TLS fetch + JSON parse overflows the small loopTask stack,
-// and running it on the loop would also freeze the UI. Waits briefly for NTP
-// time first so the once-per-day clock is meaningful.
+// Daily scan on the net task - the TLS fetch + JSON parse overflows loopTask.
+// Waits briefly for NTP so the once-per-day clock is meaningful.
 void autoScanOnce() {
   unsigned long t0 = millis();
   while (time(nullptr) < 1600000000L && millis() - t0 < 8000) delay(100);
@@ -168,9 +145,8 @@ void autoScanOnce() {
 }
 
 // ---- OTA execution --------------------------------------------------------
-// Last-drawn progress-bar fill width, so drawOtaProgress() can redraw only the
-// newly-grown segment instead of erasing + redrawing the whole bar (which
-// caused visible flicker while the bar grew).
+// Last-drawn bar fill, so drawOtaProgress() only paints the grown segment
+// (full-bar redraws flickered).
 static int s_otaFill = 0;
 
 void drawOtaHeader(const String& version) {
@@ -215,10 +191,8 @@ void drawOtaError(const char* msg) {
   delay(3000);
 }
 
-// Download + flash. Runs on a dedicated task with a large stack (see
-// otaTaskEntry) because the mbedtls TLS handshake overflows the small loop task.
-// Owns the display. Never returns on success (reboots). Returns false only after
-// showing an error screen.
+// Download + flash on the dedicated task (TLS overflows loopTask). Owns the
+// display; reboots on success.
 static bool sha256Matches(const uint8_t hash[32], const String& expected) {
   char hex[65];
   for (int i = 0; i < 32; i++) snprintf(&hex[i * 2], 3, "%02x", hash[i]);
@@ -230,12 +204,8 @@ static bool sha256Matches(const uint8_t hash[32], const String& expected) {
 }
 
 bool performOTA(const String& url, const String& version, const String& expectedSha256) {
-  // Fresh TLS connects to the release host can drop after prolonged uptime
-  // (until a reboot clears socket state), so retry the WHOLE download —
-  // connect + GET + stream + checksum — a few times with clean teardown.
-  // Retrying only the GET left the body unguarded: a mid-stream drop failed
-  // the update immediately. The drop can surface as a failed connect, non-200,
-  // or truncated body on any attempt, so every stage is retried.
+  // Fresh TLS connects can drop after long uptime, so retry the WHOLE download
+  // (connect + GET + stream + checksum) - a mid-stream drop fails any stage.
 
   // Plain HTTP OTA is restricted to explicitly enabled development builds.
   bool useHttps = url.startsWith("https://");
@@ -246,9 +216,8 @@ bool performOTA(const String& url, const String& version, const String& expected
   bool dev = isDevBuild();
   if (dev) Serial.printf("[OTA] start url=%s\n", url.c_str());
 
-  // Don't start the download until the WiFi link is actually up. The OTA can be
-  // triggered over serial while the device is still in its boot connect, and
-  // HTTPClient without a link returns code=-1 immediately. Wait up to 20s.
+  // Wait for WiFi first - a serial-triggered OTA can arrive during boot connect,
+  // and HTTPClient returns -1 with no link.
   unsigned long wifiWaitStart = millis();
   while (WiFi.status() != WL_CONNECTED && (millis() - wifiWaitStart) < 20000) {
     delay(100);
@@ -271,9 +240,8 @@ bool performOTA(const String& url, const String& version, const String& expected
     String requestUrl = url;
     int code = -1;
 
-    // GitHub's release URL redirects from github.com to a
-    // release-assets.githubusercontent.com host. Follow redirects manually so
-    // each TLS connection gets the CA bundle selected for its actual host.
+    // Follow redirects manually so each TLS connection gets the CA bundle for
+    // its actual host (github.com -> release-assets host).
     for (int redirect = 0; redirect < 4; redirect++) {
       http.setConnectTimeout(5000);
       http.setTimeout(20000);
@@ -348,9 +316,7 @@ bool performOTA(const String& url, const String& version, const String& expected
     mbedtls_sha256_finish(&sha, hash);
     mbedtls_sha256_free(&sha);
 
-    // Enforce a supplied digest for every transport. Local development images
-    // intentionally have no digest; release assets must provide one when GitHub
-    // supplies it.
+    // Enforce a supplied digest on every transport; local dev images have none.
     if (!expectedSha256.isEmpty() && !sha256Matches(hash, expectedSha256)) {
       Update.abort(); failReason = "Checksum mismatch"; continue;   // corrupted transfer -> retry
     }
@@ -367,8 +333,7 @@ bool performOTA(const String& url, const String& version, const String& expected
 }
 
 // ---- rollback safeguard ---------------------------------------------------
-// Called once after a successful boot grace period: cancels any pending
-// rollback so a freshly-OTA'd slot stays active.
+// After the boot grace period: cancel pending rollback so the OTA'd slot stays.
 void markAppValidBoot() {
   esp_ota_img_states_t st;
   const esp_partition_t* running = esp_ota_get_running_partition();
