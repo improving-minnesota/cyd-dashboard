@@ -61,7 +61,7 @@ people.
 
 ## Docs sync
 
-- User-facing changes must update three places together: `README.md`, the
+- User-facing changes must update three places together as appropriate: `README.md`, the
   on-device Help screen (`kHelpLines[]` in `cyd-horizon/settings.ino`), and
   `docs/user-guide/DEVELOPER-USERGUIDE.md` (then regenerate the PDF).
 
